@@ -1,6 +1,6 @@
 # DSForms — Session Progress
 
-## Status: session 5 complete
+## Status: session 6 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
@@ -8,6 +8,7 @@
 - Session 3 — Rate limiter & security middleware
 - Session 4 — Auth (session cookies + middleware + flash)
 - Session 5 — Submit handler
+- Session 6 — Auth handlers & login UI
 - Session 4 — Auth (session cookies + middleware + flash)
 
 ## Key decisions log
@@ -214,6 +215,41 @@
 - Email retry mechanism / notification queue — future improvement
 - EmailTo validation before SMTP send — future improvement
 - Rate limiter JSON encode error logging — low impact
+
+### Known issues
+- None
+
+---
+
+## Session 6 — Auth handlers & login UI
+**Branch:** `session/6-auth-ui`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `templates/base.html`
+- `templates/login.html`
+- `internal/handler/auth.go`
+- `internal/handler/auth_test.go`
+
+### Files modified
+- `main.go` — embedded templates, wired auth routes, RequireAuth admin group, LoginGuard
+
+### Test summary
+- 10 auth handler tests written (total project: 101+ tests across 8 packages)
+- go test -race: clean
+- go vet: clean
+
+### Decisions made
+- login.html is standalone (does not extend base.html) — login page has no nav/warning banner
+- Tests use inline templates to avoid fragile relative file paths
+- Templates embedded via //go:embed and parsed once at startup
+- Replaced hardcoded #fff with var(--surface) in base.html CSS
+- Template execution errors are logged + return 500
+
+### Deferred items
+- AuthHandler.Store as interface (same pattern as SubmitHandler) — refactor in Sessions 7-9
+- Flash.Type validation (set by our code only, not user input) — low risk
 
 ### Known issues
 - None

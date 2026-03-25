@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — dsforms</title>
+  <style>
+    :root {
+      --navy: #1B1F2E;
+      --mint: #6EE7B7;
+      --mint-dark: #34D399;
+      --mint-deep: #065F46;
+      --page-bg: #F0F2F5;
+      --surface: #ffffff;
+      --text-primary: #1B1F2E;
+      --text-secondary: #4A5568;
+      --text-muted: #8892AA;
+      --border: #E4E8F0;
+      --danger: #DC2626;
+      --danger-bg: #FEF2F2;
+      --danger-border: #FECACA;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --radius: 8px;
+      --radius-sm: 6px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-primary);
+      background: var(--page-bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      width: 100%;
+      max-width: 380px;
+    }
+    .login-brand {
+      text-align: center;
+      font-size: 20px;
+      font-weight: 500;
+      color: var(--navy);
+      margin-bottom: 24px;
+    }
+    .login-brand em { color: var(--mint-dark); font-style: normal; }
+    .login-error {
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      color: var(--danger);
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+    .login-field { margin-bottom: 16px; }
+    .login-field label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+    .login-field input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      outline: none;
+    }
+    .login-field input:focus {
+      border-color: var(--mint-dark);
+      box-shadow: 0 0 0 3px var(--mint-dark, 0.15);
+    }
+    .login-btn {
+      width: 100%;
+      padding: 9px;
+      background: var(--mint);
+      color: var(--mint-deep);
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .login-btn:hover { background: var(--mint-dark); }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-brand">ds<em>forms</em></div>
+    {{if .LoginError}}
+    <div class="login-error">Invalid username or password</div>
+    {{end}}
+    <form method="POST" action="/admin/login">
+      <div class="login-field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autofocus>
+      </div>
+      <div class="login-field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required>
+      </div>
+      <button type="submit" class="login-btn">Log in</button>
+    </form>
+  </div>
+</body>
+</html>

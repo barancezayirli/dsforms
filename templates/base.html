@@ -1,0 +1,169 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Title}} — dsforms</title>
+  <style>
+    /* === Design Tokens (DSFORMS_FRONTEND.md §1) === */
+    :root {
+      --navy:        #1B1F2E;
+      --navy-light:  #252B3D;
+      --navy-border: #3D4668;
+      --navy-muted:  #8892AA;
+      --navy-text:   #C8D0E0;
+
+      --mint:        #6EE7B7;
+      --mint-dark:   #34D399;
+      --mint-bg:     #ECFDF5;
+      --mint-border: #A7F3D0;
+      --mint-deep:   #065F46;
+      --mint-focus:  #D1FAE5;
+
+      --page-bg:     #F0F2F5;
+      --surface:     #ffffff;
+      --surface-alt: #F8F9FB;
+
+      --text-primary:   #1B1F2E;
+      --text-secondary: #4A5568;
+      --text-muted:     #8892AA;
+      --text-hint:      #B0BAD0;
+
+      --border:       #E4E8F0;
+      --border-light: #F0F2F5;
+
+      --danger:        #DC2626;
+      --danger-bg:     #FEF2F2;
+      --danger-border: #FECACA;
+      --warn-bg:       #FFFBEB;
+      --warn-border:   #FDE68A;
+      --warn-text:     #92400E;
+      --success-bg:    #F0FDF9;
+      --success-border:#A7F3D0;
+      --success-text:  #065F46;
+
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+      --radius-sm: 6px;
+      --radius:    8px;
+      --radius-lg: 10px;
+      --radius-xl: 12px;
+    }
+
+    /* === Global Reset (§2) === */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-primary);
+      background: var(--page-bg);
+    }
+    a { color: inherit; text-decoration: none; }
+    button { font-family: var(--font); cursor: pointer; }
+    input, textarea, select { font-family: var(--font); }
+
+    /* === Nav (§3.1) === */
+    .nav {
+      background: var(--navy);
+      height: 50px;
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 4px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-brand { color: var(--surface); font-size: 15px; font-weight: 500; letter-spacing: -0.02em; margin-right: 24px; flex-shrink: 0; }
+    .nav-brand em { color: var(--mint); font-style: normal; }
+    .nav-links { display: flex; align-items: center; gap: 2px; flex: 1; }
+    .nav-link { color: var(--navy-muted); font-size: 13px; padding: 6px 10px; border-radius: var(--radius-sm); }
+    .nav-link:hover { background: var(--navy-light); color: var(--navy-text); }
+    .nav-link.on { background: var(--navy-light); color: var(--surface); }
+    .nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    .nav-user { color: var(--navy-muted); font-size: 13px; }
+    .nav-user:hover { color: var(--navy-text); }
+    .nav-logout { color: var(--navy-muted); font-size: 12px; background: none; border: none; padding: 5px 8px; border-radius: var(--radius-sm); }
+    .nav-logout:hover { background: var(--navy-light); color: var(--navy-text); }
+    .nav-burger { display: none; flex-direction: column; gap: 4px; background: none; border: none; padding: 6px; margin-left: 8px; }
+    .nav-burger span { display: block; width: 18px; height: 1.5px; background: var(--navy-muted); }
+
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .nav-links.open {
+        display: flex; flex-direction: column; align-items: flex-start;
+        position: absolute; top: 50px; left: 0; right: 0;
+        background: var(--navy); padding: 8px 12px 12px; z-index: 99;
+        border-bottom: 1px solid var(--navy-light);
+      }
+      .nav-right .nav-user { display: none; }
+      .nav-burger { display: flex; }
+    }
+
+    /* === Warning Banner (§3.2) === */
+    .warn-banner {
+      background: var(--warn-bg);
+      border-bottom: 1px solid var(--warn-border);
+      padding: 9px 20px;
+      font-size: 13px;
+      color: var(--warn-text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .warn-banner a { color: var(--warn-text); font-weight: 500; text-decoration: underline; }
+
+    /* === Flash (§3.3) === */
+    .flash { padding: 10px 20px; font-size: 13px; border-bottom: 1px solid; }
+    .flash-success { background: var(--success-bg); border-color: var(--success-border); color: var(--success-text); }
+    .flash-error { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger); }
+
+    /* === Page Wrapper (§3.4) === */
+    .page { max-width: 960px; margin: 0 auto; padding: 24px 20px; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a class="nav-brand" href="/admin/forms">ds<em>forms</em></a>
+    <div class="nav-links">
+      <a class="nav-link {{if eq .Active "forms"}}on{{end}}" href="/admin/forms">Forms</a>
+      <a class="nav-link {{if eq .Active "users"}}on{{end}}" href="/admin/users">Users</a>
+      <a class="nav-link {{if eq .Active "backups"}}on{{end}}" href="/admin/backups">Backups</a>
+    </div>
+    <div class="nav-right">
+      <a class="nav-user" href="/admin/account">{{.CurrentUser.Username}}</a>
+      <form method="POST" action="/admin/logout" style="margin:0">
+        <button class="nav-logout">Log out</button>
+      </form>
+    </div>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+  </nav>
+
+  {{if .CurrentUser.IsDefaultPassword}}
+  <div class="warn-banner">
+    Default password is active.
+    <a href="/admin/account">Change it now &rarr;</a>
+  </div>
+  {{end}}
+
+  {{if .Flash}}
+  <div class="flash flash-{{.Flash.Type}}">{{.Flash.Message}}</div>
+  {{end}}
+
+  <div class="page">
+    {{template "content" .}}
+  </div>
+
+  <script>
+    document.getElementById('nav-burger').addEventListener('click', function() {
+      document.querySelector('.nav-links').classList.toggle('open');
+    });
+  </script>
+</body>
+</html>
+{{end}}
