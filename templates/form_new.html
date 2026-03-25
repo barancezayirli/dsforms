@@ -1,0 +1,33 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">New Form</h1>
+</div>
+
+<div class="card" style="max-width:600px">
+  <div class="card-body">
+    {{if .Error}}
+    <div class="form-error-banner">{{.Error}}</div>
+    {{end}}
+    <form method="POST" action="/admin/forms/new">
+      <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="e.g. Contact Form">
+      </div>
+      <div class="form-group">
+        <label for="email_to">Email To</label>
+        <input type="email" id="email_to" name="email_to" value="{{.Form.EmailTo}}" required placeholder="Where notifications go">
+      </div>
+      <div class="form-group">
+        <label for="redirect">Redirect URL</label>
+        <input type="text" id="redirect" name="redirect" value="{{.Form.Redirect}}" placeholder="https://yoursite.com/thanks (optional)">
+        <div class="form-hint">Where to send users after submission. Leave empty for default.</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:20px">
+        <button type="submit" class="btn btn-mint">Create Form</button>
+        <a href="/admin/forms" class="btn">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}

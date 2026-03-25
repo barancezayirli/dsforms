@@ -1,0 +1,48 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Edit Form</h1>
+</div>
+
+<div class="card" style="max-width:600px">
+  <div class="card-body">
+    {{if .Error}}
+    <div class="form-error-banner">{{.Error}}</div>
+    {{end}}
+    <form method="POST" action="/admin/forms/{{.Form.ID}}/edit">
+      <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" value="{{.Form.Name}}" required>
+      </div>
+      <div class="form-group">
+        <label for="email_to">Email To</label>
+        <input type="email" id="email_to" name="email_to" value="{{.Form.EmailTo}}" required>
+      </div>
+      <div class="form-group">
+        <label for="redirect">Redirect URL</label>
+        <input type="text" id="redirect" name="redirect" value="{{.Form.Redirect}}" placeholder="https://yoursite.com/thanks (optional)">
+        <div class="form-hint">Where to send users after submission. Leave empty for default.</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:20px">
+        <button type="submit" class="btn btn-mint">Save Changes</button>
+        <a href="/admin/forms" class="btn">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="max-width:600px;margin-top:20px">
+  <div class="card-head">HTML Snippet</div>
+  <div class="card-body">
+    <p class="text-muted" style="margin-bottom:12px;font-size:13px">Paste this into your static site:</p>
+    <div class="snippet-wrap">
+      <pre class="snippet"><code>&lt;form action="{{.BaseURL}}/f/{{.Form.ID}}" method="POST"&gt;
+  &lt;input type="hidden" name="_redirect" value="https://yoursite.com/thanks"&gt;
+  &lt;!-- your fields here --&gt;
+  &lt;button type="submit"&gt;Send&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+      <button class="btn-ghost snippet-copy" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)})">Copy</button>
+    </div>
+  </div>
+</div>
+{{end}}

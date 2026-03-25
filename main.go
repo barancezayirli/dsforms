@@ -81,9 +81,31 @@ func main() {
 	}
 	defer s.Close()
 
-	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
+	// Parse base template once, then clone it for each page that extends it.
+	baseTmpl, err := template.ParseFS(templateFS, "templates/base.html")
 	if err != nil {
-		log.Fatalf("failed to parse templates: %v", err)
+		log.Fatalf("failed to parse base template: %v", err)
+	}
+
+	templates := make(map[string]*template.Template)
+	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html"} {
+		t, err := baseTmpl.Clone()
+		if err != nil {
+			log.Fatalf("failed to clone base template: %v", err)
+		}
+		_, err = t.ParseFS(templateFS, "templates/"+name)
+		if err != nil {
+			log.Fatalf("failed to parse template %s: %v", name, err)
+		}
+		templates[name] = t
+	}
+
+	for _, name := range []string{"login.html", "success.html"} {
+		t, err := template.ParseFS(templateFS, "templates/"+name)
+		if err != nil {
+			log.Fatalf("failed to parse template %s: %v", name, err)
+		}
+		templates[name] = t
 	}
 
 	mailer := &mail.Mailer{
@@ -112,14 +134,25 @@ func main() {
 		SecretKey:  cfg.SecretKey,
 		BaseURL:    cfg.BaseURL,
 		LoginGuard: loginGuard,
-		Templates:  tmpl,
+		Templates:  templates,
+	}
+
+	adminHandler := &handler.AdminHandler{
+		Store:     s,
+		SecretKey: cfg.SecretKey,
+		BaseURL:   cfg.BaseURL,
+		Templates: templates,
 	}
 
 	r := newRouter()
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/forms", http.StatusFound)
+	})
 	r.Get("/admin/login", authHandler.LoginPage)
 	r.Post("/admin/login", authHandler.LoginSubmit)
+	r.Get("/success", adminHandler.Success)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth(s, cfg.SecretKey))
@@ -127,10 +160,12 @@ func main() {
 		r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/admin/forms", http.StatusFound)
 		})
-		// Placeholder for future admin routes (Sessions 7-10)
-		r.Get("/admin/forms", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("dashboard placeholder"))
-		})
+		r.Get("/admin/forms", adminHandler.Dashboard)
+		r.Get("/admin/forms/new", adminHandler.NewFormPage)
+		r.Post("/admin/forms/new", adminHandler.CreateForm)
+		r.Get("/admin/forms/{id}/edit", adminHandler.EditFormPage)
+		r.Post("/admin/forms/{id}/edit", adminHandler.EditForm)
+		r.Post("/admin/forms/{id}/delete", adminHandler.DeleteForm)
 	})
 
 	log.Printf("starting server on %s", cfg.ListenAddr)

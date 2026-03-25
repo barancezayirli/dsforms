@@ -1,6 +1,6 @@
 # DSForms — Session Progress
 
-## Status: session 6 complete
+## Status: session 7 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
@@ -9,7 +9,7 @@
 - Session 4 — Auth (session cookies + middleware + flash)
 - Session 5 — Submit handler
 - Session 6 — Auth handlers & login UI
-- Session 4 — Auth (session cookies + middleware + flash)
+- Session 7 — Admin UI: dashboard & forms CRUD
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -250,6 +250,49 @@
 ### Deferred items
 - AuthHandler.Store as interface (same pattern as SubmitHandler) — refactor in Sessions 7-9
 - Flash.Type validation (set by our code only, not user input) — low risk
+
+### Known issues
+- None
+
+---
+
+## Session 7 — Admin UI: dashboard & forms CRUD
+**Branch:** `session/7-admin-forms`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `templates/dashboard.html`
+- `templates/form_new.html`
+- `templates/form_edit.html`
+- `templates/success.html`
+- `internal/handler/admin.go`
+- `internal/handler/admin_test.go`
+
+### Files modified
+- `templates/base.html` — added CSS for tables, stats, buttons, cards, forms, snippets
+- `internal/store/store.go` — added CountAllSubmissions, updated DeleteForm with RowsAffected check
+- `internal/store/store_test.go` — added TestCountAllSubmissions
+- `main.go` — wired AdminHandler routes
+
+### Test summary
+- 17 admin handler tests + 1 store test = 18 new tests
+- Total project: 117+ tests across 8 packages
+- go test -race: clean
+- go vet: clean
+
+### Decisions made
+- success.html is standalone (no base.html) — public page with no nav
+- HTML snippet displayed on form_edit page (DSFORMS_PLAN.md §11, not dashboard per session DoD text)
+- Tests use inline templates to avoid fragile file paths
+- FlashData struct for consistent flash message rendering in base.html
+- newFlash() helper for nil-safe flash creation
+- DeleteForm in store updated to return sql.ErrNoRows for proper 404 handling
+- Per-page template cloning to resolve {{define "content"}} conflict (found via manual testing)
+- Added root URL `/` redirect to `/admin/forms`
+
+### Deferred items
+- success.html CSS duplication (standalone page by design) — add sync comment later
 
 ### Known issues
 - None

@@ -16,7 +16,7 @@ type AuthHandler struct {
 	SecretKey  string
 	BaseURL    string
 	LoginGuard *ratelimit.LoginGuard
-	Templates  *template.Template
+	Templates  map[string]*template.Template
 }
 
 // LoginData holds data passed to the login template.
@@ -30,7 +30,7 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	data := LoginData{
 		LoginError: r.URL.Query().Get("error") == "1",
 	}
-	if err := h.Templates.ExecuteTemplate(w, "login.html", data); err != nil {
+	if err := h.Templates["login.html"].Execute(w, data); err != nil {
 		log.Printf("login template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
