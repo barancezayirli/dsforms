@@ -115,11 +115,19 @@ func main() {
 		Templates:  tmpl,
 	}
 
+	adminHandler := &handler.AdminHandler{
+		Store:     s,
+		SecretKey: cfg.SecretKey,
+		BaseURL:   cfg.BaseURL,
+		Templates: tmpl,
+	}
+
 	r := newRouter()
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 
 	r.Get("/admin/login", authHandler.LoginPage)
 	r.Post("/admin/login", authHandler.LoginSubmit)
+	r.Get("/success", adminHandler.Success)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth(s, cfg.SecretKey))
@@ -127,10 +135,12 @@ func main() {
 		r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/admin/forms", http.StatusFound)
 		})
-		// Placeholder for future admin routes (Sessions 7-10)
-		r.Get("/admin/forms", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("dashboard placeholder"))
-		})
+		r.Get("/admin/forms", adminHandler.Dashboard)
+		r.Get("/admin/forms/new", adminHandler.NewFormPage)
+		r.Post("/admin/forms/new", adminHandler.CreateForm)
+		r.Get("/admin/forms/{id}/edit", adminHandler.EditFormPage)
+		r.Post("/admin/forms/{id}/edit", adminHandler.EditForm)
+		r.Post("/admin/forms/{id}/delete", adminHandler.DeleteForm)
 	})
 
 	log.Printf("starting server on %s", cfg.ListenAddr)
