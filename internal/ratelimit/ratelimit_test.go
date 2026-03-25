@@ -91,3 +91,93 @@ func TestNewLimiterPanicsOnInvalidRate(t *testing.T) {
 	}()
 	NewLimiter(5, 0, time.Now)
 }
+
+func TestLoginGuardFirstFailsDoNotLock(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	g := NewLoginGuard(5, 15*time.Minute, func() time.Time { return now })
+	for i := 0; i < 4; i++ {
+		g.RecordFailure("1.2.3.4")
+	}
+	if g.IsLocked("1.2.3.4") {
+		t.Fatal("locked after 4 failures, expected unlocked")
+	}
+}
+
+func TestLoginGuardFifthFailureLocks(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	g := NewLoginGuard(5, 15*time.Minute, func() time.Time { return now })
+	for i := 0; i < 5; i++ {
+		g.RecordFailure("1.2.3.4")
+	}
+	if !g.IsLocked("1.2.3.4") {
+		t.Fatal("not locked after 5 failures, expected locked")
+	}
+}
+
+func TestNewLoginGuardPanicsOnInvalidMaxFails(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for maxFails=0")
+		}
+	}()
+	NewLoginGuard(0, 15*time.Minute, time.Now)
+}
+
+func TestLoginGuardLockoutExpires(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	g := NewLoginGuard(5, 15*time.Minute, func() time.Time { return now })
+	for i := 0; i < 5; i++ {
+		g.RecordFailure("1.2.3.4")
+	}
+	now = now.Add(16 * time.Minute)
+	if g.IsLocked("1.2.3.4") {
+		t.Fatal("still locked after lockout expired")
+	}
+}
+
+func TestLoginGuardSuccessResets(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	g := NewLoginGuard(5, 15*time.Minute, func() time.Time { return now })
+	for i := 0; i < 4; i++ {
+		g.RecordFailure("1.2.3.4")
+	}
+	g.RecordSuccess("1.2.3.4")
+	for i := 0; i < 4; i++ {
+		g.RecordFailure("1.2.3.4")
+	}
+	if g.IsLocked("1.2.3.4") {
+		t.Fatal("locked after reset + 4 failures, expected unlocked")
+	}
+}
+
+func TestLoginGuardCleanup(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	g := NewLoginGuard(5, 15*time.Minute, func() time.Time { return now })
+	g.RecordFailure("1.2.3.4")
+	now = now.Add(31 * time.Minute)
+	g.cleanup(30 * time.Minute)
+	for i := 0; i < 4; i++ {
+		g.RecordFailure("1.2.3.4")
+	}
+	if g.IsLocked("1.2.3.4") {
+		t.Fatal("locked after cleanup + 4 failures, expected unlocked")
+	}
+}
+
+func TestLoginGuardIndependentIPs(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	g := NewLoginGuard(5, 15*time.Minute, func() time.Time { return now })
+	for i := 0; i < 5; i++ {
+		g.RecordFailure("1.1.1.1")
+	}
+	if g.IsLocked("2.2.2.2") {
+		t.Fatal("different IP should not be locked")
+	}
+}

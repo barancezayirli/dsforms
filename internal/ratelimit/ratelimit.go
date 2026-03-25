@@ -101,21 +101,71 @@ type LoginGuard struct {
 
 // NewLoginGuard creates a login brute-force guard.
 func NewLoginGuard(maxFails int, lockout time.Duration, now func() time.Time) *LoginGuard {
-	return nil
+	if maxFails <= 0 {
+		panic("ratelimit: maxFails must be > 0")
+	}
+	return &LoginGuard{
+		attempts: make(map[string]*loginState),
+		maxFails: maxFails,
+		lockout:  lockout,
+		now:      now,
+	}
 }
 
 // RecordFailure records a failed login attempt from the given IP.
-func (g *LoginGuard) RecordFailure(ip string) {}
+func (g *LoginGuard) RecordFailure(ip string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	s, ok := g.attempts[ip]
+	if !ok {
+		s = &loginState{}
+		g.attempts[ip] = s
+	}
+	s.failures++
+	s.lastSeen = g.now()
+	if s.failures >= g.maxFails {
+		s.lockedUntil = g.now().Add(g.lockout)
+	}
+}
 
 // RecordSuccess records a successful login, resetting the failure counter.
-func (g *LoginGuard) RecordSuccess(ip string) {}
+func (g *LoginGuard) RecordSuccess(ip string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	delete(g.attempts, ip)
+}
 
 // IsLocked returns true if the given IP is currently locked out.
 func (g *LoginGuard) IsLocked(ip string) bool {
-	return false
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	s, ok := g.attempts[ip]
+	if !ok {
+		return false
+	}
+	return g.now().Before(s.lockedUntil)
 }
 
-func (g *LoginGuard) cleanup(maxAge time.Duration) {}
+func (g *LoginGuard) cleanup(maxAge time.Duration) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for ip, s := range g.attempts {
+		if g.now().Sub(s.lastSeen) > maxAge {
+			delete(g.attempts, ip)
+		}
+	}
+}
 
 // StartCleanup runs a background goroutine that removes stale entries.
-func (g *LoginGuard) StartCleanup(interval, maxAge time.Duration) {}
+func (g *LoginGuard) StartCleanup(interval, maxAge time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		for range ticker.C {
+			g.cleanup(maxAge)
+		}
+	}()
+}
