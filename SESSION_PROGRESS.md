@@ -1,10 +1,11 @@
 # DSForms — Session Progress
 
-## Status: session 2 complete
+## Status: session 3 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
 - Session 2 — Store (database layer)
+- Session 3 — Rate limiter & security middleware
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -17,7 +18,10 @@
 ## Known issues / deferred items
 - BASE_URL empty string has no startup warning — address in Session 4 (auth/cookie Secure flag)
 - BackupLocalDir empty string needs validation at point of use — address in Session 10 (backup)
-- Integer config values (SMTP_PORT, RATE_BURST, RATE_PER_MINUTE) have no range validation — address in Session 3 (rate limiter)
+- ~~Integer config values (SMTP_PORT, RATE_BURST, RATE_PER_MINUTE) have no range validation — address in Session 3~~ RESOLVED: constructors panic on invalid values
+- StartCleanup goroutines leak (no shutdown mechanism / context.Context) — address in Session 11 (Docker/graceful shutdown)
+- StartCleanup parameter validation (interval/maxAge <= 0) — address in Session 11
+- Limiter/LoginGuard not yet wired into main.go routes — wiring in Sessions 5-6
 - UpdateForm/DeleteForm/MarkRead/DeleteSubmission don't check RowsAffected — address in Sessions 7-8 (handlers)
 - backup_log table, BackupLog model, InsertBackupLog/UpdateBackupLog/ListBackupLogs — address in Session 10
 
@@ -89,6 +93,41 @@
 - UpdateForm/DeleteForm/MarkRead/DeleteSubmission RowsAffected checks — address in Sessions 7-8 when handlers are built
 - backup_log table, BackupLog model, related methods — address in Session 10
 - Test setup error checking pattern (using _ = for setup calls) — improve incrementally
+
+### Known issues
+- None
+
+---
+
+## Session 3 — Rate limiter & security middleware
+**Branch:** `session/3-ratelimit`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `internal/ratelimit/ratelimit.go`
+- `internal/ratelimit/ratelimit_test.go`
+
+### Files modified
+- `main.go` — added security headers + MaxBytesReader middleware to newRouter()
+- `main_test.go` — added TestSecurityHeaders + TestMaxBytesReader
+
+### Test summary
+- 16 ratelimit tests + 2 middleware tests written
+- go test -race: clean
+- go vet: clean
+- No time.Sleep in any test — all time-dependent tests use injection
+
+### Decisions made
+- MaxBytesReader returns 413 (not 400 as session spec says) — 413 is semantically correct per HTTP spec
+- Constructor validation panics on invalid burst/perMinute/maxFails/nil-now (resolves Session 1 deferred item)
+- LoginGuard cleanup skips entries with active lockout to prevent security bypass
+- Limiter/LoginGuard not wired into routes yet — happens in Sessions 5-6 per plan
+
+### Deferred items
+- StartCleanup goroutine leak (no context.Context shutdown) — address in Session 11 (graceful shutdown)
+- StartCleanup parameter validation — address in Session 11
+- Panic message content assertions in tests — low priority
 
 ### Known issues
 - None
