@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -83,7 +84,12 @@ CREATE INDEX IF NOT EXISTS idx_submissions_read ON submissions(read);
 
 // New opens a SQLite database and runs migrations.
 func New(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_foreign_keys=ON")
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+	if path == ":memory:" {
+		// Use file URI for in-memory so pragmas apply correctly.
+		dsn = "file::memory:?_pragma=foreign_keys(1)"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -236,41 +242,129 @@ func (s *Store) HasDefaultPassword(userID string) (bool, error) {
 
 // CreateForm creates a new form.
 func (s *Store) CreateForm(f Form) error {
+	_, err := s.db.Exec(
+		"INSERT INTO forms (id, name, email_to, redirect) VALUES (?, ?, ?, ?)",
+		f.ID, f.Name, f.EmailTo, f.Redirect,
+	)
+	if err != nil {
+		return fmt.Errorf("create form: %w", err)
+	}
 	return nil
 }
 
 // GetForm returns a form by ID.
 func (s *Store) GetForm(id string) (Form, error) {
-	return Form{}, nil
+	var f Form
+	err := s.db.QueryRow(
+		"SELECT id, name, email_to, redirect, created_at FROM forms WHERE id = ?",
+		id,
+	).Scan(&f.ID, &f.Name, &f.EmailTo, &f.Redirect, &f.CreatedAt)
+	if err != nil {
+		return Form{}, fmt.Errorf("get form: %w", err)
+	}
+	return f, nil
 }
 
 // ListForms returns all forms with unread counts.
 func (s *Store) ListForms() ([]FormSummary, error) {
-	return nil, nil
+	rows, err := s.db.Query(`
+		SELECT f.id, f.name, f.email_to, f.redirect, f.created_at,
+		       COUNT(CASE WHEN s.read = 0 THEN 1 END) as unread_count
+		FROM forms f
+		LEFT JOIN submissions s ON s.form_id = f.id
+		GROUP BY f.id
+		ORDER BY f.created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list forms: %w", err)
+	}
+	defer rows.Close()
+
+	var forms []FormSummary
+	for rows.Next() {
+		var fs FormSummary
+		if err := rows.Scan(&fs.ID, &fs.Name, &fs.EmailTo, &fs.Redirect, &fs.CreatedAt, &fs.UnreadCount); err != nil {
+			return nil, fmt.Errorf("list forms: %w", err)
+		}
+		forms = append(forms, fs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list forms: %w", err)
+	}
+	return forms, nil
 }
 
 // UpdateForm updates a form's fields.
 func (s *Store) UpdateForm(f Form) error {
+	_, err := s.db.Exec(
+		"UPDATE forms SET name = ?, email_to = ?, redirect = ? WHERE id = ?",
+		f.Name, f.EmailTo, f.Redirect, f.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update form: %w", err)
+	}
 	return nil
 }
 
 // DeleteForm deletes a form and its submissions.
 func (s *Store) DeleteForm(id string) error {
+	_, err := s.db.Exec("DELETE FROM forms WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete form: %w", err)
+	}
 	return nil
 }
 
 // CreateSubmission creates a new submission.
 func (s *Store) CreateSubmission(sub Submission) error {
+	_, err := s.db.Exec(
+		"INSERT INTO submissions (id, form_id, data, ip) VALUES (?, ?, ?, ?)",
+		sub.ID, sub.FormID, sub.RawData, sub.IP,
+	)
+	if err != nil {
+		return fmt.Errorf("create submission: %w", err)
+	}
 	return nil
 }
 
 // ListSubmissions returns all submissions for a form.
 func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
-	return nil, nil
+	rows, err := s.db.Query(
+		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? ORDER BY created_at DESC",
+		formID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list submissions: %w", err)
+	}
+	defer rows.Close()
+
+	var subs []Submission
+	for rows.Next() {
+		var sub Submission
+		var rawData string
+		var readInt int
+		if err := rows.Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list submissions: %w", err)
+		}
+		sub.RawData = rawData
+		sub.Read = readInt == 1
+		if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
+			sub.Data = make(map[string]string)
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list submissions: %w", err)
+	}
+	return subs, nil
 }
 
 // MarkRead marks a submission as read.
 func (s *Store) MarkRead(submissionID string) error {
+	_, err := s.db.Exec("UPDATE submissions SET read = 1 WHERE id = ?", submissionID)
+	if err != nil {
+		return fmt.Errorf("mark read: %w", err)
+	}
 	return nil
 }
 

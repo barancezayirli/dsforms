@@ -200,3 +200,82 @@ func TestCreateUserDuplicate(t *testing.T) {
 		t.Fatal("expected error creating duplicate username, got nil")
 	}
 }
+
+func TestCreateFormGetFormRoundTrip(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	f := Form{
+		ID:      "form-1",
+		Name:    "Contact",
+		EmailTo: "me@example.com",
+	}
+	if err := s.CreateForm(f); err != nil {
+		t.Fatalf("CreateForm error = %v", err)
+	}
+	got, err := s.GetForm("form-1")
+	if err != nil {
+		t.Fatalf("GetForm error = %v", err)
+	}
+	if got.Name != "Contact" {
+		t.Errorf("Name = %q, want %q", got.Name, "Contact")
+	}
+	if got.EmailTo != "me@example.com" {
+		t.Errorf("EmailTo = %q, want %q", got.EmailTo, "me@example.com")
+	}
+}
+
+func TestListFormsWithUnreadCount(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	f := Form{ID: "form-1", Name: "Contact", EmailTo: "me@example.com"}
+	_ = s.CreateForm(f)
+	_ = s.CreateSubmission(Submission{ID: "sub-1", FormID: "form-1", RawData: `{"name":"Alice"}`})
+	_ = s.CreateSubmission(Submission{ID: "sub-2", FormID: "form-1", RawData: `{"name":"Bob"}`})
+	_ = s.MarkRead("sub-1")
+
+	forms, err := s.ListForms()
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if len(forms) != 1 {
+		t.Fatalf("len = %d, want 1", len(forms))
+	}
+	if forms[0].UnreadCount != 1 {
+		t.Errorf("UnreadCount = %d, want 1", forms[0].UnreadCount)
+	}
+}
+
+func TestUpdateForm(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	f := Form{ID: "form-1", Name: "Old", EmailTo: "old@example.com"}
+	_ = s.CreateForm(f)
+	f.Name = "New"
+	f.EmailTo = "new@example.com"
+	f.Redirect = "https://example.com/thanks"
+	if err := s.UpdateForm(f); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	got, _ := s.GetForm("form-1")
+	if got.Name != "New" {
+		t.Errorf("Name = %q, want %q", got.Name, "New")
+	}
+	if got.Redirect != "https://example.com/thanks" {
+		t.Errorf("Redirect = %q, want %q", got.Redirect, "https://example.com/thanks")
+	}
+}
+
+func TestDeleteFormCascades(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	f := Form{ID: "form-1", Name: "Contact", EmailTo: "me@example.com"}
+	_ = s.CreateForm(f)
+	_ = s.CreateSubmission(Submission{ID: "sub-1", FormID: "form-1", RawData: `{"a":"b"}`})
+	if err := s.DeleteForm("form-1"); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	subs, _ := s.ListSubmissions("form-1")
+	if len(subs) != 0 {
+		t.Errorf("submissions len = %d, want 0 after cascade delete", len(subs))
+	}
+}
