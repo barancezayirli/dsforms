@@ -342,10 +342,15 @@ func (s *Store) UpdateForm(f Form) error {
 }
 
 // DeleteForm deletes a form and its submissions.
+// Returns sql.ErrNoRows if no form with the given ID exists.
 func (s *Store) DeleteForm(id string) error {
-	_, err := s.db.Exec("DELETE FROM forms WHERE id = ?", id)
+	result, err := s.db.Exec("DELETE FROM forms WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete form: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("delete form: %w", sql.ErrNoRows)
 	}
 	return nil
 }
@@ -402,6 +407,16 @@ func (s *Store) MarkRead(submissionID string) error {
 		return fmt.Errorf("mark read: %w", err)
 	}
 	return nil
+}
+
+// CountAllSubmissions returns the total count of all submissions across all forms.
+func (s *Store) CountAllSubmissions() (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count all submissions: %w", err)
+	}
+	return count, nil
 }
 
 // MarkAllRead marks all submissions for a form as read.

@@ -432,6 +432,21 @@ func TestCreateSubmissionInvalidFormID(t *testing.T) {
 	}
 }
 
+func TestCountAllSubmissions(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s2", FormID: "f1", RawData: `{}`})
+	count, err := s.CountAllSubmissions()
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if count != 2 {
+		t.Errorf("count = %d, want 2", count)
+	}
+}
+
 func TestCheckPassword(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
