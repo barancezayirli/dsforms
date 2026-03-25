@@ -1,11 +1,12 @@
 # DSForms — Session Progress
 
-## Status: session 3 complete
+## Status: session 4 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
 - Session 2 — Store (database layer)
 - Session 3 — Rate limiter & security middleware
+- Session 4 — Auth (session cookies + middleware + flash)
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -16,7 +17,8 @@
 - Used t.TempDir() for idempotency tests (real file needed to test persistence across New() calls)
 
 ## Known issues / deferred items
-- BASE_URL empty string has no startup warning — address in Session 4 (auth/cookie Secure flag)
+- ~~BASE_URL empty string has no startup warning — address in Session 4~~ RESOLVED: Secure flag set conditionally based on baseURL prefix
+- ~~passwordHash field on User is unexported — auth package will need an accessor~~ RESOLVED: Added CheckPassword method on Store
 - BackupLocalDir empty string needs validation at point of use — address in Session 10 (backup)
 - ~~Integer config values (SMTP_PORT, RATE_BURST, RATE_PER_MINUTE) have no range validation — address in Session 3~~ RESOLVED: constructors panic on invalid values
 - StartCleanup goroutines leak (no shutdown mechanism / context.Context) — address in Session 11 (Docker/graceful shutdown)
@@ -128,6 +130,46 @@
 - StartCleanup goroutine leak (no context.Context shutdown) — address in Session 11 (graceful shutdown)
 - StartCleanup parameter validation — address in Session 11
 - Panic message content assertions in tests — low priority
+
+### Known issues
+- None
+
+---
+
+## Session 4 — Auth (session cookies + middleware + flash)
+**Branch:** `session/4-auth`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `internal/auth/auth.go`
+- `internal/auth/auth_test.go`
+- `internal/flash/flash.go`
+- `internal/flash/flash_test.go`
+
+### Files modified
+- `internal/store/store.go` — added CheckPassword method (PasswordHash kept unexported)
+- `internal/store/store_test.go` — added TestCheckPassword
+
+### Test summary
+- 14 auth tests + 5 flash tests + 3 store tests = 22 new tests
+- go test -race: clean across all 6 packages
+- go vet: clean
+
+### Decisions made
+- CreateSessionCookie takes 3 params (added baseURL) to set Secure flag conditionally — deviation from 2-param spec
+- Cookie sets Path="/" and MaxAge=30 days (not in spec but required for correct behavior)
+- Flash cookie sets HttpOnly=true (defense in depth)
+- PasswordHash kept unexported — added CheckPassword(username, plaintext) on Store instead
+- UserStore interface defined in auth package per CLAUDE.md §4
+- Flash Get validates HMAC before clearing cookie (security best practice)
+
+### Deferred items
+- ValidateSession time injection (uses time.Since with real clock) — low risk, boundary tests use explicit timestamps
+- Empty userID/secretKey defense-in-depth checks — config.Load panics on empty SECRET_KEY already
+- ValidateSession distinct error logging — all cases redirect to login correctly
+- Future timestamp rejection — requires compromised HMAC key
+- Flash parameter validation / size limits — flash set by our own code only
 
 ### Known issues
 - None

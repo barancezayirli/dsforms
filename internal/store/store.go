@@ -263,6 +263,18 @@ func (s *Store) HasDefaultPassword(userID string) (bool, error) {
 	return isDefault == 1, nil
 }
 
+// CheckPassword verifies a plaintext password against the stored hash for a user.
+func (s *Store) CheckPassword(username, password string) (User, error) {
+	u, err := s.GetUserByUsername(username)
+	if err != nil {
+		return User{}, fmt.Errorf("check password: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.passwordHash), []byte(password)); err != nil {
+		return User{}, fmt.Errorf("check password: %w", err)
+	}
+	return u, nil
+}
+
 // CreateForm creates a new form.
 func (s *Store) CreateForm(f Form) error {
 	_, err := s.db.Exec(

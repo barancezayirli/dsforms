@@ -431,3 +431,28 @@ func TestCreateSubmissionInvalidFormID(t *testing.T) {
 		t.Fatal("expected foreign key error for nonexistent form_id, got nil")
 	}
 }
+
+func TestCheckPassword(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	// Default admin/admin should work
+	u, err := s.CheckPassword("admin", "admin")
+	if err != nil {
+		t.Fatalf("CheckPassword error = %v", err)
+	}
+	if u.Username != "admin" {
+		t.Errorf("Username = %q, want admin", u.Username)
+	}
+
+	// Wrong password should fail
+	_, err = s.CheckPassword("admin", "wrongpass")
+	if err == nil {
+		t.Fatal("expected error for wrong password, got nil")
+	}
+
+	// Wrong username should fail
+	_, err = s.CheckPassword("nonexistent", "admin")
+	if err == nil {
+		t.Fatal("expected error for nonexistent user, got nil")
+	}
+}
