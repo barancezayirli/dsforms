@@ -288,6 +288,8 @@
 - FlashData struct for consistent flash message rendering in base.html
 - newFlash() helper for nil-safe flash creation
 - DeleteForm in store updated to return sql.ErrNoRows for proper 404 handling
+- Per-page template cloning to resolve {{define "content"}} conflict (found via manual testing)
+- Added root URL `/` redirect to `/admin/forms`
 
 ### Deferred items
 - success.html CSS duplication (standalone page by design) — add sync comment later
