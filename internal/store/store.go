@@ -437,6 +437,26 @@ func (s *Store) DeleteSubmission(id string) error {
 	return nil
 }
 
+// GetSubmission returns a single submission by ID.
+func (s *Store) GetSubmission(id string) (Submission, error) {
+	var sub Submission
+	var rawData string
+	var readInt int
+	err := s.db.QueryRow(
+		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE id = ?", id,
+	).Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt)
+	if err != nil {
+		return Submission{}, fmt.Errorf("get submission: %w", err)
+	}
+	sub.RawData = rawData
+	sub.Read = readInt == 1
+	if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
+		log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
+		sub.Data = map[string]string{"_raw": rawData}
+	}
+	return sub, nil
+}
+
 // UnreadCount returns the number of unread submissions for a form.
 func (s *Store) UnreadCount(formID string) (int, error) {
 	var count int

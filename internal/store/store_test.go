@@ -447,6 +447,32 @@ func TestCountAllSubmissions(t *testing.T) {
 	}
 }
 
+func TestGetSubmission(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`, IP: "1.2.3.4"})
+	sub, err := s.GetSubmission("s1")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if sub.Data["name"] != "Alice" {
+		t.Errorf("Data[name] = %q, want Alice", sub.Data["name"])
+	}
+	if sub.IP != "1.2.3.4" {
+		t.Errorf("IP = %q, want 1.2.3.4", sub.IP)
+	}
+}
+
+func TestGetSubmissionNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_, err := s.GetSubmission("nonexistent")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
 func TestCheckPassword(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
