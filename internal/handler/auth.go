@@ -2,6 +2,7 @@ package handler
 
 import (
 	"html/template"
+	"log"
 	"net/http"
 
 	"github.com/youruser/dsforms/internal/auth"
@@ -29,7 +30,10 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	data := LoginData{
 		LoginError: r.URL.Query().Get("error") == "1",
 	}
-	h.Templates.ExecuteTemplate(w, "login.html", data)
+	if err := h.Templates.ExecuteTemplate(w, "login.html", data); err != nil {
+		log.Printf("login template error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
 }
 
 // LoginSubmit processes a login form submission.
