@@ -1,0 +1,59 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Forms</h1>
+  <a class="btn btn-mint" href="/admin/forms/new">+ New form</a>
+</div>
+
+<div class="stats">
+  <div class="stat stat-accent">
+    <div class="stat-label">Total forms</div>
+    <div class="stat-val">{{.TotalForms}}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Unread</div>
+    <div class="stat-val">{{.TotalUnread}}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">All time</div>
+    <div class="stat-val">{{.TotalAll}}</div>
+  </div>
+</div>
+
+{{if .Forms}}
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email To</th>
+        <th>Unread</th>
+        <th>Created</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Forms}}
+      <tr>
+        <td><a href="/admin/forms/{{.ID}}/edit">{{.Name}}</a></td>
+        <td class="text-muted">{{.EmailTo}}</td>
+        <td>{{if gt .UnreadCount 0}}<strong>{{.UnreadCount}}</strong>{{else}}0{{end}}</td>
+        <td class="text-muted">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
+        <td class="actions">
+          <a href="/admin/forms/{{.ID}}/edit" class="btn-ghost">Edit</a>
+          <form method="POST" action="/admin/forms/{{.ID}}/delete" style="display:inline">
+            <button type="submit" class="btn-ghost btn-ghost-danger" onclick="return confirm('Delete this form and all its submissions?')">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="empty-state">
+  <p>No forms yet.</p>
+  <p class="text-muted">Create your first form to get started.</p>
+</div>
+{{end}}
+{{end}}

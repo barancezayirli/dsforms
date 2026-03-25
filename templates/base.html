@@ -123,6 +123,80 @@
 
     /* === Page Wrapper (§3.4) === */
     .page { max-width: 960px; margin: 0 auto; padding: 24px 20px; }
+
+    /* === Tables === */
+    .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .table th {
+      padding: 11px 16px;
+      background: var(--surface-alt);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      text-align: left;
+    }
+    .table td { padding: 11px 16px; border-bottom: 1px solid var(--border-light); }
+    .table tr:last-child td { border-bottom: none; }
+    .table a { color: var(--mint-deep); }
+    .table a:hover { text-decoration: underline; }
+    .text-muted { color: var(--text-muted); }
+    .actions { white-space: nowrap; }
+    .btn-ghost-danger { color: var(--danger); }
+    .btn-ghost-danger:hover { background: var(--danger-bg); }
+
+    /* === Stats (§3.9) === */
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; }
+    .stat-accent { border-top: 3px solid var(--mint); }
+    .stat-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+    .stat-val { font-size: 22px; font-weight: 500; color: var(--text-primary); }
+    @media (max-width: 640px) {
+      .stats { grid-template-columns: 1fr 1fr; }
+      .stats .stat:last-child { grid-column: 1 / -1; }
+    }
+
+    /* === Page Header (§3.5) === */
+    .page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+    .page-title { font-size: 18px; font-weight: 500; color: var(--text-primary); }
+
+    /* === Buttons (§3.6) === */
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: var(--radius); font-size: 13px; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer; white-space: nowrap; text-decoration: none; }
+    .btn:hover { background: var(--surface-alt); }
+    .btn-mint { background: var(--mint); color: var(--mint-deep); border-color: var(--mint-dark); }
+    .btn-mint:hover { background: var(--mint-dark); }
+    .btn-danger { border-color: var(--danger-border); color: var(--danger); background: var(--surface); }
+    .btn-danger:hover { background: var(--danger-bg); }
+    .btn-ghost { background: none; border: none; font-size: 13px; color: var(--text-muted); padding: 5px 8px; border-radius: var(--radius-sm); cursor: pointer; }
+    .btn-ghost:hover { background: var(--page-bg); color: var(--text-secondary); }
+
+    /* === Cards (§3.7) === */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+    .card-head { padding: 11px 16px; background: var(--surface-alt); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .card-body { padding: 20px 16px; }
+
+    /* === Form Inputs (§3.8) === */
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px; }
+    input[type="text"], input[type="email"], input[type="password"], textarea {
+      width: 100%; padding: 8px 11px; border-radius: var(--radius); border: 1px solid var(--border);
+      background: var(--surface); color: var(--text-primary); font-size: 13px; font-family: var(--font); transition: border-color .15s;
+    }
+    input:focus, textarea:focus { outline: none; border-color: var(--mint); box-shadow: 0 0 0 3px var(--mint-focus); }
+    textarea { resize: vertical; min-height: 80px; line-height: 1.6; }
+    .form-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+    .form-error { font-size: 12px; color: var(--danger); margin-top: 4px; }
+    .form-error-banner { background: var(--danger-bg); border: 1px solid var(--danger-border); color: var(--danger); padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px; }
+
+    /* === Empty State === */
+    .empty-state { text-align: center; padding: 48px 20px; }
+    .empty-state p { font-size: 15px; margin-bottom: 4px; }
+
+    /* === Snippet === */
+    .snippet-wrap { position: relative; }
+    .snippet { background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 12px; font-family: var(--font-mono); overflow-x: auto; white-space: pre; line-height: 1.6; }
+    .snippet-copy { position: absolute; top: 8px; right: 8px; }
   </style>
 </head>
 <body>
