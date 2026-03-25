@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/youruser/dsforms/internal/ratelimit"
 )
 
 func TestHealthz(t *testing.T) {
@@ -73,5 +78,64 @@ func TestMaxBytesReader(t *testing.T) {
 
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	}
+}
+
+func TestRateLimitMiddleware(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	l := ratelimit.NewLimiter(2, 6, func() time.Time { return now })
+
+	r := chi.NewRouter()
+	r.With(rateLimitMiddleware(l)).Post("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// First 2 requests succeed
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest("POST", "/test", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200", i+1, w.Code)
+		}
+	}
+
+	// 3rd request should be rate limited
+	req := httptest.NewRequest("POST", "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", w.Code)
+	}
+}
+
+func TestRateLimitMiddlewareJSON(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	l := ratelimit.NewLimiter(1, 6, func() time.Time { return now })
+
+	r := chi.NewRouter()
+	r.With(rateLimitMiddleware(l)).Post("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Exhaust
+	req := httptest.NewRequest("POST", "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Rate limited with JSON Accept
+	req2 := httptest.NewRequest("POST", "/test", nil)
+	req2.Header.Set("Accept", "application/json")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", w2.Code)
+	}
+	var resp map[string]string
+	json.NewDecoder(w2.Body).Decode(&resp)
+	if resp["error"] != "too many requests" {
+		t.Errorf("error = %q, want 'too many requests'", resp["error"])
 	}
 }
