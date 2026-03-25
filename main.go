@@ -147,6 +147,9 @@ func main() {
 	r := newRouter()
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/forms", http.StatusFound)
+	})
 	r.Get("/admin/login", authHandler.LoginPage)
 	r.Post("/admin/login", authHandler.LoginSubmit)
 	r.Get("/success", adminHandler.Success)
