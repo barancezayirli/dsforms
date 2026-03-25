@@ -1,0 +1,109 @@
+{{template "base" .}}
+{{define "content"}}
+<!-- Topbar -->
+<div class="reader-topbar">
+  <div class="breadcrumb">
+    <a href="/admin/forms">Forms</a> / <strong>{{.Form.Name}}</strong>
+  </div>
+  <div class="topbar-actions">
+    <form method="POST" action="/admin/forms/{{.Form.ID}}/read-all" style="display:inline">
+      <button type="submit" class="btn">Mark all read</button>
+    </form>
+    <a href="/admin/forms/{{.Form.ID}}/export" class="btn">Export CSV</a>
+    <a href="/admin/forms/{{.Form.ID}}/edit" class="btn">Edit form</a>
+  </div>
+</div>
+
+{{if .HasActive}}
+<div class="reader">
+  <!-- Message list -->
+  <div class="msg-list">
+    <div class="ml-header">Submissions &middot; {{.TotalCount}} total &middot; {{.UnreadCount}} unread</div>
+    {{range $i, $sub := .Submissions}}
+    <a href="/admin/forms/{{$.Form.ID}}?sub={{$sub.ID}}" class="msg-item{{if not $sub.Read}} unread{{end}}{{if eq $sub.ID $.ActiveSub.ID}} active{{end}}">
+      <div class="mi-dot{{if $sub.Read}} read{{end}}"></div>
+      <div class="mi-body">
+        <div class="mi-top">
+          <span class="mi-name{{if $sub.Read}} read{{end}}">{{index $sub.Data "name" | or (index $sub.Data "email") | or "Submission"}}</span>
+          <span class="mi-time">{{$sub.CreatedAt.Format "Jan 2"}}</span>
+        </div>
+        <div class="mi-preview">{{index $sub.Data "message" | or (index $sub.Data "body") | or (index $sub.Data "content") | or ""}}</div>
+      </div>
+    </a>
+    {{end}}
+  </div>
+
+  <!-- Reading pane -->
+  <div class="pane">
+    <div class="pane-header">
+      <div class="ph-row1">
+        <div class="ph-info">
+          <div class="ph-name">{{index .ActiveSub.Data "name" | or "Submission"}}</div>
+          {{if index .ActiveSub.Data "email"}}
+          <div class="ph-email">{{index .ActiveSub.Data "email"}}</div>
+          {{end}}
+        </div>
+        <div class="ph-actions">
+          {{if not .ActiveSub.Read}}
+          <form method="POST" action="/admin/submissions/{{.ActiveSub.ID}}/read" style="display:inline">
+            <button type="submit" class="btn">Mark read</button>
+          </form>
+          {{end}}
+          <form method="POST" action="/admin/submissions/{{.ActiveSub.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this submission?')">
+            <button type="submit" class="btn btn-danger">Delete</button>
+          </form>
+        </div>
+      </div>
+      <div class="ph-meta">
+        <div class="pm-item">
+          <span class="pm-label">Received</span>
+          <span class="pm-val">{{.ActiveSub.CreatedAt.Format "Jan 2, 2006 3:04 PM"}}</span>
+        </div>
+        <div class="pm-item">
+          <span class="pm-label">IP</span>
+          <span class="pm-val">{{.ActiveSub.IP}}</span>
+        </div>
+        <div class="pm-item">
+          <span class="pm-label">Form</span>
+          <span class="pm-val">{{.Form.Name}}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane-body">
+      {{range $key, $val := .ActiveSub.Data}}
+      <div class="field-block">
+        <div class="field-label">{{$key}}</div>
+        {{if or (eq $key "message") (eq $key "body") (eq $key "content")}}
+        <div class="field-msg">{{$val}}</div>
+        {{else}}
+        <div class="field-val">{{$val}}</div>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+
+    <div class="pane-footer">
+      <div class="pane-nav">
+        {{if .PrevID}}
+        <a href="/admin/forms/{{.Form.ID}}?sub={{.PrevID}}" class="btn-ghost">&larr; Previous</a>
+        {{else}}
+        <span class="btn-ghost" style="opacity:0.4">&larr; Previous</span>
+        {{end}}
+        <span class="pane-pos">{{add .ActiveIdx 1}} of {{.TotalCount}} submissions</span>
+        {{if .NextID}}
+        <a href="/admin/forms/{{.Form.ID}}?sub={{.NextID}}" class="btn-ghost">Next &rarr;</a>
+        {{else}}
+        <span class="btn-ghost" style="opacity:0.4">Next &rarr;</span>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+{{else}}
+<div class="reader-empty">
+  <p>No submissions yet.</p>
+  <p class="text-muted">Submissions will appear here when someone fills out your form.</p>
+</div>
+{{end}}
+{{end}}
