@@ -11,12 +11,7 @@ import (
 	"github.com/youruser/dsforms/internal/store"
 )
 
-// Notifier is the interface for sending form submission notifications.
-type Notifier interface {
-	SendNotification(form store.Form, sub store.Submission) error
-}
-
-// Mailer implements Notifier using SMTP.
+// Mailer implements handler.Notifier using SMTP.
 type Mailer struct {
 	Host    string
 	Port    int

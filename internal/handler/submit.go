@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -9,14 +11,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/youruser/dsforms/internal/mail"
 	"github.com/youruser/dsforms/internal/store"
 )
+
+// Notifier sends notifications for form submissions.
+type Notifier interface {
+	SendNotification(form store.Form, sub store.Submission) error
+}
 
 // SubmitHandler handles form submissions via POST /f/{formID}.
 type SubmitHandler struct {
 	Store    *store.Store
-	Notifier mail.Notifier
+	Notifier Notifier
 	BaseURL  string
 }
 
@@ -43,11 +49,17 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "formID")
 	form, err := h.Store.GetForm(formID)
 	if err != nil {
-		http.Error(w, "form not found", http.StatusNotFound)
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "form not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("submit: failed to get form %s: %v", formID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	if err := r.ParseForm(); err != nil {
+		log.Printf("submit: form %s parse error: %v", formID, err)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -102,14 +114,21 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("submit: panic in email for form %s submission %s: %v", formID, sub.ID, r)
+			}
+		}()
 		if err := h.Notifier.SendNotification(form, sub); err != nil {
-			log.Printf("submit: failed to send email: %v", err)
+			log.Printf("submit: failed to send email for form %s submission %s: %v", formID, sub.ID, err)
 		}
 	}()
 
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {
+			log.Printf("submit: form %s failed to write JSON response: %v", formID, err)
+		}
 		return
 	}
 	http.Redirect(w, r, redirectURL, http.StatusFound)
