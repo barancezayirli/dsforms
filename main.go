@@ -81,9 +81,31 @@ func main() {
 	}
 	defer s.Close()
 
-	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
+	// Parse base template once, then clone it for each page that extends it.
+	baseTmpl, err := template.ParseFS(templateFS, "templates/base.html")
 	if err != nil {
-		log.Fatalf("failed to parse templates: %v", err)
+		log.Fatalf("failed to parse base template: %v", err)
+	}
+
+	templates := make(map[string]*template.Template)
+	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html"} {
+		t, err := baseTmpl.Clone()
+		if err != nil {
+			log.Fatalf("failed to clone base template: %v", err)
+		}
+		_, err = t.ParseFS(templateFS, "templates/"+name)
+		if err != nil {
+			log.Fatalf("failed to parse template %s: %v", name, err)
+		}
+		templates[name] = t
+	}
+
+	for _, name := range []string{"login.html", "success.html"} {
+		t, err := template.ParseFS(templateFS, "templates/"+name)
+		if err != nil {
+			log.Fatalf("failed to parse template %s: %v", name, err)
+		}
+		templates[name] = t
 	}
 
 	mailer := &mail.Mailer{
@@ -112,14 +134,14 @@ func main() {
 		SecretKey:  cfg.SecretKey,
 		BaseURL:    cfg.BaseURL,
 		LoginGuard: loginGuard,
-		Templates:  tmpl,
+		Templates:  templates,
 	}
 
 	adminHandler := &handler.AdminHandler{
 		Store:     s,
 		SecretKey: cfg.SecretKey,
 		BaseURL:   cfg.BaseURL,
-		Templates: tmpl,
+		Templates: templates,
 	}
 
 	r := newRouter()

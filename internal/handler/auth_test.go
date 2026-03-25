@@ -26,19 +26,23 @@ func setupAuth(t *testing.T) (*store.Store, *chi.Mux) {
 	now := time.Now()
 	guard := ratelimit.NewLoginGuard(5, 15*time.Minute, func() time.Time { return now })
 
-	tmpl := template.Must(template.New("login.html").Parse(
+	loginTmpl := template.Must(template.New("login.html").Parse(
 		`<!DOCTYPE html><html><body>` +
 			`{{if .LoginError}}<p>Invalid username or password</p>{{end}}` +
 			`<form method="POST" action="/admin/login">` +
 			`<input name="username"><input name="password" type="password">` +
 			`<button type="submit">Log in</button></form></body></html>`))
 
+	templates := map[string]*template.Template{
+		"login.html": loginTmpl,
+	}
+
 	ah := &AuthHandler{
 		Store:      s,
 		SecretKey:  testSecretKey,
 		BaseURL:    "https://example.com",
 		LoginGuard: guard,
-		Templates:  tmpl,
+		Templates:  templates,
 	}
 
 	r := chi.NewRouter()

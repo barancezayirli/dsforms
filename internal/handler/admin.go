@@ -19,7 +19,7 @@ type AdminHandler struct {
 	Store     *store.Store
 	SecretKey string
 	BaseURL   string
-	Templates *template.Template
+	Templates map[string]*template.Template
 }
 
 // FlashData holds a flash message for display in templates via .Flash.Type and .Flash.Message.
@@ -104,7 +104,7 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		TotalAll:    totalAll,
 	}
 
-	if err := h.Templates.ExecuteTemplate(w, "dashboard.html", data); err != nil {
+	if err := h.Templates["dashboard.html"].ExecuteTemplate(w, "base", data); err != nil {
 		log.Printf("dashboard template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
@@ -122,7 +122,7 @@ func (h *AdminHandler) NewFormPage(w http.ResponseWriter, r *http.Request) {
 		Flash:       newFlash(flashType, flashMsg),
 	}
 
-	if err := h.Templates.ExecuteTemplate(w, "form_new.html", data); err != nil {
+	if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
 		log.Printf("form_new template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
@@ -154,7 +154,7 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 			},
 			Error: errMsg,
 		}
-		if err := h.Templates.ExecuteTemplate(w, "form_new.html", data); err != nil {
+		if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
 			log.Printf("form_new template error: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
@@ -202,7 +202,7 @@ func (h *AdminHandler) EditFormPage(w http.ResponseWriter, r *http.Request) {
 		BaseURL:     h.BaseURL,
 	}
 
-	if err := h.Templates.ExecuteTemplate(w, "form_edit.html", data); err != nil {
+	if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
 		log.Printf("form_edit template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
@@ -250,7 +250,7 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 			BaseURL:     h.BaseURL,
 			Error:       errMsg,
 		}
-		if err := h.Templates.ExecuteTemplate(w, "form_edit.html", data); err != nil {
+		if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
 			log.Printf("form_edit template error: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
@@ -292,7 +292,7 @@ func (h *AdminHandler) DeleteForm(w http.ResponseWriter, r *http.Request) {
 
 // Success renders the public success page (no auth required).
 func (h *AdminHandler) Success(w http.ResponseWriter, r *http.Request) {
-	if err := h.Templates.ExecuteTemplate(w, "success.html", nil); err != nil {
+	if err := h.Templates["success.html"].Execute(w, nil); err != nil {
 		log.Printf("success template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}

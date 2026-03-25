@@ -20,27 +20,42 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 		t.Fatalf("store.New error: %v", err)
 	}
 
-	// Inline templates for testing — standalone (no base template dependency).
-	tmpl := template.New("")
-	template.Must(tmpl.New("dashboard.html").Parse(
+	// Inline templates for testing using the per-page clone strategy.
+	// Each page template uses "base" as the entry point, which delegates to "content".
+	baseTmpl := template.Must(template.New("base").Parse(`{{template "content" .}}`))
+
+	dashTmpl, _ := baseTmpl.Clone()
+	template.Must(dashTmpl.New("content").Parse(
 		`{{range .Forms}}<span class="form-name">{{.Name}}</span><span class="unread">{{.UnreadCount}}</span>{{end}}` +
 			`{{if not .Forms}}<p>No forms yet</p>{{end}}` +
 			`<span class="stat-forms">{{.TotalForms}}</span>` +
 			`<span class="stat-unread">{{.TotalUnread}}</span>` +
 			`<span class="stat-all">{{.TotalAll}}</span>`))
-	template.Must(tmpl.New("form_new.html").Parse(
+
+	newTmpl, _ := baseTmpl.Clone()
+	template.Must(newTmpl.New("content").Parse(
 		`{{if .Error}}<p class="error">{{.Error}}</p>{{end}}<form>new form</form>`))
-	template.Must(tmpl.New("form_edit.html").Parse(
+
+	editTmpl, _ := baseTmpl.Clone()
+	template.Must(editTmpl.New("content").Parse(
 		`{{if .Error}}<p class="error">{{.Error}}</p>{{end}}` +
 			`<input value="{{.Form.Name}}"><input value="{{.Form.EmailTo}}">` +
 			`<span class="base-url">{{.BaseURL}}</span>`))
-	template.Must(tmpl.New("success.html").Parse(`<p>Your message has been sent.</p>`))
+
+	successTmpl := template.Must(template.New("success.html").Parse(`<p>Your message has been sent.</p>`))
+
+	templates := map[string]*template.Template{
+		"dashboard.html": dashTmpl,
+		"form_new.html":  newTmpl,
+		"form_edit.html": editTmpl,
+		"success.html":   successTmpl,
+	}
 
 	ah := &AdminHandler{
 		Store:     s,
 		SecretKey: testSecretKey,
 		BaseURL:   "https://example.com",
-		Templates: tmpl,
+		Templates: templates,
 	}
 
 	r := chi.NewRouter()
