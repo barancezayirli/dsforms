@@ -1,19 +1,25 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
+	"html/template"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/youruser/dsforms/internal/auth"
 	"github.com/youruser/dsforms/internal/config"
 	"github.com/youruser/dsforms/internal/handler"
 	"github.com/youruser/dsforms/internal/mail"
 	"github.com/youruser/dsforms/internal/ratelimit"
 	"github.com/youruser/dsforms/internal/store"
 )
+
+//go:embed templates/*
+var templateFS embed.FS
 
 func newRouter() *chi.Mux {
 	r := chi.NewRouter()
@@ -75,6 +81,11 @@ func main() {
 	}
 	defer s.Close()
 
+	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
+	if err != nil {
+		log.Fatalf("failed to parse templates: %v", err)
+	}
+
 	mailer := &mail.Mailer{
 		Host:    cfg.SMTPHost,
 		Port:    cfg.SMTPPort,
@@ -93,8 +104,34 @@ func main() {
 	limiter := ratelimit.NewLimiter(cfg.RateBurst, cfg.RatePerMinute, time.Now)
 	limiter.StartCleanup(10*time.Minute, 30*time.Minute)
 
+	loginGuard := ratelimit.NewLoginGuard(5, 15*time.Minute, time.Now)
+	loginGuard.StartCleanup(30*time.Minute, 30*time.Minute)
+
+	authHandler := &handler.AuthHandler{
+		Store:      s,
+		SecretKey:  cfg.SecretKey,
+		BaseURL:    cfg.BaseURL,
+		LoginGuard: loginGuard,
+		Templates:  tmpl,
+	}
+
 	r := newRouter()
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
+
+	r.Get("/admin/login", authHandler.LoginPage)
+	r.Post("/admin/login", authHandler.LoginSubmit)
+
+	r.Group(func(r chi.Router) {
+		r.Use(auth.RequireAuth(s, cfg.SecretKey))
+		r.Post("/admin/logout", authHandler.Logout)
+		r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/admin/forms", http.StatusFound)
+		})
+		// Placeholder for future admin routes (Sessions 7-10)
+		r.Get("/admin/forms", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("dashboard placeholder"))
+		})
+	})
 
 	log.Printf("starting server on %s", cfg.ListenAddr)
 	if err := http.ListenAndServe(cfg.ListenAddr, r); err != nil && err != http.ErrServerClosed {
