@@ -23,7 +23,7 @@ type User struct {
 	Username          string
 	IsDefaultPassword bool
 	CreatedAt         time.Time
-	passwordHash      string
+	PasswordHash      string
 }
 
 // Form represents a form endpoint.
@@ -138,7 +138,7 @@ func (s *Store) GetUserByUsername(username string) (User, error) {
 	err := s.db.QueryRow(
 		"SELECT id, username, password, is_default_password, created_at FROM users WHERE username = ?",
 		username,
-	).Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &isDefault, &u.CreatedAt)
 	if err != nil {
 		return User{}, fmt.Errorf("user not found: %w", err)
 	}
@@ -153,7 +153,7 @@ func (s *Store) GetUserByID(id string) (User, error) {
 	err := s.db.QueryRow(
 		"SELECT id, username, password, is_default_password, created_at FROM users WHERE id = ?",
 		id,
-	).Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &isDefault, &u.CreatedAt)
 	if err != nil {
 		return User{}, fmt.Errorf("get user by id: %w", err)
 	}
@@ -175,7 +175,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	for rows.Next() {
 		var u User
 		var isDefault int
-		if err := rows.Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &isDefault, &u.CreatedAt); err != nil {
 			return nil, fmt.Errorf("list users: %w", err)
 		}
 		u.IsDefaultPassword = isDefault == 1

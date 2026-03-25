@@ -73,7 +73,7 @@ func TestDefaultUserNotReseeded(t *testing.T) {
 		t.Fatalf("second New() error = %v", err)
 	}
 	u2, _ := s2.GetUserByUsername("admin")
-	err = bcrypt.CompareHashAndPassword([]byte(u2.passwordHash), []byte("newpass"))
+	err = bcrypt.CompareHashAndPassword([]byte(u2.PasswordHash), []byte("newpass"))
 	if err != nil {
 		t.Error("admin password was re-seeded, expected it to remain changed")
 	}
@@ -87,10 +87,10 @@ func TestCreateUserBcryptsPassword(t *testing.T) {
 		t.Fatalf("CreateUser error = %v", err)
 	}
 	u, _ := s.GetUserByUsername("alice")
-	if u.passwordHash == "plaintext" {
+	if u.PasswordHash == "plaintext" {
 		t.Error("password stored as plain text, expected bcrypt hash")
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(u.passwordHash), []byte("plaintext")); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte("plaintext")); err != nil {
 		t.Errorf("bcrypt verify failed: %v", err)
 	}
 }
