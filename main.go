@@ -13,7 +13,9 @@ func newRouter() *chi.Mux {
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		if _, err := w.Write([]byte("ok")); err != nil {
+			log.Printf("healthz write error: %v", err)
+		}
 	})
 
 	return r
@@ -25,7 +27,7 @@ func main() {
 	r := newRouter()
 
 	log.Printf("starting server on %s", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, r); err != nil {
+	if err := http.ListenAndServe(cfg.ListenAddr, r); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
 }

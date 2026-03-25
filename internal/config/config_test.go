@@ -13,6 +13,8 @@ func setAllRequired(t *testing.T) {
 	t.Setenv("SMTP_FROM", "DSForms <noreply@example.com>")
 }
 
+// TestLoad does not use t.Parallel because t.Setenv
+// is incompatible with parallel test execution.
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -166,6 +168,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			tt.setup(t)
 			if tt.wantPanic {
