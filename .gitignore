@@ -1,0 +1,24 @@
+# Binaries
+dsforms
+*.exe
+
+# Data
+/data/
+*.db
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage.out
+c.out
