@@ -22,11 +22,26 @@ type AdminHandler struct {
 	Templates *template.Template
 }
 
+// FlashData holds a flash message for display in templates via .Flash.Type and .Flash.Message.
+type FlashData struct {
+	Type    string
+	Message string
+}
+
+// newFlash returns a *FlashData if msgType is non-empty, otherwise nil.
+func newFlash(msgType, message string) *FlashData {
+	if msgType == "" {
+		return nil
+	}
+	return &FlashData{Type: msgType, Message: message}
+}
+
 // dashboardData holds the data passed to dashboard.html.
 type dashboardData struct {
+	Title       string
+	Active      string
 	CurrentUser store.User
-	FlashType   string
-	FlashMsg    string
+	Flash       *FlashData
 	Forms       []store.FormSummary
 	TotalForms  int
 	TotalUnread int
@@ -35,18 +50,20 @@ type dashboardData struct {
 
 // formNewData holds the data passed to form_new.html.
 type formNewData struct {
+	Title       string
+	Active      string
 	CurrentUser store.User
-	FlashType   string
-	FlashMsg    string
+	Flash       *FlashData
 	Form        store.Form
 	Error       string
 }
 
 // formEditData holds the data passed to form_edit.html.
 type formEditData struct {
+	Title       string
+	Active      string
 	CurrentUser store.User
-	FlashType   string
-	FlashMsg    string
+	Flash       *FlashData
 	Form        store.Form
 	BaseURL     string
 	Error       string
@@ -77,9 +94,10 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := dashboardData{
+		Title:       "Forms",
+		Active:      "forms",
 		CurrentUser: user,
-		FlashType:   flashType,
-		FlashMsg:    flashMsg,
+		Flash:       newFlash(flashType, flashMsg),
 		Forms:       forms,
 		TotalForms:  len(forms),
 		TotalUnread: totalUnread,
@@ -98,9 +116,10 @@ func (h *AdminHandler) NewFormPage(w http.ResponseWriter, r *http.Request) {
 	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	data := formNewData{
+		Title:       "New Form",
+		Active:      "forms",
 		CurrentUser: user,
-		FlashType:   flashType,
-		FlashMsg:    flashMsg,
+		Flash:       newFlash(flashType, flashMsg),
 	}
 
 	if err := h.Templates.ExecuteTemplate(w, "form_new.html", data); err != nil {
@@ -125,6 +144,8 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 			errMsg = "Notification email is required."
 		}
 		data := formNewData{
+			Title:       "New Form",
+			Active:      "forms",
 			CurrentUser: user,
 			Form: store.Form{
 				Name:     name,
@@ -173,9 +194,10 @@ func (h *AdminHandler) EditFormPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := formEditData{
+		Title:       "Edit Form",
+		Active:      "forms",
 		CurrentUser: user,
-		FlashType:   flashType,
-		FlashMsg:    flashMsg,
+		Flash:       newFlash(flashType, flashMsg),
 		Form:        f,
 		BaseURL:     h.BaseURL,
 	}
@@ -188,13 +210,58 @@ func (h *AdminHandler) EditFormPage(w http.ResponseWriter, r *http.Request) {
 
 // EditForm handles POST to update a form.
 func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.UserFromContext(r.Context())
 	id := chi.URLParam(r, "id")
+
+	name := r.FormValue("name")
+	emailTo := r.FormValue("email_to")
+	redirect := r.FormValue("redirect")
+
+	if name == "" || emailTo == "" {
+		errMsg := "Name and email are required."
+		if name == "" {
+			errMsg = "Form name is required."
+		} else {
+			errMsg = "Notification email is required."
+		}
+
+		f, err := h.Store.GetForm(id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "form not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("edit form: get form %s error: %v", id, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		// Overlay submitted values so the user sees what they typed.
+		f.Name = name
+		f.EmailTo = emailTo
+		f.Redirect = redirect
+
+		flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+		data := formEditData{
+			Title:       "Edit Form",
+			Active:      "forms",
+			CurrentUser: user,
+			Flash:       newFlash(flashType, flashMsg),
+			Form:        f,
+			BaseURL:     h.BaseURL,
+			Error:       errMsg,
+		}
+		if err := h.Templates.ExecuteTemplate(w, "form_edit.html", data); err != nil {
+			log.Printf("form_edit template error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
 
 	f := store.Form{
 		ID:       id,
-		Name:     r.FormValue("name"),
-		EmailTo:  r.FormValue("email_to"),
-		Redirect: r.FormValue("redirect"),
+		Name:     name,
+		EmailTo:  emailTo,
+		Redirect: redirect,
 	}
 
 	if err := h.Store.UpdateForm(f); err != nil {

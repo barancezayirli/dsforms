@@ -216,6 +216,44 @@ func TestEditFormPost(t *testing.T) {
 	}
 }
 
+func TestEditFormEmptyName(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Old", EmailTo: "old@example.com"})
+	form := url.Values{"name": {""}, "email_to": {"new@example.com"}}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/edit", form.Encode())
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render)", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "error") {
+		t.Error("error message not shown")
+	}
+	// Ensure the form was NOT updated.
+	f, _ := s.GetForm("f1")
+	if f.Name != "Old" {
+		t.Errorf("Name = %q, want Old (should not have been updated)", f.Name)
+	}
+}
+
+func TestEditFormEmptyEmail(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Old", EmailTo: "old@example.com"})
+	form := url.Values{"name": {"New"}, "email_to": {""}}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/edit", form.Encode())
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render)", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "error") {
+		t.Error("error message not shown")
+	}
+	// Ensure the form was NOT updated.
+	f, _ := s.GetForm("f1")
+	if f.EmailTo != "old@example.com" {
+		t.Errorf("EmailTo = %q, want old@example.com (should not have been updated)", f.EmailTo)
+	}
+}
+
 func TestEditFormNotFound(t *testing.T) {
 	t.Parallel()
 	s, r := setupAdmin(t)
