@@ -1,19 +1,25 @@
 # DSForms — Session Progress
 
-## Status: session 1 complete
+## Status: session 2 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
+- Session 2 — Store (database layer)
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
 - Used newRouter() pattern in main.go to make healthz testable without triggering config.Load()
 - Omitted t.Parallel() on config tests intentionally (env var mutations via t.Setenv are not parallel-safe)
+- Used `_pragma=foreign_keys(1)` instead of `_foreign_keys=ON` for modernc.org/sqlite DSN (driver quirk)
+- Deferred backup_log table/BackupLog model to Session 10 (no schema in DSFORMS_PLAN.md)
+- Used t.TempDir() for idempotency tests (real file needed to test persistence across New() calls)
 
 ## Known issues / deferred items
 - BASE_URL empty string has no startup warning — address in Session 4 (auth/cookie Secure flag)
 - BackupLocalDir empty string needs validation at point of use — address in Session 10 (backup)
 - Integer config values (SMTP_PORT, RATE_BURST, RATE_PER_MINUTE) have no range validation — address in Session 3 (rate limiter)
+- UpdateForm/DeleteForm/MarkRead/DeleteSubmission don't check RowsAffected — address in Sessions 7-8 (handlers)
+- backup_log table, BackupLog model, InsertBackupLog/UpdateBackupLog/ListBackupLogs — address in Session 10
 
 ---
 
@@ -49,6 +55,40 @@
 - BASE_URL empty string has no startup warning — address in Session 4 (auth/cookie Secure flag)
 - BackupLocalDir empty string needs validation at point of use — address in Session 10 (backup)
 - Integer config range validation (negative ports, zero rate burst) — address in Session 3 (rate limiter)
+
+### Known issues
+- None
+
+---
+
+## Session 2 — Store (database layer)
+**Branch:** `session/2-store`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `internal/store/store.go`
+- `internal/store/store_test.go`
+
+### Files modified
+(none — all new files)
+
+### Test summary
+- 27 store tests written, all passing (41 total across project including 12 config subtests)
+- go test -race: clean
+- go vet: clean
+
+### Decisions made
+- Used `_pragma=foreign_keys(1)` instead of `_foreign_keys=ON` (modernc.org/sqlite driver requires this syntax)
+- Deferred backup_log table/BackupLog model to Session 10 (no schema definition in DSFORMS_PLAN.md, confirmed with human)
+- Used t.TempDir() for idempotency tests (deviation from "no real file path" — necessary for testing DB persistence)
+- Added Close() method to Store (not in DSFORMS_PLAN.md but needed for graceful shutdown)
+- passwordHash field on User is unexported — auth package will need an accessor (to address in Session 4)
+
+### Deferred items
+- UpdateForm/DeleteForm/MarkRead/DeleteSubmission RowsAffected checks — address in Sessions 7-8 when handlers are built
+- backup_log table, BackupLog model, related methods — address in Session 10
+- Test setup error checking pattern (using _ = for setup calls) — improve incrementally
 
 ### Known issues
 - None
