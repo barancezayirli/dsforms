@@ -11,7 +11,9 @@
 - Omitted t.Parallel() on config tests intentionally (env var mutations via t.Setenv are not parallel-safe)
 
 ## Known issues / deferred items
-(none)
+- BASE_URL empty string has no startup warning — address in Session 4 (auth/cookie Secure flag)
+- BackupLocalDir empty string needs validation at point of use — address in Session 10 (backup)
+- Integer config values (SMTP_PORT, RATE_BURST, RATE_PER_MINUTE) have no range validation — address in Session 3 (rate limiter)
 
 ---
 
@@ -44,7 +46,9 @@
 - Config tests are not parallel due to t.Setenv usage — this is correct Go behavior
 
 ### Deferred items
-- None
+- BASE_URL empty string has no startup warning — address in Session 4 (auth/cookie Secure flag)
+- BackupLocalDir empty string needs validation at point of use — address in Session 10 (backup)
+- Integer config range validation (negative ports, zero rate burst) — address in Session 3 (rate limiter)
 
 ### Known issues
 - None
