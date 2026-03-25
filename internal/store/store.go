@@ -2,7 +2,13 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
+	"log"
 	"time"
+
+	"github.com/google/uuid"
+	_ "modernc.org/sqlite"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Store wraps the SQLite database connection.
@@ -45,14 +51,84 @@ type Submission struct {
 	CreatedAt time.Time
 }
 
+const schema = `
+CREATE TABLE IF NOT EXISTS users (
+    id                  TEXT PRIMARY KEY,
+    username            TEXT NOT NULL UNIQUE,
+    password            TEXT NOT NULL,
+    is_default_password INTEGER NOT NULL DEFAULT 1,
+    created_at          DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS forms (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    email_to    TEXT NOT NULL,
+    redirect    TEXT NOT NULL DEFAULT '',
+    created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS submissions (
+    id          TEXT PRIMARY KEY,
+    form_id     TEXT NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
+    data        TEXT NOT NULL,
+    ip          TEXT NOT NULL DEFAULT '',
+    read        INTEGER NOT NULL DEFAULT 0,
+    created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_submissions_form_id ON submissions(form_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_read ON submissions(read);
+`
+
 // New opens a SQLite database and runs migrations.
 func New(path string) (*Store, error) {
-	return nil, nil
+	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_foreign_keys=ON")
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	if _, err := db.Exec(schema); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		return nil, fmt.Errorf("count users: %w", err)
+	}
+
+	if count == 0 {
+		hash, err := bcrypt.GenerateFromPassword([]byte("admin"), 12)
+		if err != nil {
+			return nil, fmt.Errorf("hash default password: %w", err)
+		}
+		id := uuid.New().String()
+		_, err = db.Exec(
+			"INSERT INTO users (id, username, password, is_default_password) VALUES (?, ?, ?, 1)",
+			id, "admin", string(hash),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("seed default user: %w", err)
+		}
+		log.Println("⚠  WARNING: Default admin credentials are active (admin/admin). Change your password immediately at /admin/users.")
+	}
+
+	return &Store{db: db}, nil
 }
 
 // GetUserByUsername looks up a user by username.
 func (s *Store) GetUserByUsername(username string) (User, error) {
-	return User{}, nil
+	var u User
+	var isDefault int
+	err := s.db.QueryRow(
+		"SELECT id, username, password, is_default_password, created_at FROM users WHERE username = ?",
+		username,
+	).Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt)
+	if err != nil {
+		return User{}, fmt.Errorf("user not found: %w", err)
+	}
+	u.IsDefaultPassword = isDefault == 1
+	return u, nil
 }
 
 // GetUserByID looks up a user by ID.
@@ -72,6 +148,17 @@ func (s *Store) CreateUser(username, password string) error {
 
 // UpdatePassword updates a user's password and clears IsDefaultPassword.
 func (s *Store) UpdatePassword(userID, newPassword string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), 12)
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	_, err = s.db.Exec(
+		"UPDATE users SET password = ?, is_default_password = 0 WHERE id = ?",
+		string(hash), userID,
+	)
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
 	return nil
 }
 
