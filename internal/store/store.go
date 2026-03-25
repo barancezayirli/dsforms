@@ -133,16 +133,59 @@ func (s *Store) GetUserByUsername(username string) (User, error) {
 
 // GetUserByID looks up a user by ID.
 func (s *Store) GetUserByID(id string) (User, error) {
-	return User{}, nil
+	var u User
+	var isDefault int
+	err := s.db.QueryRow(
+		"SELECT id, username, password, is_default_password, created_at FROM users WHERE id = ?",
+		id,
+	).Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt)
+	if err != nil {
+		return User{}, fmt.Errorf("get user by id: %w", err)
+	}
+	u.IsDefaultPassword = isDefault == 1
+	return u, nil
 }
 
 // ListUsers returns all users.
 func (s *Store) ListUsers() ([]User, error) {
-	return nil, nil
+	rows, err := s.db.Query(
+		"SELECT id, username, password, is_default_password, created_at FROM users ORDER BY created_at",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		var isDefault int
+		if err := rows.Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list users: %w", err)
+		}
+		u.IsDefaultPassword = isDefault == 1
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	return users, nil
 }
 
 // CreateUser creates a new user with a bcrypt-hashed password.
 func (s *Store) CreateUser(username, password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	if err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
+	id := uuid.New().String()
+	_, err = s.db.Exec(
+		"INSERT INTO users (id, username, password, is_default_password) VALUES (?, ?, ?, 0)",
+		id, username, string(hash),
+	)
+	if err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
 	return nil
 }
 
@@ -164,12 +207,31 @@ func (s *Store) UpdatePassword(userID, newPassword string) error {
 
 // DeleteUser deletes a user. Fails if it's the last remaining user.
 func (s *Store) DeleteUser(id string) error {
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if count <= 1 {
+		return fmt.Errorf("cannot delete the last user")
+	}
+	_, err := s.db.Exec("DELETE FROM users WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
 	return nil
 }
 
 // HasDefaultPassword checks if a user still has the default password.
 func (s *Store) HasDefaultPassword(userID string) (bool, error) {
-	return false, nil
+	var isDefault int
+	err := s.db.QueryRow(
+		"SELECT is_default_password FROM users WHERE id = ?",
+		userID,
+	).Scan(&isDefault)
+	if err != nil {
+		return false, fmt.Errorf("has default password: %w", err)
+	}
+	return isDefault == 1, nil
 }
 
 // CreateForm creates a new form.
