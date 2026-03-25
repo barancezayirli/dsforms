@@ -21,6 +21,9 @@ func (m *mockUserStore) GetUserByID(id string) (store.User, error) {
 	if m.err != nil {
 		return store.User{}, m.err
 	}
+	if id != m.user.ID {
+		return store.User{}, fmt.Errorf("user %q not found", id)
+	}
 	return m.user, nil
 }
 

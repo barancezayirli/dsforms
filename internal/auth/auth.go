@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -127,6 +128,7 @@ func RequireAuth(us UserStore, secretKey string) func(http.Handler) http.Handler
 
 			user, err := us.GetUserByID(userID)
 			if err != nil {
+				log.Printf("auth: failed to load user %s: %v", userID, err)
 				http.Redirect(w, r, "/admin/login", http.StatusFound)
 				return
 			}

@@ -23,7 +23,7 @@ type User struct {
 	Username          string
 	IsDefaultPassword bool
 	CreatedAt         time.Time
-	PasswordHash      string
+	passwordHash      string
 }
 
 // Form represents a form endpoint.
@@ -138,7 +138,7 @@ func (s *Store) GetUserByUsername(username string) (User, error) {
 	err := s.db.QueryRow(
 		"SELECT id, username, password, is_default_password, created_at FROM users WHERE username = ?",
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &isDefault, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt)
 	if err != nil {
 		return User{}, fmt.Errorf("user not found: %w", err)
 	}
@@ -153,7 +153,7 @@ func (s *Store) GetUserByID(id string) (User, error) {
 	err := s.db.QueryRow(
 		"SELECT id, username, password, is_default_password, created_at FROM users WHERE id = ?",
 		id,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &isDefault, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt)
 	if err != nil {
 		return User{}, fmt.Errorf("get user by id: %w", err)
 	}
@@ -175,7 +175,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	for rows.Next() {
 		var u User
 		var isDefault int
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &isDefault, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt); err != nil {
 			return nil, fmt.Errorf("list users: %w", err)
 		}
 		u.IsDefaultPassword = isDefault == 1
@@ -261,6 +261,18 @@ func (s *Store) HasDefaultPassword(userID string) (bool, error) {
 		return false, fmt.Errorf("has default password: %w", err)
 	}
 	return isDefault == 1, nil
+}
+
+// CheckPassword verifies a plaintext password against the stored hash for a user.
+func (s *Store) CheckPassword(username, password string) (User, error) {
+	u, err := s.GetUserByUsername(username)
+	if err != nil {
+		return User{}, fmt.Errorf("check password: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.passwordHash), []byte(password)); err != nil {
+		return User{}, fmt.Errorf("check password: %w", err)
+	}
+	return u, nil
 }
 
 // CreateForm creates a new form.

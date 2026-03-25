@@ -73,7 +73,7 @@ func TestDefaultUserNotReseeded(t *testing.T) {
 		t.Fatalf("second New() error = %v", err)
 	}
 	u2, _ := s2.GetUserByUsername("admin")
-	err = bcrypt.CompareHashAndPassword([]byte(u2.PasswordHash), []byte("newpass"))
+	err = bcrypt.CompareHashAndPassword([]byte(u2.passwordHash), []byte("newpass"))
 	if err != nil {
 		t.Error("admin password was re-seeded, expected it to remain changed")
 	}
@@ -87,10 +87,10 @@ func TestCreateUserBcryptsPassword(t *testing.T) {
 		t.Fatalf("CreateUser error = %v", err)
 	}
 	u, _ := s.GetUserByUsername("alice")
-	if u.PasswordHash == "plaintext" {
+	if u.passwordHash == "plaintext" {
 		t.Error("password stored as plain text, expected bcrypt hash")
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte("plaintext")); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(u.passwordHash), []byte("plaintext")); err != nil {
 		t.Errorf("bcrypt verify failed: %v", err)
 	}
 }
@@ -429,5 +429,30 @@ func TestCreateSubmissionInvalidFormID(t *testing.T) {
 	err := s.CreateSubmission(Submission{ID: "s1", FormID: "nonexistent", RawData: `{}`})
 	if err == nil {
 		t.Fatal("expected foreign key error for nonexistent form_id, got nil")
+	}
+}
+
+func TestCheckPassword(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	// Default admin/admin should work
+	u, err := s.CheckPassword("admin", "admin")
+	if err != nil {
+		t.Fatalf("CheckPassword error = %v", err)
+	}
+	if u.Username != "admin" {
+		t.Errorf("Username = %q, want admin", u.Username)
+	}
+
+	// Wrong password should fail
+	_, err = s.CheckPassword("admin", "wrongpass")
+	if err == nil {
+		t.Fatal("expected error for wrong password, got nil")
+	}
+
+	// Wrong username should fail
+	_, err = s.CheckPassword("nonexistent", "admin")
+	if err == nil {
+		t.Fatal("expected error for nonexistent user, got nil")
 	}
 }

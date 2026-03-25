@@ -34,15 +34,6 @@ func Get(r *http.Request, w http.ResponseWriter, secretKey string) (string, stri
 		return "", ""
 	}
 
-	// Clear the cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-	})
-
 	// Split value into payload.signature
 	parts := strings.SplitN(c.Value, ".", 2)
 	if len(parts) != 2 {
@@ -69,6 +60,15 @@ func Get(r *http.Request, w http.ResponseWriter, secretKey string) (string, stri
 	if idx < 0 {
 		return "", ""
 	}
+
+	// Clear the cookie only after successful validation
+	http.SetCookie(w, &http.Cookie{
+		Name:     CookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
 
 	return string(decoded[:idx]), string(decoded[idx+1:])
 }
