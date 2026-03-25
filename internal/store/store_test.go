@@ -279,3 +279,116 @@ func TestDeleteFormCascades(t *testing.T) {
 		t.Errorf("submissions len = %d, want 0 after cascade delete", len(subs))
 	}
 }
+
+func TestCreateSubmissionListSubmissions(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	sub := Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice","email":"a@b.com"}`, IP: "1.2.3.4"}
+	if err := s.CreateSubmission(sub); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	subs, err := s.ListSubmissions("f1")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if len(subs) != 1 {
+		t.Fatalf("len = %d, want 1", len(subs))
+	}
+	if subs[0].Data["name"] != "Alice" {
+		t.Errorf("Data[name] = %q, want %q", subs[0].Data["name"], "Alice")
+	}
+	if subs[0].IP != "1.2.3.4" {
+		t.Errorf("IP = %q, want %q", subs[0].IP, "1.2.3.4")
+	}
+	if subs[0].Read {
+		t.Error("Read = true, want false for new submission")
+	}
+}
+
+func TestMarkRead(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	if err := s.MarkRead("s1"); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if !subs[0].Read {
+		t.Error("Read = false, want true after MarkRead")
+	}
+}
+
+func TestMarkAllRead(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s2", FormID: "f1", RawData: `{}`})
+	if err := s.MarkAllRead("f1"); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	for _, sub := range subs {
+		if !sub.Read {
+			t.Errorf("submission %s Read = false, want true", sub.ID)
+		}
+	}
+}
+
+func TestDeleteSubmission(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	if err := s.DeleteSubmission("s1"); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 0 {
+		t.Errorf("len = %d, want 0", len(subs))
+	}
+}
+
+func TestUnreadCount(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s2", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s3", FormID: "f1", RawData: `{}`})
+
+	count, err := s.UnreadCount("f1")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if count != 3 {
+		t.Errorf("UnreadCount = %d, want 3", count)
+	}
+
+	_ = s.MarkRead("s1")
+	count, _ = s.UnreadCount("f1")
+	if count != 2 {
+		t.Errorf("UnreadCount after read = %d, want 2", count)
+	}
+
+	_ = s.DeleteSubmission("s2")
+	count, _ = s.UnreadCount("f1")
+	if count != 1 {
+		t.Errorf("UnreadCount after delete = %d, want 1", count)
+	}
+}
+
+func TestListSubmissionsEmpty(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	subs, err := s.ListSubmissions("f1")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if len(subs) != 0 {
+		t.Errorf("len = %d, want 0", len(subs))
+	}
+}

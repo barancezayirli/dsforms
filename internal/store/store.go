@@ -370,15 +370,31 @@ func (s *Store) MarkRead(submissionID string) error {
 
 // MarkAllRead marks all submissions for a form as read.
 func (s *Store) MarkAllRead(formID string) error {
+	_, err := s.db.Exec("UPDATE submissions SET read = 1 WHERE form_id = ?", formID)
+	if err != nil {
+		return fmt.Errorf("mark all read: %w", err)
+	}
 	return nil
 }
 
 // DeleteSubmission deletes a submission.
 func (s *Store) DeleteSubmission(id string) error {
+	_, err := s.db.Exec("DELETE FROM submissions WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete submission: %w", err)
+	}
 	return nil
 }
 
 // UnreadCount returns the number of unread submissions for a form.
 func (s *Store) UnreadCount(formID string) (int, error) {
-	return 0, nil
+	var count int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM submissions WHERE form_id = ? AND read = 0",
+		formID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("unread count: %w", err)
+	}
+	return count, nil
 }
