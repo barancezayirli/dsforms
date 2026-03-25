@@ -1,11 +1,13 @@
 # DSForms — Session Progress
 
-## Status: session 4 complete
+## Status: session 5 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
 - Session 2 — Store (database layer)
 - Session 3 — Rate limiter & security middleware
+- Session 4 — Auth (session cookies + middleware + flash)
+- Session 5 — Submit handler
 - Session 4 — Auth (session cookies + middleware + flash)
 
 ## Key decisions log
@@ -170,6 +172,48 @@
 - ValidateSession distinct error logging — all cases redirect to login correctly
 - Future timestamp rejection — requires compromised HMAC key
 - Flash parameter validation / size limits — flash set by our own code only
+
+### Known issues
+- None
+
+---
+
+## Session 5 — Submit handler
+**Branch:** `session/5-submit`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `internal/mail/mail.go`
+- `internal/mail/mail_test.go`
+- `internal/handler/submit.go`
+- `internal/handler/submit_test.go`
+
+### Files modified
+- `main.go` — wired store, mailer, submit handler, rate limiter on POST /f/{formID}
+- `main_test.go` — added rate limit middleware tests
+
+### Test summary
+- 19 handler tests + 9 mail tests + 2 rate limit tests = 30 new tests
+- Total project: 91+ top-level tests across 8 packages
+- go test -race: clean
+- go vet: clean
+
+### Decisions made
+- Notifier interface defined in handler package (not mail) per CLAUDE.md "interfaces in consuming package"
+- MockMailer uses channel-based Wait() for deterministic async email testing (no time.Sleep)
+- GetForm distinguishes sql.ErrNoRows (404) from DB errors (500 + log)
+- Async email goroutine has panic recovery with form/submission context in logs
+- _redirect open redirect is by design — static site developer controls the HTML form
+- MockMailer stays in mail.go (not _test.go) because handler tests need cross-package access
+- ExtractIP exported from handler package, reused in main.go rateLimitMiddleware
+
+### Deferred items
+- Open redirect validation on _redirect field — by design per DSFORMS_PLAN.md §6
+- MockMailer in production code — acceptable for cross-package test access
+- Email retry mechanism / notification queue — future improvement
+- EmailTo validation before SMTP send — future improvement
+- Rate limiter JSON encode error logging — low impact
 
 ### Known issues
 - None
