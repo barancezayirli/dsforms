@@ -90,6 +90,9 @@ func TestCreateUserBcryptsPassword(t *testing.T) {
 	if u.passwordHash == "plaintext" {
 		t.Error("password stored as plain text, expected bcrypt hash")
 	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.passwordHash), []byte("plaintext")); err != nil {
+		t.Errorf("bcrypt verify failed: %v", err)
+	}
 }
 
 func TestGetUserByUsername(t *testing.T) {
@@ -390,5 +393,41 @@ func TestListSubmissionsEmpty(t *testing.T) {
 	}
 	if len(subs) != 0 {
 		t.Errorf("len = %d, want 0", len(subs))
+	}
+}
+
+func TestGetUserByUsernameNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_, err := s.GetUserByUsername("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent username, got nil")
+	}
+}
+
+func TestGetUserByIDNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_, err := s.GetUserByID("nonexistent-id")
+	if err == nil {
+		t.Fatal("expected error for nonexistent user ID, got nil")
+	}
+}
+
+func TestGetFormNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_, err := s.GetForm("nonexistent-id")
+	if err == nil {
+		t.Fatal("expected error for nonexistent form ID, got nil")
+	}
+}
+
+func TestCreateSubmissionInvalidFormID(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	err := s.CreateSubmission(Submission{ID: "s1", FormID: "nonexistent", RawData: `{}`})
+	if err == nil {
+		t.Fatal("expected foreign key error for nonexistent form_id, got nil")
 	}
 }

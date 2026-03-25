@@ -116,10 +116,19 @@ func New(path string) (*Store, error) {
 		if err != nil {
 			return nil, fmt.Errorf("seed default user: %w", err)
 		}
+	}
+
+	var hasDefault int
+	if err := db.QueryRow("SELECT COUNT(*) FROM users WHERE is_default_password = 1").Scan(&hasDefault); err == nil && hasDefault > 0 {
 		log.Println("⚠  WARNING: Default admin credentials are active (admin/admin). Change your password immediately at /admin/users.")
 	}
 
 	return &Store{db: db}, nil
+}
+
+// Close closes the underlying database connection.
+func (s *Store) Close() error {
+	return s.db.Close()
 }
 
 // GetUserByUsername looks up a user by username.
@@ -201,30 +210,44 @@ func (s *Store) UpdatePassword(userID, newPassword string) error {
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
-	_, err = s.db.Exec(
+	result, err := s.db.Exec(
 		"UPDATE users SET password = ?, is_default_password = 0 WHERE id = ?",
 		string(hash), userID,
 	)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("update password: user not found")
+	}
 	return nil
 }
 
 // DeleteUser deletes a user. Fails if it's the last remaining user.
 func (s *Store) DeleteUser(id string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	defer tx.Rollback()
+
 	var count int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+	if err := tx.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	if count <= 1 {
 		return fmt.Errorf("cannot delete the last user")
 	}
-	_, err := s.db.Exec("DELETE FROM users WHERE id = ?", id)
+	result, err := tx.Exec("DELETE FROM users WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
-	return nil
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("delete user: user not found")
+	}
+	return tx.Commit()
 }
 
 // HasDefaultPassword checks if a user still has the default password.
@@ -349,7 +372,8 @@ func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
 		sub.RawData = rawData
 		sub.Read = readInt == 1
 		if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
-			sub.Data = make(map[string]string)
+			log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
+			sub.Data = map[string]string{"_raw": rawData}
 		}
 		subs = append(subs, sub)
 	}
