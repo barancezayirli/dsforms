@@ -181,3 +181,23 @@ func TestLoginGuardIndependentIPs(t *testing.T) {
 		t.Fatal("different IP should not be locked")
 	}
 }
+
+func TestNewLimiterPanicsOnNilNow(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for nil now")
+		}
+	}()
+	NewLimiter(5, 6, nil)
+}
+
+func TestNewLoginGuardPanicsOnNilNow(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for nil now")
+		}
+	}()
+	NewLoginGuard(5, 15*time.Minute, nil)
+}

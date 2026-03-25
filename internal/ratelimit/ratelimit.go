@@ -27,6 +27,9 @@ func NewLimiter(burst, perMinute int, now func() time.Time) *Limiter {
 	if perMinute <= 0 {
 		panic("ratelimit: perMinute must be > 0")
 	}
+	if now == nil {
+		panic("ratelimit: now function must not be nil")
+	}
 	return &Limiter{
 		buckets: make(map[string]*bucket),
 		burst:   burst,
@@ -40,24 +43,22 @@ func (l *Limiter) Allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	t := l.now()
 	b, ok := l.buckets[ip]
 	if !ok {
-		b = &bucket{
-			tokens:   float64(l.burst),
-			lastSeen: l.now(),
-		}
+		b = &bucket{tokens: float64(l.burst), lastSeen: t}
 		l.buckets[ip] = b
 	} else {
-		elapsed := l.now().Sub(b.lastSeen)
+		elapsed := t.Sub(b.lastSeen)
 		b.tokens += elapsed.Seconds() * l.rate
 		if b.tokens > float64(l.burst) {
 			b.tokens = float64(l.burst)
 		}
-		b.lastSeen = l.now()
+		b.lastSeen = t
 	}
 
 	if b.tokens >= 1 {
-		b.tokens -= 1
+		b.tokens--
 		return true
 	}
 	return false
@@ -104,6 +105,9 @@ func NewLoginGuard(maxFails int, lockout time.Duration, now func() time.Time) *L
 	if maxFails <= 0 {
 		panic("ratelimit: maxFails must be > 0")
 	}
+	if now == nil {
+		panic("ratelimit: now function must not be nil")
+	}
 	return &LoginGuard{
 		attempts: make(map[string]*loginState),
 		maxFails: maxFails,
@@ -117,15 +121,16 @@ func (g *LoginGuard) RecordFailure(ip string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	t := g.now()
 	s, ok := g.attempts[ip]
 	if !ok {
 		s = &loginState{}
 		g.attempts[ip] = s
 	}
 	s.failures++
-	s.lastSeen = g.now()
+	s.lastSeen = t
 	if s.failures >= g.maxFails {
-		s.lockedUntil = g.now().Add(g.lockout)
+		s.lockedUntil = t.Add(g.lockout)
 	}
 }
 
@@ -153,8 +158,9 @@ func (g *LoginGuard) cleanup(maxAge time.Duration) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	t := g.now()
 	for ip, s := range g.attempts {
-		if g.now().Sub(s.lastSeen) > maxAge {
+		if t.Sub(s.lastSeen) > maxAge && !t.Before(s.lockedUntil) {
 			delete(g.attempts, ip)
 		}
 	}
