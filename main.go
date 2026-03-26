@@ -312,6 +312,9 @@ func main() {
 			From:    cfg.SMTPFrom,
 			BaseURL: cfg.BaseURL,
 		}
+		log.Printf("email notifications enabled (SMTP: %s)", cfg.SMTPHost)
+	} else {
+		log.Println("email notifications disabled (SMTP_HOST or SMTP_FROM not set)")
 	}
 
 	webhookSender := webhook.NewSender()
