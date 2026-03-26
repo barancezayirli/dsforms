@@ -1,0 +1,15 @@
+# Development overrides — adds Mailpit for local email testing
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# View emails at http://localhost:8025
+
+services:
+  dsforms:
+    depends_on:
+      - mailpit
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP

@@ -53,22 +53,6 @@ func TestLoad(t *testing.T) {
 			wantPanic: true,
 		},
 		{
-			name: "missing SMTP_USER panics",
-			setup: func(t *testing.T) {
-				setAllRequired(t)
-				t.Setenv("SMTP_USER", "")
-			},
-			wantPanic: true,
-		},
-		{
-			name: "missing SMTP_PASS panics",
-			setup: func(t *testing.T) {
-				setAllRequired(t)
-				t.Setenv("SMTP_PASS", "")
-			},
-			wantPanic: true,
-		},
-		{
 			name: "missing SMTP_FROM panics",
 			setup: func(t *testing.T) {
 				setAllRequired(t)

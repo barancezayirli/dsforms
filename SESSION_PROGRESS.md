@@ -1,6 +1,6 @@
 # DSForms — Session Progress
 
-## Status: session 10 complete
+## Status: session 11 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
@@ -14,6 +14,7 @@
 - Session 9 — Users & account management
 - Refactor: DB-backed session tokens (between S8-S9)
 - Session 10 — Backup + CLI
+- Session 11 — Docker & deployment
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -414,6 +415,42 @@
 - backup_log table tracking (originally planned for S2, not needed for MVP)
 - CLI tests via os/exec subprocess — tested via underlying store functions instead
 - Store.Reopen concurrency safety (mutex) — address in Session 12
+
+### Known issues
+- None
+
+---
+
+## Session 11 — Docker & deployment
+**Branch:** `session/11-docker`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `Dockerfile` — multistage (golang:1.23-alpine builder, alpine:3.19 runtime), CGO_ENABLED=0
+- `docker-compose.yml` — dsforms + mailpit (SMTP dev server with web UI)
+- `Makefile` — test, build, docker-build, docker-up, docker-down, lint
+
+### Files modified
+- `.env.example` — Mailpit as default SMTP, production examples (Gmail, Resend, Brevo)
+- `internal/config/config.go` — SMTP_USER/SMTP_PASS now optional (was requireEnv)
+- `internal/config/config_test.go` — removed SMTP_USER/SMTP_PASS panic tests
+- `internal/mail/mail.go` — skip SMTP auth when credentials empty
+
+### Test summary
+- 2 config tests removed (SMTP_USER/SMTP_PASS no longer required)
+- All existing tests pass
+- go test -race: clean
+
+### Decisions made
+- Added Mailpit to docker-compose for out-of-the-box email testing
+- SMTP_USER/SMTP_PASS made optional to support auth-free SMTP (Mailpit)
+- Mailer skips PlainAuth when credentials empty
+- .env.example documents 3 production SMTP providers with setup links
+- docker-compose uses depends_on for mailpit → dsforms ordering
+
+### Deferred items
+- Integration-level Docker tests (docker build, healthz check, volume persistence) — manual verification
 
 ### Known issues
 - None
