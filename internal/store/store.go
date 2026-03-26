@@ -31,11 +31,13 @@ type User struct {
 
 // Form represents a form endpoint.
 type Form struct {
-	ID        string
-	Name      string
-	EmailTo   string
-	Redirect  string
-	CreatedAt time.Time
+	ID            string
+	Name          string
+	EmailTo       string
+	Redirect      string
+	WebhookURL    string
+	WebhookFormat string
+	CreatedAt     time.Time
 }
 
 // FormSummary is a Form with its unread submission count.
@@ -65,11 +67,13 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS forms (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    email_to    TEXT NOT NULL,
-    redirect    TEXT NOT NULL DEFAULT '',
-    created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    email_to       TEXT NOT NULL DEFAULT '',
+    redirect       TEXT NOT NULL DEFAULT '',
+    webhook_url    TEXT NOT NULL DEFAULT '',
+    webhook_format TEXT NOT NULL DEFAULT '',
+    created_at     DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
@@ -102,6 +106,18 @@ func runMigrations(db *sql.DB) error {
 	return nil
 }
 
+// runAlterMigrations adds columns to existing tables. Errors are silently
+// ignored because SQLite returns an error when a column already exists.
+func runAlterMigrations(db *sql.DB) {
+	alters := []string{
+		"ALTER TABLE forms ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE forms ADD COLUMN webhook_format TEXT NOT NULL DEFAULT ''",
+	}
+	for _, q := range alters {
+		_, _ = db.Exec(q) // silently ignore "duplicate column" errors
+	}
+}
+
 // New opens a SQLite database and runs migrations.
 func New(path string) (*Store, error) {
 	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
@@ -117,6 +133,7 @@ func New(path string) (*Store, error) {
 	if err := runMigrations(db); err != nil {
 		return nil, err
 	}
+	runAlterMigrations(db)
 
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
@@ -173,6 +190,7 @@ func (s *Store) Reopen(path string) error {
 		newDB.Close()
 		return fmt.Errorf("reopen: %w", err)
 	}
+	runAlterMigrations(newDB)
 	// Close old connection; ignore error — may already be closed by Import.
 	if s.db != nil {
 		s.db.Close()
@@ -328,8 +346,8 @@ func (s *Store) CheckPassword(username, password string) (User, error) {
 // CreateForm creates a new form.
 func (s *Store) CreateForm(f Form) error {
 	_, err := s.db.Exec(
-		"INSERT INTO forms (id, name, email_to, redirect) VALUES (?, ?, ?, ?)",
-		f.ID, f.Name, f.EmailTo, f.Redirect,
+		"INSERT INTO forms (id, name, email_to, redirect, webhook_url, webhook_format) VALUES (?, ?, ?, ?, ?, ?)",
+		f.ID, f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat,
 	)
 	if err != nil {
 		return fmt.Errorf("create form: %w", err)
@@ -341,9 +359,9 @@ func (s *Store) CreateForm(f Form) error {
 func (s *Store) GetForm(id string) (Form, error) {
 	var f Form
 	err := s.db.QueryRow(
-		"SELECT id, name, email_to, redirect, created_at FROM forms WHERE id = ?",
+		"SELECT id, name, email_to, redirect, webhook_url, webhook_format, created_at FROM forms WHERE id = ?",
 		id,
-	).Scan(&f.ID, &f.Name, &f.EmailTo, &f.Redirect, &f.CreatedAt)
+	).Scan(&f.ID, &f.Name, &f.EmailTo, &f.Redirect, &f.WebhookURL, &f.WebhookFormat, &f.CreatedAt)
 	if err != nil {
 		return Form{}, fmt.Errorf("get form: %w", err)
 	}
@@ -353,7 +371,7 @@ func (s *Store) GetForm(id string) (Form, error) {
 // ListForms returns all forms with unread counts.
 func (s *Store) ListForms() ([]FormSummary, error) {
 	rows, err := s.db.Query(`
-		SELECT f.id, f.name, f.email_to, f.redirect, f.created_at,
+		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at,
 		       COUNT(CASE WHEN s.read = 0 THEN 1 END) as unread_count
 		FROM forms f
 		LEFT JOIN submissions s ON s.form_id = f.id
@@ -368,7 +386,7 @@ func (s *Store) ListForms() ([]FormSummary, error) {
 	var forms []FormSummary
 	for rows.Next() {
 		var fs FormSummary
-		if err := rows.Scan(&fs.ID, &fs.Name, &fs.EmailTo, &fs.Redirect, &fs.CreatedAt, &fs.UnreadCount); err != nil {
+		if err := rows.Scan(&fs.ID, &fs.Name, &fs.EmailTo, &fs.Redirect, &fs.WebhookURL, &fs.WebhookFormat, &fs.CreatedAt, &fs.UnreadCount); err != nil {
 			return nil, fmt.Errorf("list forms: %w", err)
 		}
 		forms = append(forms, fs)
@@ -382,8 +400,8 @@ func (s *Store) ListForms() ([]FormSummary, error) {
 // UpdateForm updates a form's fields.
 func (s *Store) UpdateForm(f Form) error {
 	_, err := s.db.Exec(
-		"UPDATE forms SET name = ?, email_to = ?, redirect = ? WHERE id = ?",
-		f.Name, f.EmailTo, f.Redirect, f.ID,
+		"UPDATE forms SET name = ?, email_to = ?, redirect = ?, webhook_url = ?, webhook_format = ? WHERE id = ?",
+		f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update form: %w", err)

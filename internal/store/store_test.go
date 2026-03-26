@@ -737,3 +737,61 @@ func TestReopenRunsMigrations(t *testing.T) {
 		t.Errorf("CreateUser after reopen failed: %v", err)
 	}
 }
+
+func TestCreateFormWithWebhook(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	f := Form{
+		ID:            "form-wh",
+		Name:          "Webhook Form",
+		EmailTo:       "me@example.com",
+		WebhookURL:    "https://hooks.slack.com/services/T00/B00/xxx",
+		WebhookFormat: "slack",
+	}
+	if err := s.CreateForm(f); err != nil {
+		t.Fatalf("CreateForm error = %v", err)
+	}
+	got, err := s.GetForm("form-wh")
+	if err != nil {
+		t.Fatalf("GetForm error = %v", err)
+	}
+	if got.WebhookURL != "https://hooks.slack.com/services/T00/B00/xxx" {
+		t.Errorf("WebhookURL = %q, want webhook URL", got.WebhookURL)
+	}
+	if got.WebhookFormat != "slack" {
+		t.Errorf("WebhookFormat = %q, want slack", got.WebhookFormat)
+	}
+}
+
+func TestUpdateFormWebhookFields(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	f := Form{ID: "form-wh2", Name: "Test", EmailTo: "a@b.com"}
+	_ = s.CreateForm(f)
+	f.WebhookURL = "https://discord.com/api/webhooks/123/abc"
+	f.WebhookFormat = "discord"
+	if err := s.UpdateForm(f); err != nil {
+		t.Fatalf("UpdateForm error = %v", err)
+	}
+	got, _ := s.GetForm("form-wh2")
+	if got.WebhookURL != "https://discord.com/api/webhooks/123/abc" {
+		t.Errorf("WebhookURL = %q, want discord URL", got.WebhookURL)
+	}
+	if got.WebhookFormat != "discord" {
+		t.Errorf("WebhookFormat = %q, want discord", got.WebhookFormat)
+	}
+}
+
+func TestGetFormDefaultWebhookEmpty(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	f := Form{ID: "form-no-wh", Name: "NoWH", EmailTo: "a@b.com"}
+	_ = s.CreateForm(f)
+	got, _ := s.GetForm("form-no-wh")
+	if got.WebhookURL != "" {
+		t.Errorf("WebhookURL = %q, want empty", got.WebhookURL)
+	}
+	if got.WebhookFormat != "" {
+		t.Errorf("WebhookFormat = %q, want empty", got.WebhookFormat)
+	}
+}
