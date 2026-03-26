@@ -1,6 +1,6 @@
 # DSForms — Session Progress
 
-## Status: session 8 complete
+## Status: session 9 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
@@ -11,6 +11,8 @@
 - Session 6 — Auth handlers & login UI
 - Session 7 — Admin UI: dashboard & forms CRUD
 - Session 8 — Submission reader
+- Session 9 — Users & account management
+- Refactor: DB-backed session tokens (between S8-S9)
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -333,6 +335,40 @@
 
 ### Deferred items
 - CSV flush error check — address in Session 12 (polish)
+
+### Known issues
+- None
+
+---
+
+## Session 9 — Users & account management
+**Branch:** `session/9-users`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `templates/users.html`
+- `templates/users_new.html`
+- `templates/account.html`
+- `internal/handler/users.go`
+- `internal/handler/users_test.go`
+
+### Files modified
+- `main.go` — wired UsersHandler + 6 user routes + template cloning for 3 new templates
+
+### Test summary
+- 19 new tests (total project: 163 across 8 packages)
+- go test -race: clean
+- go vet: clean
+
+### Decisions made
+- Separate users_new.html template for add user form (not inline in users.html)
+- UpdatePassword creates new session after deleting all old ones (keeps current browser logged in)
+- DeleteUser checks self-deletion via context before calling store (clear error message)
+- Warning banner tests use account page template with IsDefaultPassword check
+
+### Deferred items
+- None
 
 ### Known issues
 - None

@@ -1,0 +1,32 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Account Settings</h1>
+</div>
+
+<p class="text-muted" style="margin-bottom:20px">Logged in as <strong>{{.CurrentUser.Username}}</strong></p>
+
+<div class="card" style="max-width:500px">
+  <div class="card-head">Change Password</div>
+  <div class="card-body">
+    {{if .Error}}
+    <div class="form-error-banner">{{.Error}}</div>
+    {{end}}
+    <form method="POST" action="/admin/account/password">
+      <div class="form-group">
+        <label for="current_password">Current Password</label>
+        <input type="password" id="current_password" name="current_password" required>
+      </div>
+      <div class="form-group">
+        <label for="new_password">New Password</label>
+        <input type="password" id="new_password" name="new_password" required>
+      </div>
+      <div class="form-group">
+        <label for="confirm_password">Confirm New Password</label>
+        <input type="password" id="confirm_password" name="confirm_password" required>
+      </div>
+      <button type="submit" class="btn btn-mint" style="margin-top:8px">Update Password</button>
+    </form>
+  </div>
+</div>
+{{end}}
