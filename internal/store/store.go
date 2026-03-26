@@ -94,6 +94,14 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 `
 
+// runMigrations applies the schema to db. Safe to call on an existing DB (idempotent).
+func runMigrations(db *sql.DB) error {
+	if _, err := db.Exec(schema); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+	return nil
+}
+
 // New opens a SQLite database and runs migrations.
 func New(path string) (*Store, error) {
 	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
@@ -106,8 +114,8 @@ func New(path string) (*Store, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	if _, err := db.Exec(schema); err != nil {
-		return nil, fmt.Errorf("run migrations: %w", err)
+	if err := runMigrations(db); err != nil {
+		return nil, err
 	}
 
 	var count int
@@ -141,6 +149,36 @@ func New(path string) (*Store, error) {
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// DB returns the underlying *sql.DB for backup operations.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
+// Reopen closes the current database and opens a new one at the given path.
+// Runs migrations on the new database.
+func (s *Store) Reopen(path string) error {
+	if err := s.db.Close(); err != nil {
+		return fmt.Errorf("reopen: close old db: %w", err)
+	}
+
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("reopen: open new db: %w", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("reopen: ping: %w", err)
+	}
+
+	if err := runMigrations(db); err != nil {
+		return fmt.Errorf("reopen: %w", err)
+	}
+
+	s.db = db
+	return nil
 }
 
 // GetUserByUsername looks up a user by username.
