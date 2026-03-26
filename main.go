@@ -82,13 +82,16 @@ func main() {
 	defer s.Close()
 
 	// Parse base template once, then clone it for each page that extends it.
-	baseTmpl, err := template.ParseFS(templateFS, "templates/base.html")
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+	}
+	baseTmpl, err := template.New("base").Funcs(funcMap).ParseFS(templateFS, "templates/base.html")
 	if err != nil {
 		log.Fatalf("failed to parse base template: %v", err)
 	}
 
 	templates := make(map[string]*template.Template)
-	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html"} {
+	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html"} {
 		t, err := baseTmpl.Clone()
 		if err != nil {
 			log.Fatalf("failed to clone base template: %v", err)
@@ -166,6 +169,11 @@ func main() {
 		r.Get("/admin/forms/{id}/edit", adminHandler.EditFormPage)
 		r.Post("/admin/forms/{id}/edit", adminHandler.EditForm)
 		r.Post("/admin/forms/{id}/delete", adminHandler.DeleteForm)
+		r.Get("/admin/forms/{id}", adminHandler.FormDetail)
+		r.Post("/admin/forms/{id}/read-all", adminHandler.MarkAllRead)
+		r.Get("/admin/forms/{id}/export", adminHandler.ExportCSV)
+		r.Post("/admin/submissions/{id}/read", adminHandler.MarkRead)
+		r.Post("/admin/submissions/{id}/delete", adminHandler.DeleteSubmission)
 	})
 
 	log.Printf("starting server on %s", cfg.ListenAddr)
