@@ -25,8 +25,19 @@ type Mailer struct {
 func (m *Mailer) SendNotification(form store.Form, sub store.Submission) error {
 	msg := m.buildMessage(form, sub)
 	addr := net.JoinHostPort(m.Host, fmt.Sprintf("%d", m.Port))
-	auth := smtp.PlainAuth("", m.User, m.Pass, m.Host)
-	if err := smtp.SendMail(addr, auth, m.User, []string{form.EmailTo}, []byte(msg)); err != nil {
+
+	// Skip auth if no credentials (e.g., Mailpit for development)
+	var auth smtp.Auth
+	if m.User != "" && m.Pass != "" {
+		auth = smtp.PlainAuth("", m.User, m.Pass, m.Host)
+	}
+
+	from := m.User
+	if from == "" {
+		from = m.From
+	}
+
+	if err := smtp.SendMail(addr, auth, from, []string{form.EmailTo}, []byte(msg)); err != nil {
 		return fmt.Errorf("send notification: %w", err)
 	}
 	return nil
