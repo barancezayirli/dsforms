@@ -1,0 +1,39 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Users</h1>
+  <a class="btn btn-mint" href="/admin/users/new">+ Add user</a>
+</div>
+
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Created</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Users}}
+      <tr>
+        <td>
+          {{.Username}}
+          {{if .IsYou}}<span class="badge" style="margin-left:6px;font-size:11px">you</span>{{end}}
+        </td>
+        <td class="text-muted">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
+        <td class="actions">
+          {{if .IsYou}}
+          <span class="text-muted" style="font-size:12px">Cannot delete yourself</span>
+          {{else}}
+          <form method="POST" action="/admin/users/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete user {{.Username}}?')">
+            <button type="submit" class="btn-ghost btn-ghost-danger">Delete</button>
+          </form>
+          {{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
