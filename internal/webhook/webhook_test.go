@@ -295,18 +295,77 @@ func TestSend_EmptyURL(t *testing.T) {
 	}
 }
 
-func TestSend_Timeout(t *testing.T) {
+func TestSend_SlackFormat(t *testing.T) {
 	t.Parallel()
+	var receivedBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(6 * time.Second)
+		receivedBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
 	sender := NewSender()
+	form := store.Form{ID: "f1", Name: "Test", WebhookURL: srv.URL, WebhookFormat: "slack"}
+	sub := store.Submission{Data: map[string]string{"name": "Jane"}}
+	if err := sender.Send(form, sub); err != nil {
+		t.Fatalf("Send error: %v", err)
+	}
+	// Verify it's a Slack payload (has "blocks" key)
+	var result map[string]interface{}
+	if err := json.Unmarshal(receivedBody, &result); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if _, ok := result["blocks"]; !ok {
+		t.Error("expected Slack payload with 'blocks' key")
+	}
+	if _, ok := result["text"]; !ok {
+		t.Error("expected Slack payload with 'text' key")
+	}
+}
+
+func TestSend_DiscordFormat(t *testing.T) {
+	t.Parallel()
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sender := NewSender()
+	form := store.Form{ID: "f1", Name: "Test", WebhookURL: srv.URL, WebhookFormat: "discord"}
+	sub := store.Submission{Data: map[string]string{"name": "Jane"}}
+	if err := sender.Send(form, sub); err != nil {
+		t.Fatalf("Send error: %v", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(receivedBody, &result); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if _, ok := result["embeds"]; !ok {
+		t.Error("expected Discord payload with 'embeds' key")
+	}
+	if result["username"] != "DSForms" {
+		t.Errorf("username = %v, want DSForms", result["username"])
+	}
+}
+
+func TestSend_Timeout(t *testing.T) {
+	t.Parallel()
+	// unblock is closed by the test after Send returns to let the handler finish.
+	unblock := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-unblock
+	}))
+	defer srv.Close()
+
+	sender := &Sender{
+		Client: &http.Client{Timeout: 50 * time.Millisecond},
+	}
 	form := store.Form{ID: "f1", Name: "Test", WebhookURL: srv.URL, WebhookFormat: "generic"}
 	sub := store.Submission{Data: map[string]string{"name": "Jane"}}
 	err := sender.Send(form, sub)
+	close(unblock) // let handler goroutine exit so srv.Close() doesn't block
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
