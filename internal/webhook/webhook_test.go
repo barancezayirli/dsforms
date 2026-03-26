@@ -3,8 +3,13 @@ package webhook
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/youruser/dsforms/internal/store"
 )
@@ -229,5 +234,80 @@ func TestBuildDiscord_EmbedMeta(t *testing.T) {
 	}
 	if embed.Timestamp == "" {
 		t.Error("timestamp is empty")
+	}
+}
+
+// --- Send HTTP tests ---
+
+func TestSend_Success(t *testing.T) {
+	t.Parallel()
+	var called atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.Add(1)
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", r.Header.Get("Content-Type"))
+		}
+		body, _ := io.ReadAll(r.Body)
+		if len(body) == 0 {
+			t.Error("empty body")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sender := NewSender()
+	form := store.Form{ID: "f1", Name: "Test", WebhookURL: srv.URL, WebhookFormat: "generic"}
+	sub := store.Submission{Data: map[string]string{"name": "Jane"}}
+	err := sender.Send(form, sub)
+	if err != nil {
+		t.Fatalf("Send error: %v", err)
+	}
+	if called.Load() != 1 {
+		t.Errorf("server called %d times, want 1", called.Load())
+	}
+}
+
+func TestSend_ServerError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	}))
+	defer srv.Close()
+
+	sender := NewSender()
+	form := store.Form{ID: "f1", Name: "Test", WebhookURL: srv.URL, WebhookFormat: "generic"}
+	sub := store.Submission{Data: map[string]string{"name": "Jane"}}
+	err := sender.Send(form, sub)
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
+func TestSend_EmptyURL(t *testing.T) {
+	t.Parallel()
+	sender := NewSender()
+	form := store.Form{ID: "f1", Name: "Test", WebhookURL: "", WebhookFormat: "generic"}
+	sub := store.Submission{Data: map[string]string{"name": "Jane"}}
+	err := sender.Send(form, sub)
+	if err != nil {
+		t.Fatalf("expected nil for empty URL, got: %v", err)
+	}
+}
+
+func TestSend_Timeout(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(6 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sender := NewSender()
+	form := store.Form{ID: "f1", Name: "Test", WebhookURL: srv.URL, WebhookFormat: "generic"}
+	sub := store.Submission{Data: map[string]string{"name": "Jane"}}
+	err := sender.Send(form, sub)
+	if err == nil {
+		t.Fatal("expected timeout error")
 	}
 }
