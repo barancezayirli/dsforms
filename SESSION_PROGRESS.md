@@ -1,6 +1,6 @@
 # DSForms — Session Progress
 
-## Status: session 7 complete
+## Status: session 8 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
@@ -10,6 +10,7 @@
 - Session 5 — Submit handler
 - Session 6 — Auth handlers & login UI
 - Session 7 — Admin UI: dashboard & forms CRUD
+- Session 8 — Submission reader
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -293,6 +294,44 @@
 
 ### Deferred items
 - success.html CSS duplication (standalone page by design) — add sync comment later
+
+### Known issues
+- None
+
+---
+
+## Session 8 — Submission reader
+**Branch:** `session/8-reader`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `templates/form_detail.html` — paginated submissions table
+- `templates/submission_detail.html` — individual submission view
+
+### Files modified
+- `templates/base.html` — table styles (unread-dot, sub-name, pagination), field styles
+- `internal/handler/admin.go` — added FormDetail (paginated), SubmissionDetail (new), MarkRead, MarkAllRead, DeleteSubmission, ExportCSV
+- `internal/handler/admin_test.go` — reader tests including pagination + submission detail
+- `internal/store/store.go` — added GetSubmission, ListSubmissionsPaged, CountSubmissions
+- `internal/store/store_test.go` — tests for new store methods
+- `main.go` — FuncMap, template cloning for form_detail + submission_detail, 6 new routes
+- `.gitignore` — added .playwright-mcp/ and .remember/
+
+### Test summary
+- go test -race: clean across all 8 packages
+- go vet: clean
+
+### Decisions made
+- Refactored from two-pane "email client" to table + detail page (per user feedback — simpler for server-rendered HTML)
+- Added pagination (20 per page) with ListSubmissionsPaged + CountSubmissions
+- Separate SubmissionDetail page (GET /admin/forms/{formID}/submissions/{subID}) for viewing individual submissions
+- Auto-mark-read happens on SubmissionDetail view (not on list page)
+- CSV filename uses form ID (not name) to prevent header injection
+- Go template `or` with piped `index` doesn't work — replaced with if/else blocks
+
+### Deferred items
+- CSV flush error check — address in Session 12 (polish)
 
 ### Known issues
 - None

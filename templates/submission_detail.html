@@ -1,0 +1,39 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">
+    <a href="/admin/forms/{{.Form.ID}}" class="text-muted" style="text-decoration:none">&larr; {{.Form.Name}}</a>
+  </h1>
+  <div style="display:flex;gap:8px">
+    {{if not .Submission.Read}}
+    <form method="POST" action="/admin/submissions/{{.Submission.ID}}/read" style="display:inline">
+      <button type="submit" class="btn">Mark read</button>
+    </form>
+    {{end}}
+    <form method="POST" action="/admin/submissions/{{.Submission.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this submission?')">
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="max-width:700px">
+  <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Submission Details</span>
+    <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">
+      {{.Submission.CreatedAt.Format "Jan 2, 2006 3:04 PM"}} &middot; IP: {{.Submission.IP}}
+    </span>
+  </div>
+  <div class="card-body">
+    {{range $key, $val := .Submission.Data}}
+    <div class="field-block">
+      <div class="field-label">{{$key}}</div>
+      {{if or (eq $key "message") (eq $key "body") (eq $key "content")}}
+      <div class="field-msg">{{$val}}</div>
+      {{else}}
+      <div class="field-val">{{$val}}</div>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}

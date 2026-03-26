@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -44,11 +45,35 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 
 	successTmpl := template.Must(template.New("success.html").Parse(`<p>Your message has been sent.</p>`))
 
+	// form_detail template
+	detailBase := template.Must(template.New("base").Parse(`{{define "base"}}{{template "content" .}}{{end}}`))
+	detailTmpl, _ := detailBase.Clone()
+	template.Must(detailTmpl.New("content").Parse(
+		`{{if .Submissions}}` +
+			`{{range .Submissions}}<span class="sub-id">{{.ID}}</span>{{end}}` +
+			`<span class="total">{{.TotalCount}}</span>` +
+			`<span class="unread">{{.UnreadCount}}</span>` +
+			`<span class="page">{{.Page}}</span>` +
+			`{{if .HasPrev}}<span class="has-prev">true</span>{{end}}` +
+			`{{if .HasNext}}<span class="has-next">true</span>{{end}}` +
+			`{{else}}<p>No submissions yet</p>{{end}}`))
+
+	// submission_detail template
+	subDetailBase := template.Must(template.New("base").Parse(`{{define "base"}}{{template "content" .}}{{end}}`))
+	subDetailTmpl, _ := subDetailBase.Clone()
+	template.Must(subDetailTmpl.New("content").Parse(
+		`<span class="sub-id">{{.Submission.ID}}</span>` +
+			`<span class="sub-read">{{.Submission.Read}}</span>` +
+			`<span class="form-id">{{.Form.ID}}</span>` +
+			`{{range $key, $val := .Submission.Data}}<span class="field-{{$key}}">{{$val}}</span>{{end}}`))
+
 	templates := map[string]*template.Template{
-		"dashboard.html": dashTmpl,
-		"form_new.html":  newTmpl,
-		"form_edit.html": editTmpl,
-		"success.html":   successTmpl,
+		"dashboard.html":        dashTmpl,
+		"form_new.html":         newTmpl,
+		"form_edit.html":        editTmpl,
+		"success.html":          successTmpl,
+		"form_detail.html":      detailTmpl,
+		"submission_detail.html": subDetailTmpl,
 	}
 
 	ah := &AdminHandler{
@@ -67,6 +92,12 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 		r.Get("/admin/forms/{id}/edit", ah.EditFormPage)
 		r.Post("/admin/forms/{id}/edit", ah.EditForm)
 		r.Post("/admin/forms/{id}/delete", ah.DeleteForm)
+		r.Get("/admin/forms/{id}", ah.FormDetail)
+		r.Post("/admin/forms/{id}/read-all", ah.MarkAllRead)
+		r.Get("/admin/forms/{id}/export", ah.ExportCSV)
+		r.Get("/admin/forms/{formID}/submissions/{subID}", ah.SubmissionDetail)
+		r.Post("/admin/submissions/{id}/read", ah.MarkRead)
+		r.Post("/admin/submissions/{id}/delete", ah.DeleteSubmission)
 	})
 	r.Get("/success", ah.Success)
 
@@ -317,5 +348,227 @@ func TestSuccess(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "message has been sent") {
 		t.Error("success message not in body")
+	}
+}
+
+func TestFormDetailReturns200(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Contact", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1", "")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestFormDetailEmptyState(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1", "")
+	if !strings.Contains(w.Body.String(), "No submissions") {
+		t.Error("empty state not shown")
+	}
+}
+
+func TestFormDetailPagination(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	// Create 25 submissions (more than one page of 20)
+	for i := 1; i <= 25; i++ {
+		_ = s.CreateSubmission(store.Submission{
+			ID:      fmt.Sprintf("s%02d", i),
+			FormID:  "f1",
+			RawData: `{"name":"Test"}`,
+		})
+	}
+	// Page 1 should show has-next but not has-prev
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1", "")
+	body := w.Body.String()
+	if !strings.Contains(body, `has-next`) {
+		t.Error("page 1 should show has-next")
+	}
+	if strings.Contains(body, `has-prev`) {
+		t.Error("page 1 should not show has-prev")
+	}
+
+	// Page 2 should show has-prev but not has-next
+	w = doAdminRequest(t, s, r, "GET", "/admin/forms/f1?page=2", "")
+	body = w.Body.String()
+	if !strings.Contains(body, `has-prev`) {
+		t.Error("page 2 should show has-prev")
+	}
+	if strings.Contains(body, `has-next`) {
+		t.Error("page 2 should not show has-next")
+	}
+}
+
+func TestSubmissionDetailReturns200(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Contact", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/submissions/s1", "")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "s1") {
+		t.Error("submission ID not in body")
+	}
+}
+
+func TestSubmissionDetailAutoMarksRead(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`})
+	// Before viewing, s1 is unread
+	sub, _ := s.GetSubmission("s1")
+	if sub.Read {
+		t.Fatal("submission should be unread before viewing")
+	}
+	// View the submission detail (auto-marks as read)
+	doAdminRequest(t, s, r, "GET", "/admin/forms/f1/submissions/s1", "")
+	// After viewing, s1 should be read
+	sub, _ = s.GetSubmission("s1")
+	if !sub.Read {
+		t.Error("submission should be marked read after viewing detail page")
+	}
+}
+
+func TestSubmissionDetailNotFound(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/submissions/nonexistent", "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestMarkReadPost(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	w := doAdminRequest(t, s, r, "POST", "/admin/submissions/s1/read", "")
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	sub, _ := s.GetSubmission("s1")
+	if !sub.Read {
+		t.Error("submission not marked read")
+	}
+}
+
+func TestMarkReadNotFound(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	w := doAdminRequest(t, s, r, "POST", "/admin/submissions/nonexistent/read", "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestMarkAllReadPost(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f1", RawData: `{}`})
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/read-all", "")
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	count, _ := s.UnreadCount("f1")
+	if count != 0 {
+		t.Errorf("unread = %d, want 0", count)
+	}
+}
+
+func TestDeleteSubmissionPost(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	w := doAdminRequest(t, s, r, "POST", "/admin/submissions/s1/delete", "")
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 0 {
+		t.Errorf("submissions = %d, want 0", len(subs))
+	}
+}
+
+func TestDeleteSubmissionNotFound(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	w := doAdminRequest(t, s, r, "POST", "/admin/submissions/nonexistent/delete", "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestExportCSVContentType(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Contact", EmailTo: "a@b.com"})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/export", "")
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/csv") {
+		t.Errorf("Content-Type = %q, want text/csv", ct)
+	}
+}
+
+func TestExportCSVHeaders(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice","email":"a@b.com"}`})
+	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f1", RawData: `{"name":"Bob","phone":"123"}`})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/export", "")
+	body := w.Body.String()
+	// Header should contain union of keys: email, name, phone (sorted)
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) < 1 {
+		t.Fatal("no CSV output")
+	}
+	header := lines[0]
+	if !strings.Contains(header, "email") || !strings.Contains(header, "name") || !strings.Contains(header, "phone") {
+		t.Errorf("header = %q, missing expected field columns", header)
+	}
+}
+
+func TestExportCSVValues(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice","email":"a@b.com"}`})
+	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f1", RawData: `{"name":"Bob","phone":"123"}`})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/export", "")
+	body := w.Body.String()
+	// Row for s1 should have email=a@b.com but phone="" (missing)
+	if !strings.Contains(body, "Alice") || !strings.Contains(body, "a@b.com") {
+		t.Error("CSV missing Alice's data")
+	}
+	if !strings.Contains(body, "Bob") || !strings.Contains(body, "123") {
+		t.Error("CSV missing Bob's data")
+	}
+}
+
+func TestExportCSVEmpty(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/export", "")
+	body := w.Body.String()
+	// Should have header but no data rows
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) != 1 {
+		t.Errorf("lines = %d, want 1 (header only)", len(lines))
 	}
 }

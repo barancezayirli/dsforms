@@ -22,3 +22,9 @@ Thumbs.db
 # Test
 coverage.out
 c.out
+
+# Playwright
+.playwright-mcp/
+
+# Remember plugin
+.remember/

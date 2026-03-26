@@ -1,0 +1,75 @@
+{{template "base" .}}
+{{define "content"}}
+<!-- Topbar -->
+<div class="page-header">
+  <h1 class="page-title">{{.Form.Name}}</h1>
+  <div style="display:flex;gap:8px">
+    <form method="POST" action="/admin/forms/{{.Form.ID}}/read-all" style="display:inline">
+      <button type="submit" class="btn">Mark all read</button>
+    </form>
+    <a href="/admin/forms/{{.Form.ID}}/export" class="btn">Export CSV</a>
+    <a href="/admin/forms/{{.Form.ID}}/edit" class="btn">Edit form</a>
+  </div>
+</div>
+
+<div class="stats" style="grid-template-columns: repeat(2, 1fr);">
+  <div class="stat stat-accent">
+    <div class="stat-label">Unread</div>
+    <div class="stat-val">{{.UnreadCount}}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Total</div>
+    <div class="stat-val">{{.TotalCount}}</div>
+  </div>
+</div>
+
+{{if .Submissions}}
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr>
+        <th style="width:20px"></th>
+        <th>From</th>
+        <th>Preview</th>
+        <th>Date</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Submissions}}
+      <tr class="{{if not .Read}}row-unread{{end}}">
+        <td>{{if not .Read}}<span class="unread-dot"></span>{{end}}</td>
+        <td>
+          <a href="/admin/forms/{{$.Form.ID}}/submissions/{{.ID}}" class="sub-name{{if not .Read}} sub-unread{{end}}">
+            {{if index .Data "name"}}{{index .Data "name"}}{{else if index .Data "email"}}{{index .Data "email"}}{{else}}Submission{{end}}
+          </a>
+          {{if index .Data "email"}}<div class="sub-email">{{index .Data "email"}}</div>{{end}}
+        </td>
+        <td class="sub-preview">{{if index .Data "message"}}{{index .Data "message"}}{{else if index .Data "body"}}{{index .Data "body"}}{{else if index .Data "content"}}{{index .Data "content"}}{{else}}—{{end}}</td>
+        <td class="text-muted" style="white-space:nowrap">{{.CreatedAt.Format "Jan 2, 3:04 PM"}}</td>
+        <td class="actions">
+          <form method="POST" action="/admin/submissions/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this submission?')">
+            <button type="submit" class="btn-ghost btn-ghost-danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+
+{{if or .HasPrev .HasNext}}
+<div class="pagination">
+  {{if .HasPrev}}<a href="/admin/forms/{{.Form.ID}}?page={{.PrevPage}}" class="btn">&larr; Newer</a>{{end}}
+  <span class="text-muted">Page {{.Page}}</span>
+  {{if .HasNext}}<a href="/admin/forms/{{.Form.ID}}?page={{.NextPage}}" class="btn">Older &rarr;</a>{{end}}
+</div>
+{{end}}
+
+{{else}}
+<div class="empty-state">
+  <p>No submissions yet.</p>
+  <p class="text-muted">Submissions will appear here when someone fills out your form.</p>
+</div>
+{{end}}
+{{end}}

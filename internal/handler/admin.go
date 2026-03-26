@@ -2,10 +2,14 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
+	"sort"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -296,4 +300,252 @@ func (h *AdminHandler) Success(w http.ResponseWriter, r *http.Request) {
 		log.Printf("success template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
+}
+
+// formDetailData holds the data passed to form_detail.html.
+type formDetailData struct {
+	Title       string
+	Active      string
+	CurrentUser store.User
+	Flash       *FlashData
+	Form        store.Form
+	Submissions []store.Submission
+	TotalCount  int
+	UnreadCount int
+	Page        int
+	HasPrev     bool
+	HasNext     bool
+	PrevPage    int
+	NextPage    int
+}
+
+// submissionDetailData holds the data passed to submission_detail.html.
+type submissionDetailData struct {
+	Title       string
+	Active      string
+	CurrentUser store.User
+	Flash       *FlashData
+	Form        store.Form
+	Submission  store.Submission
+}
+
+const pageSize = 20
+
+// FormDetail renders the paginated submissions table for a form.
+func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
+	formID := chi.URLParam(r, "id")
+	form, err := h.Store.GetForm(formID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "form not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("admin: get form %s: %v", formID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			page = n
+		}
+	}
+	offset := (page - 1) * pageSize
+
+	user, _ := auth.UserFromContext(r.Context())
+	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+
+	subs, _ := h.Store.ListSubmissionsPaged(formID, pageSize, offset)
+	total, _ := h.Store.CountSubmissions(formID)
+	unread, _ := h.Store.UnreadCount(formID)
+
+	data := formDetailData{
+		Title:       form.Name,
+		Active:      "forms",
+		CurrentUser: user,
+		Flash:       newFlash(flashType, flashMsg),
+		Form:        form,
+		Submissions: subs,
+		TotalCount:  total,
+		UnreadCount: unread,
+		Page:        page,
+		HasPrev:     page > 1,
+		HasNext:     offset+pageSize < total,
+		PrevPage:    page - 1,
+		NextPage:    page + 1,
+	}
+
+	if err := h.Templates["form_detail.html"].ExecuteTemplate(w, "base", data); err != nil {
+		log.Printf("form detail template error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// SubmissionDetail renders a single submission detail page and auto-marks it read.
+func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) {
+	formID := chi.URLParam(r, "formID")
+	subID := chi.URLParam(r, "subID")
+
+	form, err := h.Store.GetForm(formID)
+	if err != nil {
+		http.Error(w, "form not found", http.StatusNotFound)
+		return
+	}
+
+	sub, err := h.Store.GetSubmission(subID)
+	if err != nil {
+		http.Error(w, "submission not found", http.StatusNotFound)
+		return
+	}
+
+	// Auto-mark read
+	if !sub.Read {
+		if err := h.Store.MarkRead(subID); err != nil {
+			log.Printf("submission detail: mark read %s error: %v", subID, err)
+		}
+		sub.Read = true
+	}
+
+	user, _ := auth.UserFromContext(r.Context())
+	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+
+	data := submissionDetailData{
+		Title:       form.Name,
+		Active:      "forms",
+		CurrentUser: user,
+		Flash:       newFlash(flashType, flashMsg),
+		Form:        form,
+		Submission:  sub,
+	}
+
+	if err := h.Templates["submission_detail.html"].ExecuteTemplate(w, "base", data); err != nil {
+		log.Printf("submission detail template error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// MarkRead handles POST to mark a single submission as read.
+func (h *AdminHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	sub, err := h.Store.GetSubmission(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "submission not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("mark read: get submission %s error: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.Store.MarkRead(id); err != nil {
+		log.Printf("mark read: %s error: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/admin/forms/"+sub.FormID, http.StatusFound)
+}
+
+// MarkAllRead handles POST to mark all submissions for a form as read.
+func (h *AdminHandler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	if err := h.Store.MarkAllRead(id); err != nil {
+		log.Printf("mark all read: form %s error: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/admin/forms/"+id, http.StatusFound)
+}
+
+// DeleteSubmission handles POST to delete a single submission.
+func (h *AdminHandler) DeleteSubmission(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	sub, err := h.Store.GetSubmission(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "submission not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("delete submission: get %s error: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.Store.DeleteSubmission(id); err != nil {
+		log.Printf("delete submission: %s error: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/admin/forms/"+sub.FormID, http.StatusFound)
+}
+
+// ExportCSV handles GET to export submissions as CSV.
+func (h *AdminHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	f, err := h.Store.GetForm(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "form not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("export csv: get form %s error: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	subs, err := h.Store.ListSubmissions(id)
+	if err != nil {
+		log.Printf("export csv: list submissions for %s error: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Collect union of all data keys
+	keySet := make(map[string]struct{})
+	for _, s := range subs {
+		for k := range s.Data {
+			keySet[k] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(keySet))
+	for k := range keySet {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	filename := fmt.Sprintf("%s-submissions.csv", f.ID)
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+
+	cw := csv.NewWriter(w)
+	// Write header: id, submitted_at, ip, read, then data keys
+	header := append([]string{"id", "submitted_at", "ip", "read"}, keys...)
+	if err := cw.Write(header); err != nil {
+		log.Printf("export csv: write header error: %v", err)
+		return
+	}
+
+	for _, s := range subs {
+		readVal := "false"
+		if s.Read {
+			readVal = "true"
+		}
+		row := []string{s.ID, s.CreatedAt.Format("2006-01-02T15:04:05Z"), s.IP, readVal}
+		for _, k := range keys {
+			row = append(row, s.Data[k])
+		}
+		if err := cw.Write(row); err != nil {
+			log.Printf("export csv: write row error: %v", err)
+			return
+		}
+	}
+	cw.Flush()
 }

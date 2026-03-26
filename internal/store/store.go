@@ -437,6 +437,69 @@ func (s *Store) DeleteSubmission(id string) error {
 	return nil
 }
 
+// GetSubmission returns a single submission by ID.
+func (s *Store) GetSubmission(id string) (Submission, error) {
+	var sub Submission
+	var rawData string
+	var readInt int
+	err := s.db.QueryRow(
+		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE id = ?", id,
+	).Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt)
+	if err != nil {
+		return Submission{}, fmt.Errorf("get submission: %w", err)
+	}
+	sub.RawData = rawData
+	sub.Read = readInt == 1
+	if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
+		log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
+		sub.Data = map[string]string{"_raw": rawData}
+	}
+	return sub, nil
+}
+
+// ListSubmissionsPaged returns a page of submissions for a form.
+func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submission, error) {
+	rows, err := s.db.Query(
+		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+		formID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list submissions paged: %w", err)
+	}
+	defer rows.Close()
+
+	var subs []Submission
+	for rows.Next() {
+		var sub Submission
+		var rawData string
+		var readInt int
+		if err := rows.Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list submissions paged: %w", err)
+		}
+		sub.RawData = rawData
+		sub.Read = readInt == 1
+		if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
+			log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
+			sub.Data = map[string]string{"_raw": rawData}
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list submissions paged: %w", err)
+	}
+	return subs, nil
+}
+
+// CountSubmissions returns the total number of submissions for a form.
+func (s *Store) CountSubmissions(formID string) (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ?", formID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count submissions: %w", err)
+	}
+	return count, nil
+}
+
 // UnreadCount returns the number of unread submissions for a form.
 func (s *Store) UnreadCount(formID string) (int, error) {
 	var count int
