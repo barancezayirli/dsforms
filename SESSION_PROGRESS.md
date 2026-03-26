@@ -1,6 +1,6 @@
 # DSForms — Session Progress
 
-## Status: session 7 complete
+## Status: session 8 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
@@ -10,6 +10,7 @@
 - Session 5 — Submit handler
 - Session 6 — Auth handlers & login UI
 - Session 7 — Admin UI: dashboard & forms CRUD
+- Session 8 — Submission reader
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -293,6 +294,45 @@
 
 ### Deferred items
 - success.html CSS duplication (standalone page by design) — add sync comment later
+
+### Known issues
+- None
+
+---
+
+## Session 8 — Submission reader
+**Branch:** `session/8-reader`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `templates/form_detail.html`
+
+### Files modified
+- `templates/base.html` — reader CSS (topbar, msg-list, pane, fields, responsive @640px)
+- `internal/handler/admin.go` — added FormDetail, MarkRead, MarkAllRead, DeleteSubmission, ExportCSV
+- `internal/handler/admin_test.go` — added 14 reader tests
+- `internal/store/store.go` — added GetSubmission
+- `internal/store/store_test.go` — added TestGetSubmission, TestGetSubmissionNotFound
+- `main.go` — FuncMap for `add` template function, form_detail template cloning, 5 new routes
+
+### Test summary
+- 14 handler tests + 2 store tests = 16 new tests
+- Total project: 136 tests across 8 packages
+- go test -race: clean
+- go vet: clean
+
+### Decisions made
+- ActiveSub (not Active) for selected submission to avoid field name conflict
+- Template `add` FuncMap registered for prev/next pagination math
+- GetSubmission added to store for MarkRead/DeleteSubmission redirect logic
+- CSV filename uses form ID (not name) to prevent header injection
+- Auto-mark-read means "Mark read" button is never visible on first load (consistent behavior)
+- Responsive reader stacks at 640px with msg-list max-height 240px
+
+### Deferred items
+- CSV flush error check — address in Session 12 (polish)
+- MarkRead button dead code in template (auto-mark makes it unreachable on first load) — harmless
 
 ### Known issues
 - None
