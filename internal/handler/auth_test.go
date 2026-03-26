@@ -51,7 +51,7 @@ func setupAuth(t *testing.T) (*store.Store, *chi.Mux) {
 	r.Post("/admin/logout", ah.Logout)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireAuth(s, testSecretKey))
+		r.Use(auth.RequireAuth(s))
 		r.Get("/admin/forms", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("dashboard"))
@@ -210,7 +210,8 @@ func TestAdminGuardValidCookie(t *testing.T) {
 	t.Parallel()
 	s, r := setupAuth(t)
 	admin, _ := s.GetUserByUsername("admin")
-	cookie := auth.CreateSessionCookie(admin.ID, testSecretKey, "https://example.com")
+	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	cookie := auth.CreateSessionCookie(token, "https://example.com")
 	req := httptest.NewRequest("GET", "/admin/forms", nil)
 	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
@@ -224,7 +225,8 @@ func TestAdminGuardTamperedCookie(t *testing.T) {
 	t.Parallel()
 	s, r := setupAuth(t)
 	admin, _ := s.GetUserByUsername("admin")
-	cookie := auth.CreateSessionCookie(admin.ID, testSecretKey, "https://example.com")
+	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	cookie := auth.CreateSessionCookie(token, "https://example.com")
 	cookie.Value += "tampered"
 	req := httptest.NewRequest("GET", "/admin/forms", nil)
 	req.AddCookie(cookie)

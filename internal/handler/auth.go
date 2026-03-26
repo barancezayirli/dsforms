@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/youruser/dsforms/internal/auth"
 	"github.com/youruser/dsforms/internal/ratelimit"
@@ -63,13 +64,23 @@ func (h *AuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.LoginGuard.RecordSuccess(ip)
-	cookie := auth.CreateSessionCookie(user.ID, h.SecretKey, h.BaseURL)
+	token, err := h.Store.CreateSession(user.ID, 30*24*time.Hour)
+	if err != nil {
+		log.Printf("login: failed to create session: %v", err)
+		http.Redirect(w, r, "/admin/login?error=1", http.StatusFound)
+		return
+	}
+	cookie := auth.CreateSessionCookie(token, h.BaseURL)
 	http.SetCookie(w, cookie)
 	http.Redirect(w, r, "/admin/forms", http.StatusFound)
 }
 
 // Logout clears the session cookie and redirects to the login page.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	token, _ := auth.GetSessionToken(r)
+	if token != "" {
+		h.Store.DeleteSession(token)
+	}
 	http.SetCookie(w, auth.ClearSessionCookie())
 	http.Redirect(w, r, "/admin/login", http.StatusFound)
 }
