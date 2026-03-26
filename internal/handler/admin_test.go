@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -44,28 +45,35 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 
 	successTmpl := template.Must(template.New("success.html").Parse(`<p>Your message has been sent.</p>`))
 
-	// form_detail template with add FuncMap
-	funcMap := template.FuncMap{"add": func(a, b int) int { return a + b }}
-	detailBase := template.Must(template.New("base").Funcs(funcMap).Parse(`{{define "base"}}{{template "content" .}}{{end}}`))
+	// form_detail template
+	detailBase := template.Must(template.New("base").Parse(`{{define "base"}}{{template "content" .}}{{end}}`))
 	detailTmpl, _ := detailBase.Clone()
 	template.Must(detailTmpl.New("content").Parse(
-		`{{if .HasActive}}` +
-			`<span class="active-id">{{.ActiveSub.ID}}</span>` +
-			`<span class="active-idx">{{.ActiveIdx}}</span>` +
-			`<span class="active-read">{{.ActiveSub.Read}}</span>` +
-			`<span class="prev">{{.PrevID}}</span>` +
-			`<span class="next">{{.NextID}}</span>` +
+		`{{if .Submissions}}` +
+			`{{range .Submissions}}<span class="sub-id">{{.ID}}</span>{{end}}` +
 			`<span class="total">{{.TotalCount}}</span>` +
 			`<span class="unread">{{.UnreadCount}}</span>` +
-			`{{range $key, $val := .ActiveSub.Data}}<span class="field-{{$key}}">{{$val}}</span>{{end}}` +
+			`<span class="page">{{.Page}}</span>` +
+			`{{if .HasPrev}}<span class="has-prev">true</span>{{end}}` +
+			`{{if .HasNext}}<span class="has-next">true</span>{{end}}` +
 			`{{else}}<p>No submissions yet</p>{{end}}`))
 
+	// submission_detail template
+	subDetailBase := template.Must(template.New("base").Parse(`{{define "base"}}{{template "content" .}}{{end}}`))
+	subDetailTmpl, _ := subDetailBase.Clone()
+	template.Must(subDetailTmpl.New("content").Parse(
+		`<span class="sub-id">{{.Submission.ID}}</span>` +
+			`<span class="sub-read">{{.Submission.Read}}</span>` +
+			`<span class="form-id">{{.Form.ID}}</span>` +
+			`{{range $key, $val := .Submission.Data}}<span class="field-{{$key}}">{{$val}}</span>{{end}}`))
+
 	templates := map[string]*template.Template{
-		"dashboard.html":  dashTmpl,
-		"form_new.html":   newTmpl,
-		"form_edit.html":  editTmpl,
-		"success.html":    successTmpl,
-		"form_detail.html": detailTmpl,
+		"dashboard.html":        dashTmpl,
+		"form_new.html":         newTmpl,
+		"form_edit.html":        editTmpl,
+		"success.html":          successTmpl,
+		"form_detail.html":      detailTmpl,
+		"submission_detail.html": subDetailTmpl,
 	}
 
 	ah := &AdminHandler{
@@ -87,6 +95,7 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 		r.Get("/admin/forms/{id}", ah.FormDetail)
 		r.Post("/admin/forms/{id}/read-all", ah.MarkAllRead)
 		r.Get("/admin/forms/{id}/export", ah.ExportCSV)
+		r.Get("/admin/forms/{formID}/submissions/{subID}", ah.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", ah.MarkRead)
 		r.Post("/admin/submissions/{id}/delete", ah.DeleteSubmission)
 	})
@@ -353,71 +362,6 @@ func TestFormDetailReturns200(t *testing.T) {
 	}
 }
 
-func TestFormDetailFirstUnreadActive(t *testing.T) {
-	t.Parallel()
-	s, r := setupAdmin(t)
-	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
-	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`})
-	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f1", RawData: `{"name":"Bob"}`})
-	_ = s.CreateSubmission(store.Submission{ID: "s3", FormID: "f1", RawData: `{"name":"Carol"}`})
-	_ = s.MarkRead("s1") // s1 read, s2 and s3 unread
-	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1", "")
-	body := w.Body.String()
-	// First unread should be active (s2 or s3 depending on order)
-	if !strings.Contains(body, "active-id") {
-		t.Error("no active submission shown")
-	}
-}
-
-func TestFormDetailAutoMarksRead(t *testing.T) {
-	t.Parallel()
-	s, r := setupAdmin(t)
-	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
-	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`})
-	// Before viewing, s1 is unread
-	subs, _ := s.ListSubmissions("f1")
-	if subs[0].Read {
-		t.Fatal("submission should be unread before viewing")
-	}
-	// View the form detail (auto-marks active as read)
-	doAdminRequest(t, s, r, "GET", "/admin/forms/f1", "")
-	// After viewing, s1 should be read
-	subs, _ = s.ListSubmissions("f1")
-	if !subs[0].Read {
-		t.Error("submission should be marked read after viewing")
-	}
-}
-
-func TestFormDetailSubParam(t *testing.T) {
-	t.Parallel()
-	s, r := setupAdmin(t)
-	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
-	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`})
-	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f1", RawData: `{"name":"Bob"}`})
-	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1?sub=s2", "")
-	if !strings.Contains(w.Body.String(), "s2") {
-		t.Error("?sub=s2 should select s2 as active")
-	}
-}
-
-func TestFormDetailPrevNext(t *testing.T) {
-	t.Parallel()
-	s, r := setupAdmin(t)
-	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
-	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"A"}`})
-	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f1", RawData: `{"name":"B"}`})
-	_ = s.CreateSubmission(store.Submission{ID: "s3", FormID: "f1", RawData: `{"name":"C"}`})
-	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1?sub=s2", "")
-	body := w.Body.String()
-	// s2 is the middle submission — should have both prev and next
-	if !strings.Contains(body, `<span class="prev">s`) {
-		t.Errorf("expected non-empty prev ID, body: %s", body)
-	}
-	if !strings.Contains(body, `<span class="next">s`) {
-		t.Errorf("expected non-empty next ID, body: %s", body)
-	}
-}
-
 func TestFormDetailEmptyState(t *testing.T) {
 	t.Parallel()
 	s, r := setupAdmin(t)
@@ -425,6 +369,83 @@ func TestFormDetailEmptyState(t *testing.T) {
 	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1", "")
 	if !strings.Contains(w.Body.String(), "No submissions") {
 		t.Error("empty state not shown")
+	}
+}
+
+func TestFormDetailPagination(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	// Create 25 submissions (more than one page of 20)
+	for i := 1; i <= 25; i++ {
+		_ = s.CreateSubmission(store.Submission{
+			ID:      fmt.Sprintf("s%02d", i),
+			FormID:  "f1",
+			RawData: `{"name":"Test"}`,
+		})
+	}
+	// Page 1 should show has-next but not has-prev
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1", "")
+	body := w.Body.String()
+	if !strings.Contains(body, `has-next`) {
+		t.Error("page 1 should show has-next")
+	}
+	if strings.Contains(body, `has-prev`) {
+		t.Error("page 1 should not show has-prev")
+	}
+
+	// Page 2 should show has-prev but not has-next
+	w = doAdminRequest(t, s, r, "GET", "/admin/forms/f1?page=2", "")
+	body = w.Body.String()
+	if !strings.Contains(body, `has-prev`) {
+		t.Error("page 2 should show has-prev")
+	}
+	if strings.Contains(body, `has-next`) {
+		t.Error("page 2 should not show has-next")
+	}
+}
+
+func TestSubmissionDetailReturns200(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Contact", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/submissions/s1", "")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "s1") {
+		t.Error("submission ID not in body")
+	}
+}
+
+func TestSubmissionDetailAutoMarksRead(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"Alice"}`})
+	// Before viewing, s1 is unread
+	sub, _ := s.GetSubmission("s1")
+	if sub.Read {
+		t.Fatal("submission should be unread before viewing")
+	}
+	// View the submission detail (auto-marks as read)
+	doAdminRequest(t, s, r, "GET", "/admin/forms/f1/submissions/s1", "")
+	// After viewing, s1 should be read
+	sub, _ = s.GetSubmission("s1")
+	if !sub.Read {
+		t.Error("submission should be marked read after viewing detail page")
+	}
+}
+
+func TestSubmissionDetailNotFound(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/submissions/nonexistent", "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -309,114 +310,117 @@ type formDetailData struct {
 	Flash       *FlashData
 	Form        store.Form
 	Submissions []store.Submission
-	HasActive   bool
-	ActiveSub   store.Submission
-	ActiveIdx   int
-	PrevID      string
-	NextID      string
 	TotalCount  int
 	UnreadCount int
+	Page        int
+	HasPrev     bool
+	HasNext     bool
+	PrevPage    int
+	NextPage    int
 }
 
-// FormDetail renders the form submission reader page.
-func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
-	id := chi.URLParam(r, "id")
+// submissionDetailData holds the data passed to submission_detail.html.
+type submissionDetailData struct {
+	Title       string
+	Active      string
+	CurrentUser store.User
+	Flash       *FlashData
+	Form        store.Form
+	Submission  store.Submission
+}
 
-	f, err := h.Store.GetForm(id)
+const pageSize = 20
+
+// FormDetail renders the paginated submissions table for a form.
+func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
+	formID := chi.URLParam(r, "id")
+	form, err := h.Store.GetForm(formID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "form not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("form detail: get form %s error: %v", id, err)
+		log.Printf("admin: get form %s: %v", formID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	subs, err := h.Store.ListSubmissions(id)
-	if err != nil {
-		log.Printf("form detail: list submissions for %s error: %v", id, err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			page = n
+		}
 	}
+	offset := (page - 1) * pageSize
+
+	user, _ := auth.UserFromContext(r.Context())
+	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+
+	subs, _ := h.Store.ListSubmissionsPaged(formID, pageSize, offset)
+	total, _ := h.Store.CountSubmissions(formID)
+	unread, _ := h.Store.UnreadCount(formID)
 
 	data := formDetailData{
-		Title:       f.Name,
+		Title:       form.Name,
 		Active:      "forms",
 		CurrentUser: user,
 		Flash:       newFlash(flashType, flashMsg),
-		Form:        f,
+		Form:        form,
 		Submissions: subs,
-		TotalCount:  len(subs),
-	}
-
-	if len(subs) > 0 {
-		// Determine active submission
-		subParam := r.URL.Query().Get("sub")
-		activeIdx := -1
-		if subParam != "" {
-			for i, s := range subs {
-				if s.ID == subParam {
-					activeIdx = i
-					break
-				}
-			}
-		}
-		if activeIdx == -1 {
-			// Find first unread
-			for i, s := range subs {
-				if !s.Read {
-					activeIdx = i
-					break
-				}
-			}
-		}
-		if activeIdx == -1 {
-			activeIdx = 0
-		}
-
-		activeSub := subs[activeIdx]
-
-		// Auto-mark as read
-		if !activeSub.Read {
-			if err := h.Store.MarkRead(activeSub.ID); err != nil {
-				log.Printf("form detail: mark read %s error: %v", activeSub.ID, err)
-			}
-			activeSub.Read = true
-		}
-
-		// Compute prev/next
-		var prevID, nextID string
-		if activeIdx > 0 {
-			prevID = subs[activeIdx-1].ID
-		}
-		if activeIdx < len(subs)-1 {
-			nextID = subs[activeIdx+1].ID
-		}
-
-		// Compute unread count (after marking active as read)
-		unread := 0
-		for i, s := range subs {
-			if i == activeIdx {
-				continue
-			}
-			if !s.Read {
-				unread++
-			}
-		}
-
-		data.HasActive = true
-		data.ActiveSub = activeSub
-		data.ActiveIdx = activeIdx
-		data.PrevID = prevID
-		data.NextID = nextID
-		data.UnreadCount = unread
+		TotalCount:  total,
+		UnreadCount: unread,
+		Page:        page,
+		HasPrev:     page > 1,
+		HasNext:     offset+pageSize < total,
+		PrevPage:    page - 1,
+		NextPage:    page + 1,
 	}
 
 	if err := h.Templates["form_detail.html"].ExecuteTemplate(w, "base", data); err != nil {
-		log.Printf("form_detail template error: %v", err)
+		log.Printf("form detail template error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// SubmissionDetail renders a single submission detail page and auto-marks it read.
+func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) {
+	formID := chi.URLParam(r, "formID")
+	subID := chi.URLParam(r, "subID")
+
+	form, err := h.Store.GetForm(formID)
+	if err != nil {
+		http.Error(w, "form not found", http.StatusNotFound)
+		return
+	}
+
+	sub, err := h.Store.GetSubmission(subID)
+	if err != nil {
+		http.Error(w, "submission not found", http.StatusNotFound)
+		return
+	}
+
+	// Auto-mark read
+	if !sub.Read {
+		if err := h.Store.MarkRead(subID); err != nil {
+			log.Printf("submission detail: mark read %s error: %v", subID, err)
+		}
+		sub.Read = true
+	}
+
+	user, _ := auth.UserFromContext(r.Context())
+	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+
+	data := submissionDetailData{
+		Title:       form.Name,
+		Active:      "forms",
+		CurrentUser: user,
+		Flash:       newFlash(flashType, flashMsg),
+		Form:        form,
+		Submission:  sub,
+	}
+
+	if err := h.Templates["submission_detail.html"].ExecuteTemplate(w, "base", data); err != nil {
+		log.Printf("submission detail template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }

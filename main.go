@@ -91,7 +91,7 @@ func main() {
 	}
 
 	templates := make(map[string]*template.Template)
-	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html"} {
+	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html"} {
 		t, err := baseTmpl.Clone()
 		if err != nil {
 			log.Fatalf("failed to clone base template: %v", err)
@@ -172,6 +172,7 @@ func main() {
 		r.Get("/admin/forms/{id}", adminHandler.FormDetail)
 		r.Post("/admin/forms/{id}/read-all", adminHandler.MarkAllRead)
 		r.Get("/admin/forms/{id}/export", adminHandler.ExportCSV)
+		r.Get("/admin/forms/{formID}/submissions/{subID}", adminHandler.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", adminHandler.MarkRead)
 		r.Post("/admin/submissions/{id}/delete", adminHandler.DeleteSubmission)
 	})

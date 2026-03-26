@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -470,6 +471,83 @@ func TestGetSubmissionNotFound(t *testing.T) {
 	_, err := s.GetSubmission("nonexistent")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestListSubmissionsPaged(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	for i := 1; i <= 5; i++ {
+		_ = s.CreateSubmission(Submission{
+			ID:      fmt.Sprintf("s%d", i),
+			FormID:  "f1",
+			RawData: fmt.Sprintf(`{"n":"%d"}`, i),
+		})
+	}
+
+	tests := []struct {
+		name   string
+		limit  int
+		offset int
+		want   int
+	}{
+		{"first page of 3", 3, 0, 3},
+		{"second page of 3", 3, 3, 2},
+		{"page beyond end", 3, 10, 0},
+		{"full page", 5, 0, 5},
+		{"limit 1", 1, 0, 1},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			subs, err := s.ListSubmissionsPaged("f1", tt.limit, tt.offset)
+			if err != nil {
+				t.Fatalf("error = %v", err)
+			}
+			if len(subs) != tt.want {
+				t.Errorf("len = %d, want %d", len(subs), tt.want)
+			}
+		})
+	}
+}
+
+func TestListSubmissionsPagedEmpty(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	subs, err := s.ListSubmissionsPaged("f1", 20, 0)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if len(subs) != 0 {
+		t.Errorf("len = %d, want 0", len(subs))
+	}
+}
+
+func TestCountSubmissions(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+
+	count, err := s.CountSubmissions("f1")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s2", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s3", FormID: "f1", RawData: `{}`})
+
+	count, err = s.CountSubmissions("f1")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
 	}
 }
 
