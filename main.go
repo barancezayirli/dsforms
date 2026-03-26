@@ -253,7 +253,7 @@ func main() {
 	}
 
 	templates := make(map[string]*template.Template)
-	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html", "users.html", "users_new.html", "account.html"} {
+	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html", "users.html", "users_new.html", "account.html", "backups.html"} {
 		t, err := baseTmpl.Clone()
 		if err != nil {
 			log.Fatalf("failed to clone base template: %v", err)
@@ -316,6 +316,14 @@ func main() {
 		Templates: templates,
 	}
 
+	backupHandler := &handler.BackupHandler{
+		Store:     s,
+		SecretKey: cfg.SecretKey,
+		BaseURL:   cfg.BaseURL,
+		DBPath:    cfg.DBPath,
+		Templates: templates,
+	}
+
 	r := newRouter()
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 
@@ -350,6 +358,9 @@ func main() {
 		r.Post("/admin/users/{id}/delete", usersHandler.DeleteUser)
 		r.Get("/admin/account", usersHandler.AccountPage)
 		r.Post("/admin/account/password", usersHandler.UpdatePassword)
+		r.Get("/admin/backups", backupHandler.Page)
+		r.Get("/admin/backups/export", backupHandler.Export)
+		r.Post("/admin/backups/import", backupHandler.Import)
 	})
 
 	log.Printf("starting server on %s", cfg.ListenAddr)
