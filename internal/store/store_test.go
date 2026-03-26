@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -573,5 +574,107 @@ func TestCheckPassword(t *testing.T) {
 	_, err = s.CheckPassword("nonexistent", "admin")
 	if err == nil {
 		t.Fatal("expected error for nonexistent user, got nil")
+	}
+}
+
+func TestCreateSession(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	admin, _ := s.GetUserByUsername("admin")
+	token, err := s.CreateSession(admin.ID, 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if len(token) != 64 {
+		t.Errorf("token len = %d, want 64", len(token))
+	}
+}
+
+func TestGetSessionValid(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	admin, _ := s.GetUserByUsername("admin")
+	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	userID, err := s.GetSession(token)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if userID != admin.ID {
+		t.Errorf("userID = %q, want %q", userID, admin.ID)
+	}
+}
+
+func TestGetSessionExpired(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	admin, _ := s.GetUserByUsername("admin")
+	token, _ := s.CreateSession(admin.ID, -1*time.Hour)
+	_, err := s.GetSession(token)
+	if err == nil {
+		t.Fatal("expected error for expired session")
+	}
+}
+
+func TestGetSessionNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_, err := s.GetSession("0000000000000000000000000000000000000000000000000000000000000000")
+	if err == nil {
+		t.Fatal("expected error for nonexistent token")
+	}
+}
+
+func TestDeleteSession(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	admin, _ := s.GetUserByUsername("admin")
+	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	if err := s.DeleteSession(token); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	_, err := s.GetSession(token)
+	if err == nil {
+		t.Fatal("session still valid after delete")
+	}
+}
+
+func TestDeleteUserSessions(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	admin, _ := s.GetUserByUsername("admin")
+	token1, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	token2, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	if err := s.DeleteUserSessions(admin.ID); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	// Both original sessions should be gone
+	if _, err := s.GetSession(token1); err == nil {
+		t.Error("token1 still valid after DeleteUserSessions")
+	}
+	if _, err := s.GetSession(token2); err == nil {
+		t.Error("token2 still valid after DeleteUserSessions")
+	}
+}
+
+func TestCleanExpiredSessions(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	admin, _ := s.GetUserByUsername("admin")
+	s.CreateSession(admin.ID, -1*time.Hour) // expired
+	validToken, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	if err := s.CleanExpiredSessions(); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if _, err := s.GetSession(validToken); err != nil {
+		t.Fatalf("valid session gone after cleanup: %v", err)
+	}
+}
+
+func TestCreateSessionEmptyUserID(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_, err := s.CreateSession("", 30*24*time.Hour)
+	if err == nil {
+		t.Fatal("expected error for empty userID")
 	}
 }
