@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,39 @@ import (
 	"github.com/youruser/dsforms/internal/mail"
 	"github.com/youruser/dsforms/internal/store"
 )
+
+type mockWebhookSender struct {
+	mu    sync.Mutex
+	calls []store.Form
+	ch    chan struct{}
+}
+
+func newMockWebhookSender() *mockWebhookSender {
+	return &mockWebhookSender{ch: make(chan struct{}, 10)}
+}
+
+func (m *mockWebhookSender) Send(form store.Form, sub store.Submission) error {
+	m.mu.Lock()
+	m.calls = append(m.calls, form)
+	m.mu.Unlock()
+	m.ch <- struct{}{}
+	return nil
+}
+
+func (m *mockWebhookSender) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.calls)
+}
+
+func (m *mockWebhookSender) wait(timeout time.Duration) bool {
+	select {
+	case <-m.ch:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
 
 func setupSubmit(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {
 	t.Helper()
@@ -286,5 +320,90 @@ func TestDetermineRedirectFallback(t *testing.T) {
 	got := determineRedirect("", "")
 	if got != "/success" {
 		t.Errorf("determineRedirect = %q, want /success", got)
+	}
+}
+
+func TestSubmitWebhookFired(t *testing.T) {
+	t.Parallel()
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New error: %v", err)
+	}
+	_ = s.CreateForm(store.Form{
+		ID: "wh-form", Name: "WH", EmailTo: "test@test.com",
+		WebhookURL: "https://hooks.example.com", WebhookFormat: "generic",
+	})
+	m := mail.NewMockMailer()
+	wh := newMockWebhookSender()
+	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com"}
+	r := chi.NewRouter()
+	r.Post("/f/{formID}", h.Handle)
+
+	form := url.Values{"name": {"Alice"}}
+	req := httptest.NewRequest("POST", "/f/wh-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if !wh.wait(2 * time.Second) {
+		t.Fatal("webhook not called within timeout")
+	}
+	if wh.callCount() != 1 {
+		t.Errorf("webhook calls = %d, want 1", wh.callCount())
+	}
+}
+
+func TestSubmitNoWebhook(t *testing.T) {
+	t.Parallel()
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New error: %v", err)
+	}
+	_ = s.CreateForm(store.Form{ID: "no-wh", Name: "NoWH", EmailTo: "test@test.com"})
+	m := mail.NewMockMailer()
+	wh := newMockWebhookSender()
+	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com"}
+	r := chi.NewRouter()
+	r.Post("/f/{formID}", h.Handle)
+
+	form := url.Values{"name": {"Alice"}}
+	req := httptest.NewRequest("POST", "/f/no-wh", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Wait for email to fire (proves goroutine ran)
+	if !m.Wait(2 * time.Second) {
+		t.Fatal("email not sent")
+	}
+	// Webhook should NOT have been called
+	if wh.callCount() != 0 {
+		t.Errorf("webhook calls = %d, want 0", wh.callCount())
+	}
+}
+
+func TestSubmitNoEmailNoWebhook(t *testing.T) {
+	t.Parallel()
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New error: %v", err)
+	}
+	_ = s.CreateForm(store.Form{ID: "silent", Name: "Silent"})
+	h := &SubmitHandler{Store: s, Notifier: nil, Webhook: nil, BaseURL: "https://example.com"}
+	r := chi.NewRouter()
+	r.Post("/f/{formID}", h.Handle)
+
+	form := url.Values{"name": {"Alice"}}
+	req := httptest.NewRequest("POST", "/f/silent", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	subs, _ := s.ListSubmissions("silent")
+	if len(subs) != 1 {
+		t.Errorf("submissions = %d, want 1", len(subs))
 	}
 }
