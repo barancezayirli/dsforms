@@ -7,10 +7,6 @@ import (
 func setAllRequired(t *testing.T) {
 	t.Helper()
 	t.Setenv("SECRET_KEY", "test-secret-key-32-chars-long!!")
-	t.Setenv("SMTP_HOST", "smtp.example.com")
-	t.Setenv("SMTP_USER", "user@example.com")
-	t.Setenv("SMTP_PASS", "password123")
-	t.Setenv("SMTP_FROM", "DSForms <noreply@example.com>")
 }
 
 // TestLoad does not use t.Parallel because t.Setenv
@@ -26,6 +22,10 @@ func TestLoad(t *testing.T) {
 			name: "all required vars set",
 			setup: func(t *testing.T) {
 				setAllRequired(t)
+				t.Setenv("SMTP_HOST", "smtp.example.com")
+				t.Setenv("SMTP_USER", "user@example.com")
+				t.Setenv("SMTP_PASS", "password123")
+				t.Setenv("SMTP_FROM", "DSForms <noreply@example.com>")
 			},
 			check: func(t *testing.T, cfg Config) {
 				if cfg.SecretKey != "test-secret-key-32-chars-long!!" {
@@ -41,22 +41,6 @@ func TestLoad(t *testing.T) {
 			setup: func(t *testing.T) {
 				setAllRequired(t)
 				t.Setenv("SECRET_KEY", "")
-			},
-			wantPanic: true,
-		},
-		{
-			name: "missing SMTP_HOST panics",
-			setup: func(t *testing.T) {
-				setAllRequired(t)
-				t.Setenv("SMTP_HOST", "")
-			},
-			wantPanic: true,
-		},
-		{
-			name: "missing SMTP_FROM panics",
-			setup: func(t *testing.T) {
-				setAllRequired(t)
-				t.Setenv("SMTP_FROM", "")
 			},
 			wantPanic: true,
 		},
@@ -123,6 +107,21 @@ func TestLoad(t *testing.T) {
 			check: func(t *testing.T, cfg Config) {
 				if cfg.BackupLocalDir != "" {
 					t.Errorf("BackupLocalDir = %q, want empty", cfg.BackupLocalDir)
+				}
+			},
+		},
+		{
+			name: "missing SMTP_HOST does not panic",
+			setup: func(t *testing.T) {
+				t.Setenv("SECRET_KEY", "test-secret-key-32-chars-long!!")
+				// No SMTP vars set at all
+			},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.SMTPHost != "" {
+					t.Errorf("SMTPHost = %q, want empty", cfg.SMTPHost)
+				}
+				if cfg.SMTPFrom != "" {
+					t.Errorf("SMTPFrom = %q, want empty", cfg.SMTPFrom)
 				}
 			},
 		},
