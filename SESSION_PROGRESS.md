@@ -404,11 +404,16 @@
 - Import: checkpoint WAL + remove -wal/-shm files before atomic rename (prevents WAL replay corruption)
 - CLI opens store directly via DB_PATH env var (default /data/dsforms.db)
 - Backup CLI falls back to copy if cross-device rename fails
-- 100MB upload limit on import (separate from the 64KB general body limit)
+- 100MB upload limit on import (global 64KB middleware exempted for this route)
+- Reopen: open-new-first-then-close-old (prevents broken state on failure)
+- Import: close old DB before filesystem ops, abort if WAL removal fails
+- Generic error in flash for import failure (log detail server-side)
+- Content-Length header on export for download progress
 
 ### Deferred items
-- backup_log table tracking (originally planned for S2, deferred here — decided not needed for MVP)
-- CLI tests via os/exec subprocess — complex to set up, tested via underlying store functions instead
+- backup_log table tracking (originally planned for S2, not needed for MVP)
+- CLI tests via os/exec subprocess — tested via underlying store functions instead
+- Store.Reopen concurrency safety (mutex) — address in Session 12
 
 ### Known issues
 - None
