@@ -678,3 +678,62 @@ func TestCreateSessionEmptyUserID(t *testing.T) {
 		t.Fatal("expected error for empty userID")
 	}
 }
+
+func TestDB(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if s.DB() == nil {
+		t.Fatal("DB() returned nil")
+	}
+}
+
+func TestReopen(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	pathA := dir + "/a.db"
+	pathB := dir + "/b.db"
+
+	sA, err := New(pathA)
+	if err != nil {
+		t.Fatalf("New(pathA) error: %v", err)
+	}
+	_ = sA.CreateForm(Form{ID: "f1", Name: "Test", EmailTo: "a@b.com"})
+
+	// Create a second DB at path B (fresh, no forms)
+	sB, err := New(pathB)
+	if err != nil {
+		t.Fatalf("New(pathB) error: %v", err)
+	}
+	sB.Close()
+
+	// Reopen store A at path B — old data should be gone
+	if err := sA.Reopen(pathB); err != nil {
+		t.Fatalf("Reopen error: %v", err)
+	}
+
+	forms, _ := sA.ListForms()
+	if len(forms) != 0 {
+		t.Errorf("forms = %d after reopen to fresh DB, want 0", len(forms))
+	}
+}
+
+func TestReopenRunsMigrations(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	pathA := dir + "/a.db"
+	pathB := dir + "/b.db"
+
+	sA, _ := New(pathA)
+
+	sB, _ := New(pathB)
+	sB.Close()
+
+	if err := sA.Reopen(pathB); err != nil {
+		t.Fatalf("Reopen error: %v", err)
+	}
+
+	// Should be able to create users (migrations ran)
+	if err := sA.CreateUser("test", "pass"); err != nil {
+		t.Errorf("CreateUser after reopen failed: %v", err)
+	}
+}

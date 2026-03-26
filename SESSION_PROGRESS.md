@@ -1,6 +1,6 @@
 # DSForms — Session Progress
 
-## Status: session 9 complete
+## Status: session 10 complete
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
@@ -13,6 +13,7 @@
 - Session 8 — Submission reader
 - Session 9 — Users & account management
 - Refactor: DB-backed session tokens (between S8-S9)
+- Session 10 — Backup + CLI
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -369,6 +370,50 @@
 
 ### Deferred items
 - None
+
+### Known issues
+- None
+
+---
+
+## Session 10 — Backup + CLI
+**Branch:** `session/10-backup-cli`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `internal/backup/backup.go`
+- `internal/backup/backup_test.go`
+- `internal/handler/backup.go`
+- `internal/handler/backup_test.go`
+- `templates/backups.html`
+
+### Files modified
+- `internal/store/store.go` — added Reopen(), DB(), extracted runMigrations()
+- `internal/store/store_test.go` — added TestReopen, TestReopenRunsMigrations, TestDB
+- `main.go` — CLI dispatch (user list/add/set-password/delete, backup create), BackupHandler wiring, 3 backup routes
+
+### Test summary
+- 8 backup tests + 5 handler tests + 3 store tests = 16 new tests
+- Total project: 179 tests across 9 packages
+- go test -race: clean
+- go vet: clean
+
+### Decisions made
+- Export returns temp file path (not streaming to ResponseWriter) — better separation of concerns
+- Import: checkpoint WAL + remove -wal/-shm files before atomic rename (prevents WAL replay corruption)
+- CLI opens store directly via DB_PATH env var (default /data/dsforms.db)
+- Backup CLI falls back to copy if cross-device rename fails
+- 100MB upload limit on import (global 64KB middleware exempted for this route)
+- Reopen: open-new-first-then-close-old (prevents broken state on failure)
+- Import: close old DB before filesystem ops, abort if WAL removal fails
+- Generic error in flash for import failure (log detail server-side)
+- Content-Length header on export for download progress
+
+### Deferred items
+- backup_log table tracking (originally planned for S2, not needed for MVP)
+- CLI tests via os/exec subprocess — tested via underlying store functions instead
+- Store.Reopen concurrency safety (mutex) — address in Session 12
 
 ### Known issues
 - None

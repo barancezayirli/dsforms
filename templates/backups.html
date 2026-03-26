@@ -1,0 +1,30 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Backups</h1>
+</div>
+
+<div class="card" style="max-width:600px">
+  <div class="card-head">Export Database</div>
+  <div class="card-body">
+    <p class="text-muted" style="margin-bottom:12px">Download a complete snapshot of all your data: forms, submissions, and users.</p>
+    <a href="/admin/backups/export" class="btn btn-mint">Download backup</a>
+  </div>
+</div>
+
+<div class="card" style="max-width:600px;margin-top:20px">
+  <div class="card-head">Restore Database</div>
+  <div class="card-body">
+    <div class="form-error-banner" style="margin-bottom:12px">
+      This will replace ALL current data with the contents of the uploaded file. This cannot be undone.
+    </div>
+    <form method="POST" action="/admin/backups/import" enctype="multipart/form-data" onsubmit="return confirm('This will replace ALL current data. Are you sure?')">
+      <div class="form-group">
+        <label for="file">Choose .db file</label>
+        <input type="file" id="file" name="file" accept=".db" required>
+      </div>
+      <button type="submit" class="btn btn-danger">Restore</button>
+    </form>
+  </div>
+</div>
+{{end}}

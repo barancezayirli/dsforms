@@ -3,14 +3,18 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/youruser/dsforms/internal/auth"
+	"github.com/youruser/dsforms/internal/backup"
 	"github.com/youruser/dsforms/internal/config"
 	"github.com/youruser/dsforms/internal/handler"
 	"github.com/youruser/dsforms/internal/mail"
@@ -35,9 +39,14 @@ func newRouter() *chi.Mux {
 		})
 	})
 
-	// Request body size limit (64KB)
+	// Request body size limit (64KB); backup import has its own 100MB limit.
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Backup import sets its own limit inside the handler
+			if r.URL.Path == "/admin/backups/import" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 			next.ServeHTTP(w, r)
 		})
@@ -72,7 +81,155 @@ func rateLimitMiddleware(l *ratelimit.Limiter) func(http.Handler) http.Handler {
 	}
 }
 
+func runUserCLI(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: dsforms user <list|add|set-password|delete> [args...]")
+		os.Exit(1)
+	}
+
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "/data/dsforms.db"
+	}
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer s.Close()
+
+	switch args[0] {
+	case "list":
+		users, err := s.ListUsers()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("%-20s %s\n", "USERNAME", "CREATED")
+		for _, u := range users {
+			fmt.Printf("%-20s %s\n", u.Username, u.CreatedAt.Format("2006-01-02 15:04:05"))
+		}
+
+	case "add":
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: dsforms user add <username> <password>")
+			os.Exit(1)
+		}
+		if err := s.CreateUser(args[1], args[2]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("User %q created.\n", args[1])
+
+	case "set-password":
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: dsforms user set-password <username> <password>")
+			os.Exit(1)
+		}
+		u, err := s.GetUserByUsername(args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := s.UpdatePassword(u.ID, args[2]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Password updated for user %q.\n", args[1])
+
+	case "delete":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Usage: dsforms user delete <username>")
+			os.Exit(1)
+		}
+		u, err := s.GetUserByUsername(args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := s.DeleteUser(u.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("User %q deleted.\n", args[1])
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: user %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+func runBackupCLI(args []string) {
+	if len(args) == 0 || args[0] != "create" {
+		fmt.Fprintln(os.Stderr, "Usage: dsforms backup create")
+		os.Exit(1)
+	}
+
+	backupDir := os.Getenv("BACKUP_LOCAL_DIR")
+	if backupDir == "" {
+		fmt.Fprintln(os.Stderr, "Error: BACKUP_LOCAL_DIR is not set")
+		os.Exit(1)
+	}
+
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "/data/dsforms.db"
+	}
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer s.Close()
+
+	exportPath, err := backup.Export(s.DB())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating backup: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Move to backup dir with timestamp filename
+	timestamp := time.Now().Format("2006-01-02-150405")
+	destPath := filepath.Join(backupDir, fmt.Sprintf("dsforms-backup-%s.db", timestamp))
+
+	// Ensure backup dir exists
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		os.Remove(exportPath)
+		fmt.Fprintf(os.Stderr, "Error creating backup directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := os.Rename(exportPath, destPath); err != nil {
+		// If rename fails (cross-device), try copy
+		data, readErr := os.ReadFile(exportPath)
+		if readErr != nil {
+			fmt.Fprintf(os.Stderr, "Error reading backup: %v\n", readErr)
+			os.Exit(1)
+		}
+		if writeErr := os.WriteFile(destPath, data, 0644); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "Error writing backup to %s: %v\nTemp file preserved at: %s\n", destPath, writeErr, exportPath)
+			os.Exit(1)
+		}
+		os.Remove(exportPath) // Only delete after successful write
+	}
+
+	fmt.Printf("Backup created: %s\n", destPath)
+}
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "user":
+			runUserCLI(os.Args[2:])
+			return
+		case "backup":
+			runBackupCLI(os.Args[2:])
+			return
+		}
+	}
+
 	cfg := config.Load()
 
 	s, err := store.New(cfg.DBPath)
@@ -101,7 +258,7 @@ func main() {
 	}
 
 	templates := make(map[string]*template.Template)
-	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html", "users.html", "users_new.html", "account.html"} {
+	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html", "users.html", "users_new.html", "account.html", "backups.html"} {
 		t, err := baseTmpl.Clone()
 		if err != nil {
 			log.Fatalf("failed to clone base template: %v", err)
@@ -164,6 +321,14 @@ func main() {
 		Templates: templates,
 	}
 
+	backupHandler := &handler.BackupHandler{
+		Store:     s,
+		SecretKey: cfg.SecretKey,
+		BaseURL:   cfg.BaseURL,
+		DBPath:    cfg.DBPath,
+		Templates: templates,
+	}
+
 	r := newRouter()
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 
@@ -198,6 +363,9 @@ func main() {
 		r.Post("/admin/users/{id}/delete", usersHandler.DeleteUser)
 		r.Get("/admin/account", usersHandler.AccountPage)
 		r.Post("/admin/account/password", usersHandler.UpdatePassword)
+		r.Get("/admin/backups", backupHandler.Page)
+		r.Get("/admin/backups/export", backupHandler.Export)
+		r.Post("/admin/backups/import", backupHandler.Import)
 	})
 
 	log.Printf("starting server on %s", cfg.ListenAddr)
