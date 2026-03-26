@@ -1,6 +1,6 @@
 # DSForms — Session Progress
 
-## Status: session 11 complete
+## Status: ALL SESSIONS COMPLETE
 
 ## Sessions completed
 - Session 1 — Project skeleton & config
@@ -15,6 +15,8 @@
 - Refactor: DB-backed session tokens (between S8-S9)
 - Session 10 — Backup + CLI
 - Session 11 — Docker & deployment
+- Session 12 — Polish (error pages, README, cleanup)
+- Session 13 — Landing page (merged into Session 12)
 
 ## Key decisions log
 - Added RateBurst/RatePerMinute to Config struct (from DSFORMS_PLAN.md §21) to avoid refactoring in Session 3
@@ -454,3 +456,35 @@
 
 ### Known issues
 - None
+
+---
+
+## Session 12+13 — Polish, README, Landing Page
+**Branch:** `session/12-polish`
+**Status:** pending merge
+**Date:** 2026-03-25
+
+### Files created
+- `README.md` — comprehensive with quick start, config, SMTP, CLI, backup, reverse proxy, security
+- `LICENSE` — MIT
+- `templates/404.html` — styled 404 error page
+- `templates/500.html` — styled 500 error page
+- `docs/index.html` — GitHub Pages landing page (dark theme, DM Mono + Inter)
+- `docs/screenshots/.gitkeep` — placeholder for screenshots
+
+### Files modified
+- `main.go` — recovery middleware + NotFound handler
+- `main_test.go` — TestNotFoundHandler + TestRecoveryMiddleware
+
+### Test summary
+- 2 new tests (181 total across 9 packages)
+- Zero TODO/FIXME comments in codebase
+- go test -race: clean
+- go vet: clean
+
+### Decisions made
+- Sessions 12 + 13 merged into one branch (both are polish/docs work)
+- Landing page uses dark GitHub-style theme per DSFORMS_PLAN.md §22
+- README has screenshot placeholders (user adds later)
+- Recovery middleware uses plain text (not HTML templates) since newRouter() has no template access
+- NotFound handler same approach

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dsforms — Form submissions for static sites</title>
+  <meta name="description" content="Self-hosted form endpoint for static websites. One binary. SQLite. Your data stays with you.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* Full CSS inline — no external stylesheet */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --border: #30363d;
+      --font-mono: 'DM Mono', monospace;
+      --font-body: 'Inter', sans-serif;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    a { color: var(--green); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+
+    /* Nav */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(8px);
+      background: rgba(13,17,23,0.85);
+    }
+    .nav-brand {
+      font-family: var(--font-mono);
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--green);
+    }
+    .nav-links { display: flex; gap: 20px; }
+    .nav-links a { color: var(--muted); font-size: 14px; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    /* Hero */
+    .hero { padding: 100px 0 60px; text-align: center; }
+    .hero h1 {
+      font-family: var(--font-mono);
+      font-size: 56px;
+      font-weight: 500;
+      line-height: 1.15;
+      margin-bottom: 20px;
+      animation: fadeUp 0.5s ease both;
+    }
+    .hero-sub {
+      font-size: 18px;
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
+    .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn-primary {
+      display: inline-block;
+      padding: 12px 24px;
+      background: var(--green);
+      color: #0d1117;
+      font-weight: 600;
+      font-size: 15px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-primary:hover { opacity: 0.9; text-decoration: none; }
+    .btn-secondary {
+      display: inline-block;
+      padding: 12px 24px;
+      background: transparent;
+      color: var(--green);
+      font-weight: 500;
+      font-size: 15px;
+      border-radius: 6px;
+      border: 1px solid var(--green);
+    }
+    .btn-secondary:hover { background: rgba(63,185,80,0.1); text-decoration: none; }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 48px 0;
+    }
+
+    /* Section titles */
+    .section-title {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--green);
+      margin-bottom: 28px;
+      letter-spacing: 0.02em;
+    }
+
+    /* How it works */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 48px; }
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 24px;
+    }
+    .step-num {
+      font-family: var(--font-mono);
+      font-size: 32px;
+      color: var(--green);
+      opacity: 0.4;
+      margin-bottom: 12px;
+    }
+    .step-title { font-weight: 600; margin-bottom: 6px; font-size: 15px; }
+    .step-desc { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+    /* Code snippet */
+    .code-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+    .code-bar {
+      background: var(--bg);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .dots { display: flex; gap: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-r { background: #FF5F57; }
+    .dot-y { background: #FFBD2E; }
+    .dot-g { background: #28C840; }
+    .code-filename {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .code-copy {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--green);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .code-copy:hover { background: var(--border); }
+    .code-body {
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.8;
+      overflow-x: auto;
+      white-space: pre;
+      color: var(--text);
+    }
+    .t-tag { color: #79c0ff; }
+    .t-attr { color: #d2a8ff; }
+    .t-val { color: #3fb950; }
+    .t-kw { color: #ffa657; }
+
+    /* Fields table */
+    .fields-table { width: 100%; border-collapse: collapse; margin-bottom: 48px; font-size: 14px; }
+    .fields-table th {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+    .fields-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .fields-table code {
+      font-family: var(--font-mono);
+      color: var(--green);
+      font-size: 13px;
+    }
+
+    /* Features */
+    .features { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 40px; margin-bottom: 48px; }
+    .feature { font-size: 15px; padding: 6px 0; }
+    .feature::before { content: '✓ '; color: var(--green); font-weight: 600; }
+
+    /* Terminal commands */
+    .cmd-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.8;
+      margin-bottom: 16px;
+      overflow-x: auto;
+      white-space: pre;
+      color: var(--text);
+    }
+    .cmd-block .prompt { color: var(--green); user-select: none; }
+    .cmd-block .comment { color: var(--muted); }
+    .cmd-note { font-size: 13px; color: var(--muted); margin-top: 20px; }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      text-align: center;
+      font-size: 14px;
+      color: var(--muted);
+      margin-top: 60px;
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--text); }
+    .footer-brand { font-family: var(--font-mono); color: var(--green); }
+    .footer-links { margin-top: 12px; display: flex; gap: 16px; justify-content: center; }
+
+    /* Animation */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 36px; }
+      .hero { padding: 60px 0 40px; }
+      .steps { grid-template-columns: 1fr; }
+      .features { grid-template-columns: 1fr; }
+      .nav-links { gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-brand">dsforms</span>
+  <div class="nav-links">
+    <a href="https://github.com/barancezayirli/dsforms" target="_blank">GitHub ↗</a>
+    <a href="#self-host">Self-host ↓</a>
+  </div>
+</nav>
+
+<main class="container">
+
+  <!-- Hero -->
+  <section class="hero">
+    <h1>Form submissions<br>for static sites.</h1>
+    <p class="hero-sub">Self-hosted · One binary · No SaaS</p>
+    <div class="hero-buttons">
+      <a class="btn-primary" href="#self-host">Self-host in 5 min →</a>
+      <a class="btn-secondary" href="https://github.com/barancezayirli/dsforms" target="_blank">View on GitHub →</a>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- How it works -->
+  <section>
+    <div class="section-title">// how it works</div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <div class="step-title">Deploy DSForms</div>
+        <div class="step-desc">on your server with Docker Compose</div>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <div class="step-title">Create a form</div>
+        <div class="step-desc">in the admin UI and get your endpoint URL</div>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <div class="step-title">Paste the snippet</div>
+        <div class="step-desc">into your HTML and you're done</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HTML Snippet -->
+  <section>
+    <div class="section-title">// drop this in your html</div>
+    <div class="code-block">
+      <div class="code-bar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="code-filename">contact.html</span>
+        <button class="code-copy" id="copy-btn" aria-label="Copy code snippet">Copy</button>
+      </div>
+      <pre class="code-body" id="snippet"><span class="t-tag">&lt;form</span> <span class="t-attr">action</span>=<span class="t-val">"https://your-server.com/f/YOUR_FORM_ID"</span> <span class="t-attr">method</span>=<span class="t-val">"POST"</span><span class="t-tag">&gt;</span>
+  <span class="t-tag">&lt;input</span> <span class="t-attr">type</span>=<span class="t-val">"hidden"</span> <span class="t-attr">name</span>=<span class="t-val">"_redirect"</span> <span class="t-attr">value</span>=<span class="t-val">"https://yoursite.com/thanks"</span><span class="t-tag">&gt;</span>
+  <span class="t-tag">&lt;input</span> <span class="t-attr">type</span>=<span class="t-val">"text"</span>   <span class="t-attr">name</span>=<span class="t-val">"name"</span>    <span class="t-attr">placeholder</span>=<span class="t-val">"Your name"</span>    <span class="t-kw">required</span><span class="t-tag">&gt;</span>
+  <span class="t-tag">&lt;input</span> <span class="t-attr">type</span>=<span class="t-val">"email"</span>  <span class="t-attr">name</span>=<span class="t-val">"email"</span>   <span class="t-attr">placeholder</span>=<span class="t-val">"Your email"</span>   <span class="t-kw">required</span><span class="t-tag">&gt;</span>
+  <span class="t-tag">&lt;textarea</span>            <span class="t-attr">name</span>=<span class="t-val">"message"</span> <span class="t-attr">placeholder</span>=<span class="t-val">"Your message"</span> <span class="t-kw">required</span><span class="t-tag">&gt;&lt;/textarea&gt;</span>
+  <span class="t-tag">&lt;button</span> <span class="t-attr">type</span>=<span class="t-val">"submit"</span><span class="t-tag">&gt;</span>Send<span class="t-tag">&lt;/button&gt;</span>
+<span class="t-tag">&lt;/form&gt;</span></pre>
+    </div>
+
+    <table class="fields-table">
+      <thead><tr><th>Field</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>_redirect</code></td><td>Where to send the user after submission</td></tr>
+        <tr><td><code>_subject</code></td><td>Custom email subject line</td></tr>
+        <tr><td><code>_honeypot</code></td><td>Hidden spam trap — bots fill it, humans don't</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Features -->
+  <section>
+    <div class="section-title">// what you get</div>
+    <div class="features">
+      <div class="feature">Email notifications on every submission</div>
+      <div class="feature">Submissions stored in SQLite</div>
+      <div class="feature">Simple admin UI to view &amp; manage</div>
+      <div class="feature">CSV export</div>
+      <div class="feature">Honeypot + rate limiting built in</div>
+      <div class="feature">Single Docker Compose deploy</div>
+      <div class="feature">Open source — MIT license</div>
+      <div class="feature">No per-submission fees, ever</div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- Self-host -->
+  <section id="self-host">
+    <div class="section-title">// self-host in 5 min</div>
+
+    <div class="cmd-block"><span class="comment"># Clone and configure</span>
+<span class="prompt">$</span> git clone https://github.com/barancezayirli/dsforms
+<span class="prompt">$</span> cd dsforms
+<span class="prompt">$</span> cp .env.example .env
+<span class="comment"># Edit .env — set SECRET_KEY and SMTP credentials</span></div>
+
+    <div class="cmd-block"><span class="comment"># Start (with Mailpit for email testing)</span>
+<span class="prompt">$</span> make dev-up
+<span class="comment"># Or production (bring your own SMTP)</span>
+<span class="prompt">$</span> make docker-up</div>
+
+    <div class="cmd-block"><span class="comment"># Open the admin UI</span>
+<span class="prompt">$</span> open http://localhost:8080
+<span class="comment"># Default login: admin / admin</span></div>
+
+    <p class="cmd-note">Requires Docker + Docker Compose. A $5 VPS is enough.</p>
+  </section>
+
+</main>
+
+<footer>
+  <div><span class="footer-brand">dsforms</span> · MIT License · Made by <a href="https://barancezayirli.com">Baran Cezayirli</a></div>
+  <div class="footer-links">
+    <a href="https://github.com/barancezayirli/dsforms" target="_blank">GitHub ↗</a>
+    <a href="https://github.com/barancezayirli/dsforms/issues" target="_blank">Issues ↗</a>
+  </div>
+</footer>
+
+<script>
+document.getElementById('copy-btn').addEventListener('click', function() {
+  var code = document.getElementById('snippet').innerText;
+  navigator.clipboard.writeText(code).then(function() {
+    var btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    btn.setAttribute('aria-label', 'Copied');
+    setTimeout(function() {
+      btn.textContent = 'Copy';
+      btn.setAttribute('aria-label', 'Copy code snippet');
+    }, 2000);
+  });
+});
+</script>
+
+</body>
+</html>
