@@ -3,6 +3,7 @@ package backup
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/youruser/dsforms/internal/store"
@@ -70,21 +71,35 @@ func Import(s *store.Store, uploadedPath, dbPath string) error {
 	}
 
 	// Checkpoint the live DB so all WAL frames are written to the main file.
-	// Ignore error — we will remove the WAL files below regardless.
-	_, _ = s.DB().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	if _, err := s.DB().Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		log.Printf("import: WAL checkpoint failed (recent unflushed data may be lost): %v", err)
+	}
 
-	// Remove the stale WAL and SHM files *before* renaming the new DB in place.
-	// If we leave them, SQLite would replay the old WAL on top of the new file
-	// when the store is reopened, corrupting the import.
-	os.Remove(dbPath + "-wal")
-	os.Remove(dbPath + "-shm")
+	// Close the old connection before filesystem operations so no writes race
+	// with the rename.
+	if err := s.DB().Close(); err != nil {
+		log.Printf("import: warning: close old db: %v", err)
+	}
+
+	// Remove stale WAL file — if it exists and cannot be removed, abort to
+	// prevent SQLite replaying old WAL frames over the new database.
+	walPath := dbPath + "-wal"
+	if _, statErr := os.Stat(walPath); statErr == nil {
+		if err := os.Remove(walPath); err != nil {
+			return fmt.Errorf("import: cannot remove old WAL file (aborting to prevent corruption): %w", err)
+		}
+	}
+	// SHM is reconstructable — best-effort removal only.
+	if err := os.Remove(dbPath + "-shm"); err != nil && !os.IsNotExist(err) {
+		log.Printf("import: warning: could not remove SHM file: %v", err)
+	}
 
 	// Atomic swap: rename the validated uploaded file to the live DB path.
 	if err := os.Rename(uploadedPath, dbPath); err != nil {
 		return fmt.Errorf("import: rename: %w", err)
 	}
 
-	// Reopen closes the old connection and opens the new file.
+	// Reopen opens a fresh connection to the new file (old is already closed).
 	if err := s.Reopen(dbPath); err != nil {
 		return fmt.Errorf("import: reopen: %w", err)
 	}

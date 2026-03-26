@@ -39,9 +39,14 @@ func newRouter() *chi.Mux {
 		})
 	})
 
-	// Request body size limit (64KB)
+	// Request body size limit (64KB); backup import has its own 100MB limit.
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Backup import sets its own limit inside the handler
+			if r.URL.Path == "/admin/backups/import" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 			next.ServeHTTP(w, r)
 		})
@@ -124,7 +129,7 @@ func runUserCLI(args []string) {
 		}
 		u, err := s.GetUserByUsername(args[1])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: user not found\n")
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 		if err := s.UpdatePassword(u.ID, args[2]); err != nil {
@@ -140,7 +145,7 @@ func runUserCLI(args []string) {
 		}
 		u, err := s.GetUserByUsername(args[1])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: user not found\n")
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 		if err := s.DeleteUser(u.ID); err != nil {
@@ -199,15 +204,15 @@ func runBackupCLI(args []string) {
 	if err := os.Rename(exportPath, destPath); err != nil {
 		// If rename fails (cross-device), try copy
 		data, readErr := os.ReadFile(exportPath)
-		os.Remove(exportPath)
 		if readErr != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", readErr)
+			fmt.Fprintf(os.Stderr, "Error reading backup: %v\n", readErr)
 			os.Exit(1)
 		}
 		if writeErr := os.WriteFile(destPath, data, 0644); writeErr != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", writeErr)
+			fmt.Fprintf(os.Stderr, "Error writing backup to %s: %v\nTemp file preserved at: %s\n", destPath, writeErr, exportPath)
 			os.Exit(1)
 		}
+		os.Remove(exportPath) // Only delete after successful write
 	}
 
 	fmt.Printf("Backup created: %s\n", destPath)

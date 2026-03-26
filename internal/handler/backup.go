@@ -68,9 +68,17 @@ func (h *BackupHandler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
+	fi, err := f.Stat()
+	if err != nil {
+		log.Printf("backup export: stat error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	filename := fmt.Sprintf("dsforms-backup-%s.db", time.Now().UTC().Format("2006-01-02"))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
 
 	if _, err := io.Copy(w, f); err != nil {
 		log.Printf("backup export: stream to response: %v", err)
@@ -119,7 +127,7 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	if err := backup.Import(h.Store, tmpPath, h.DBPath); err != nil {
 		log.Printf("backup import error: %v", err)
-		flash.Set(w, h.SecretKey, "error", "Restore failed: "+err.Error())
+		flash.Set(w, h.SecretKey, "error", "Restore failed. The uploaded file may be invalid or corrupted.")
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return
 	}

@@ -156,28 +156,28 @@ func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
-// Reopen closes the current database and opens a new one at the given path.
-// Runs migrations on the new database.
+// Reopen opens a new database at path, confirms it is healthy, then closes the
+// old connection. If the old connection was already closed (e.g. by Import),
+// that close error is intentionally ignored.
 func (s *Store) Reopen(path string) error {
-	if err := s.db.Close(); err != nil {
-		return fmt.Errorf("reopen: close old db: %w", err)
-	}
-
 	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
-	db, err := sql.Open("sqlite", dsn)
+	newDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return fmt.Errorf("reopen: open new db: %w", err)
 	}
-
-	if err := db.Ping(); err != nil {
+	if err := newDB.Ping(); err != nil {
+		newDB.Close()
 		return fmt.Errorf("reopen: ping: %w", err)
 	}
-
-	if err := runMigrations(db); err != nil {
+	if err := runMigrations(newDB); err != nil {
+		newDB.Close()
 		return fmt.Errorf("reopen: %w", err)
 	}
-
-	s.db = db
+	// Close old connection; ignore error — may already be closed by Import.
+	if s.db != nil {
+		s.db.Close()
+	}
+	s.db = newDB
 	return nil
 }
 
