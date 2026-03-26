@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 
@@ -175,6 +176,27 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 		webhookFormat = ""
 	}
 
+	if webhookURL != "" {
+		u, parseErr := url.Parse(webhookURL)
+		if parseErr != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			data := formNewData{
+				Title:       "New Form",
+				Active:      "forms",
+				CurrentUser: user,
+				Form: store.Form{
+					Name: name, EmailTo: emailTo, Redirect: redirect,
+					WebhookURL: webhookURL, WebhookFormat: webhookFormat,
+				},
+				Error: "Webhook URL must use http or https.",
+			}
+			if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
+				log.Printf("form_new template error: %v", err)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+			return
+		}
+	}
+
 	f := store.Form{
 		ID:            uuid.New().String(),
 		Name:          name,
@@ -277,6 +299,42 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		webhookFormat = ""
+	}
+
+	if webhookURL != "" {
+		u, parseErr := url.Parse(webhookURL)
+		if parseErr != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			ef, err := h.Store.GetForm(id)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					http.Error(w, "form not found", http.StatusNotFound)
+					return
+				}
+				log.Printf("edit form: get form %s error: %v", id, err)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			ef.Name = name
+			ef.EmailTo = emailTo
+			ef.Redirect = redirect
+			ef.WebhookURL = webhookURL
+			ef.WebhookFormat = webhookFormat
+			flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+			data := formEditData{
+				Title:       "Edit Form",
+				Active:      "forms",
+				CurrentUser: user,
+				Flash:       newFlash(flashType, flashMsg),
+				Form:        ef,
+				BaseURL:     h.BaseURL,
+				Error:       "Webhook URL must use http or https.",
+			}
+			if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
+				log.Printf("form_edit template error: %v", err)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+			return
+		}
 	}
 
 	f := store.Form{
@@ -513,9 +571,19 @@ func (h *AdminHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 
 	form, err := h.Store.GetForm(id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "form not found",
+			})
+			return
+		}
+		log.Printf("test webhook: get form %s error: %v", id, err)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
-			"error":   "form not found",
+			"error":   "internal error",
 		})
 		return
 	}
@@ -539,14 +607,20 @@ func (h *AdminHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 		IP: "127.0.0.1",
 	}
 
-	if h.Webhook != nil {
-		if err := h.Webhook.Send(form, testSub); err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": false,
-				"error":   err.Error(),
-			})
-			return
-		}
+	if h.Webhook == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "webhook sender not configured",
+		})
+		return
+	}
+
+	if err := h.Webhook.Send(form, testSub); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
