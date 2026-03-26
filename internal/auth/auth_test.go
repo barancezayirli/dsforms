@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,133 +9,69 @@ import (
 	"github.com/youruser/dsforms/internal/store"
 )
 
-const testSecret = "test-secret-key-32-chars-long!!"
-
-type mockUserStore struct {
-	user store.User
-	err  error
-}
-
-func (m *mockUserStore) GetUserByID(id string) (store.User, error) {
-	if m.err != nil {
-		return store.User{}, m.err
-	}
-	if id != m.user.ID {
-		return store.User{}, fmt.Errorf("user %q not found", id)
-	}
-	return m.user, nil
-}
-
 func TestCreateSessionCookieAttributes(t *testing.T) {
 	t.Parallel()
-	c := CreateSessionCookie("user-123", testSecret, "https://example.com")
+	c := CreateSessionCookie("abc123token", "https://example.com")
 	if !c.HttpOnly {
-		t.Error("HttpOnly = false, want true")
+		t.Error("HttpOnly = false")
 	}
 	if c.SameSite != http.SameSiteLaxMode {
-		t.Errorf("SameSite = %v, want Lax", c.SameSite)
+		t.Error("SameSite != Lax")
 	}
 	if !c.Secure {
-		t.Error("Secure = false, want true for https baseURL")
+		t.Error("Secure = false for https")
+	}
+	if c.Path != "/" {
+		t.Errorf("Path = %q", c.Path)
+	}
+	if c.MaxAge != 30*24*60*60 {
+		t.Errorf("MaxAge = %d", c.MaxAge)
+	}
+	if c.Value != "abc123token" {
+		t.Errorf("Value = %q, want abc123token", c.Value)
 	}
 	if c.Name != CookieName {
-		t.Errorf("Name = %q, want %q", c.Name, CookieName)
+		t.Errorf("Name = %q", c.Name)
 	}
 }
 
-func TestCreateSessionCookieSecureFalseForHTTP(t *testing.T) {
+func TestCreateSessionCookieSecureFalseHTTP(t *testing.T) {
 	t.Parallel()
-	c := CreateSessionCookie("user-123", testSecret, "http://localhost:8080")
+	c := CreateSessionCookie("token", "http://localhost")
 	if c.Secure {
-		t.Error("Secure = true, want false for http baseURL")
+		t.Error("Secure = true for http")
 	}
 }
 
-func TestCreateSessionCookiePathAndMaxAge(t *testing.T) {
+func TestGetSessionToken(t *testing.T) {
 	t.Parallel()
-	c := CreateSessionCookie("user-123", testSecret, "https://example.com")
-	if c.Path != "/" {
-		t.Errorf("Path = %q, want /", c.Path)
-	}
-	expectedMaxAge := 30 * 24 * 60 * 60
-	if c.MaxAge != expectedMaxAge {
-		t.Errorf("MaxAge = %d, want %d", c.MaxAge, expectedMaxAge)
-	}
-}
-
-func TestCreateSessionCookieContainsUserID(t *testing.T) {
-	t.Parallel()
-	c := CreateSessionCookie("user-123", testSecret, "https://example.com")
-	if c.Value == "" {
-		t.Fatal("cookie value is empty")
-	}
 	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(c)
-	userID, ok := ValidateSession(req, testSecret)
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: "mytoken"})
+	token, ok := GetSessionToken(req)
 	if !ok {
-		t.Fatal("ValidateSession returned ok=false for fresh cookie")
+		t.Fatal("ok = false")
 	}
-	if userID != "user-123" {
-		t.Errorf("userID = %q, want %q", userID, "user-123")
+	if token != "mytoken" {
+		t.Errorf("token = %q", token)
 	}
 }
 
-func TestValidateSessionTamperedCookie(t *testing.T) {
+func TestGetSessionTokenMissing(t *testing.T) {
 	t.Parallel()
-	c := CreateSessionCookie("user-123", testSecret, "https://example.com")
-	c.Value = c.Value + "tampered"
 	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(c)
-	_, ok := ValidateSession(req, testSecret)
+	_, ok := GetSessionToken(req)
 	if ok {
-		t.Fatal("ValidateSession returned ok=true for tampered cookie")
+		t.Fatal("ok = true for missing cookie")
 	}
 }
 
-func TestValidateSessionExpiredCookie(t *testing.T) {
+func TestGetSessionTokenEmpty(t *testing.T) {
 	t.Parallel()
-	val := createSessionValue("user-123", testSecret, time.Now().Add(-31*24*time.Hour))
-	c := &http.Cookie{Name: CookieName, Value: val}
 	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(c)
-	_, ok := ValidateSession(req, testSecret)
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: ""})
+	_, ok := GetSessionToken(req)
 	if ok {
-		t.Fatal("ValidateSession returned ok=true for expired cookie")
-	}
-}
-
-func TestValidateSessionNotExpiredAt29Days(t *testing.T) {
-	t.Parallel()
-	val := createSessionValue("user-123", testSecret, time.Now().Add(-29*24*time.Hour))
-	c := &http.Cookie{Name: CookieName, Value: val}
-	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(c)
-	userID, ok := ValidateSession(req, testSecret)
-	if !ok {
-		t.Fatal("ValidateSession returned ok=false for 29-day-old cookie")
-	}
-	if userID != "user-123" {
-		t.Errorf("userID = %q, want user-123", userID)
-	}
-}
-
-func TestValidateSessionMissingCookie(t *testing.T) {
-	t.Parallel()
-	req := httptest.NewRequest("GET", "/", nil)
-	_, ok := ValidateSession(req, testSecret)
-	if ok {
-		t.Fatal("ValidateSession returned ok=true for missing cookie")
-	}
-}
-
-func TestValidateSessionWrongKey(t *testing.T) {
-	t.Parallel()
-	c := CreateSessionCookie("user-123", testSecret, "https://example.com")
-	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(c)
-	_, ok := ValidateSession(req, "wrong-secret-key-32-chars-long!!")
-	if ok {
-		t.Fatal("ValidateSession returned ok=true with wrong secret key")
+		t.Fatal("ok = true for empty cookie value")
 	}
 }
 
@@ -144,24 +79,32 @@ func TestClearSessionCookie(t *testing.T) {
 	t.Parallel()
 	c := ClearSessionCookie()
 	if c.MaxAge != -1 {
-		t.Errorf("MaxAge = %d, want -1", c.MaxAge)
+		t.Errorf("MaxAge = %d", c.MaxAge)
 	}
 	if c.Name != CookieName {
-		t.Errorf("Name = %q, want %q", c.Name, CookieName)
+		t.Errorf("Name = %q", c.Name)
 	}
 }
 
-func TestRequireAuthAllowsValidSession(t *testing.T) {
+func TestRequireAuthValidSession(t *testing.T) {
 	t.Parallel()
-	mock := &mockUserStore{
-		user: store.User{ID: "user-123", Username: "admin"},
-	}
-	handler := RequireAuth(mock, testSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s, _ := store.New(":memory:")
+	admin, _ := s.GetUserByUsername("admin")
+	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+
+	handler := RequireAuth(s)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, ok := UserFromContext(r.Context())
+		if !ok {
+			t.Fatal("no user in context")
+		}
+		if u.Username != "admin" {
+			t.Errorf("Username = %q", u.Username)
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	c := CreateSessionCookie("user-123", testSecret, "https://example.com")
+
 	req := httptest.NewRequest("GET", "/admin/forms", nil)
-	req.AddCookie(c)
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: token})
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -169,65 +112,73 @@ func TestRequireAuthAllowsValidSession(t *testing.T) {
 	}
 }
 
-func TestRequireAuthRedirectsInvalidSession(t *testing.T) {
+func TestRequireAuthInvalidToken(t *testing.T) {
 	t.Parallel()
-	mock := &mockUserStore{}
-	handler := RequireAuth(mock, testSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s, _ := store.New(":memory:")
+	handler := RequireAuth(s)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest("GET", "/admin/forms", nil)
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: "invalid-token"})
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
 	}
-	loc := w.Header().Get("Location")
-	if loc != "/admin/login" {
-		t.Errorf("Location = %q, want /admin/login", loc)
-	}
-}
-
-func TestRequireAuthLoadsUserIntoContext(t *testing.T) {
-	t.Parallel()
-	mock := &mockUserStore{
-		user: store.User{ID: "user-123", Username: "admin", IsDefaultPassword: true},
-	}
-	var gotUser store.User
-	handler := RequireAuth(mock, testSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, ok := UserFromContext(r.Context())
-		if !ok {
-			t.Fatal("UserFromContext returned ok=false")
+	// Should clear the stale cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == CookieName && c.MaxAge == -1 {
+			return
 		}
-		gotUser = u
-		w.WriteHeader(http.StatusOK)
-	}))
-	c := CreateSessionCookie("user-123", testSecret, "https://example.com")
-	req := httptest.NewRequest("GET", "/admin/forms", nil)
-	req.AddCookie(c)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if gotUser.Username != "admin" {
-		t.Errorf("Username = %q, want admin", gotUser.Username)
 	}
-	if !gotUser.IsDefaultPassword {
-		t.Error("IsDefaultPassword = false, want true")
-	}
+	t.Error("stale cookie not cleared")
 }
 
-func TestRequireAuthRedirectsWhenUserNotFound(t *testing.T) {
+func TestRequireAuthNoCookie(t *testing.T) {
 	t.Parallel()
-	mock := &mockUserStore{
-		err: fmt.Errorf("user not found"),
-	}
-	handler := RequireAuth(mock, testSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s, _ := store.New(":memory:")
+	handler := RequireAuth(s)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	c := CreateSessionCookie("deleted-user", testSecret, "https://example.com")
 	req := httptest.NewRequest("GET", "/admin/forms", nil)
-	req.AddCookie(c)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
+	}
+}
+
+func TestRequireAuthExpiredSession(t *testing.T) {
+	t.Parallel()
+	s, _ := store.New(":memory:")
+	admin, _ := s.GetUserByUsername("admin")
+	token, _ := s.CreateSession(admin.ID, -1*time.Hour) // already expired
+	handler := RequireAuth(s)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest("GET", "/admin/forms", nil)
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: token})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+}
+
+func TestRequireAuthDeletedSession(t *testing.T) {
+	t.Parallel()
+	s, _ := store.New(":memory:")
+	admin, _ := s.GetUserByUsername("admin")
+	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	s.DeleteSession(token) // simulate logout
+	handler := RequireAuth(s)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest("GET", "/admin/forms", nil)
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: token})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302 after session deleted", w.Code)
 	}
 }

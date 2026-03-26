@@ -81,6 +81,16 @@ func main() {
 	}
 	defer s.Close()
 
+	// Clean expired sessions periodically
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		for range ticker.C {
+			if err := s.CleanExpiredSessions(); err != nil {
+				log.Printf("session cleanup error: %v", err)
+			}
+		}
+	}()
+
 	// Parse base template once, then clone it for each page that extends it.
 	funcMap := template.FuncMap{
 		"add": func(a, b int) int { return a + b },
@@ -158,7 +168,7 @@ func main() {
 	r.Get("/success", adminHandler.Success)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireAuth(s, cfg.SecretKey))
+		r.Use(auth.RequireAuth(s))
 		r.Post("/admin/logout", authHandler.Logout)
 		r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/admin/forms", http.StatusFound)

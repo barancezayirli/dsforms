@@ -1,7 +1,10 @@
 package store
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -80,6 +83,15 @@ CREATE TABLE IF NOT EXISTS submissions (
 
 CREATE INDEX IF NOT EXISTS idx_submissions_form_id ON submissions(form_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_read ON submissions(read);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    expires_at DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 `
 
 // New opens a SQLite database and runs migrations.
@@ -511,4 +523,74 @@ func (s *Store) UnreadCount(formID string) (int, error) {
 		return 0, fmt.Errorf("unread count: %w", err)
 	}
 	return count, nil
+}
+
+// hashToken returns the hex-encoded SHA-256 hash of the given token.
+func hashToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
+// CreateSession creates a new session for the given user and returns the raw token.
+func (s *Store) CreateSession(userID string, expiry time.Duration) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("create session: userID must not be empty")
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("create session: %w", err)
+	}
+	token := hex.EncodeToString(b)
+	tokenHash := hashToken(token)
+	expiresAt := time.Now().Add(expiry)
+	_, err := s.db.Exec(
+		"INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+		tokenHash, userID, expiresAt,
+	)
+	if err != nil {
+		return "", fmt.Errorf("create session: %w", err)
+	}
+	return token, nil
+}
+
+// GetSession returns the userID for the given raw token if it exists and is not expired.
+func (s *Store) GetSession(token string) (string, error) {
+	tokenHash := hashToken(token)
+	var userID string
+	err := s.db.QueryRow(
+		"SELECT user_id FROM sessions WHERE token_hash = ? AND expires_at > datetime('now')",
+		tokenHash,
+	).Scan(&userID)
+	if err != nil {
+		return "", fmt.Errorf("get session: %w", err)
+	}
+	return userID, nil
+}
+
+// DeleteSession removes the session with the given raw token.
+func (s *Store) DeleteSession(token string) error {
+	tokenHash := hashToken(token)
+	_, err := s.db.Exec("DELETE FROM sessions WHERE token_hash = ?", tokenHash)
+	if err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	return nil
+}
+
+// DeleteUserSessions removes all sessions for the given user.
+func (s *Store) DeleteUserSessions(userID string) error {
+	_, err := s.db.Exec("DELETE FROM sessions WHERE user_id = ?", userID)
+	if err != nil {
+		return fmt.Errorf("delete user sessions: %w", err)
+	}
+	return nil
+}
+
+// CleanExpiredSessions removes all expired sessions from the database.
+func (s *Store) CleanExpiredSessions() error {
+	_, err := s.db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
+	if err != nil {
+		return fmt.Errorf("clean expired sessions: %w", err)
+	}
+	return nil
 }

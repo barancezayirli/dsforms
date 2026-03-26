@@ -19,6 +19,7 @@
 - Used `_pragma=foreign_keys(1)` instead of `_foreign_keys=ON` for modernc.org/sqlite DSN (driver quirk)
 - Deferred backup_log table/BackupLog model to Session 10 (no schema in DSFORMS_PLAN.md)
 - Used t.TempDir() for idempotency tests (real file needed to test persistence across New() calls)
+- Replaced HMAC-signed session cookies with DB-backed random tokens (SHA-256 hashed in storage)
 
 ## Known issues / deferred items
 - ~~BASE_URL empty string has no startup warning — address in Session 4~~ RESOLVED: Secure flag set conditionally based on baseURL prefix

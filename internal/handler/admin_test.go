@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/youruser/dsforms/internal/auth"
@@ -85,7 +86,7 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 
 	r := chi.NewRouter()
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireAuth(s, testSecretKey))
+		r.Use(auth.RequireAuth(s))
 		r.Get("/admin/forms", ah.Dashboard)
 		r.Get("/admin/forms/new", ah.NewFormPage)
 		r.Post("/admin/forms/new", ah.CreateForm)
@@ -107,7 +108,8 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 func doAdminRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	admin, _ := s.GetUserByUsername("admin")
-	cookie := auth.CreateSessionCookie(admin.ID, testSecretKey, "https://example.com")
+	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+	cookie := auth.CreateSessionCookie(token, "https://example.com")
 
 	var req *http.Request
 	if body != "" {
