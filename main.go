@@ -20,6 +20,7 @@ import (
 	"github.com/youruser/dsforms/internal/mail"
 	"github.com/youruser/dsforms/internal/ratelimit"
 	"github.com/youruser/dsforms/internal/store"
+	"github.com/youruser/dsforms/internal/webhook"
 )
 
 //go:embed templates/*
@@ -301,18 +302,24 @@ func main() {
 		templates[name] = t
 	}
 
-	mailer := &mail.Mailer{
-		Host:    cfg.SMTPHost,
-		Port:    cfg.SMTPPort,
-		User:    cfg.SMTPUser,
-		Pass:    cfg.SMTPPass,
-		From:    cfg.SMTPFrom,
-		BaseURL: cfg.BaseURL,
+	var mailer handler.Notifier
+	if cfg.SMTPHost != "" && cfg.SMTPFrom != "" {
+		mailer = &mail.Mailer{
+			Host:    cfg.SMTPHost,
+			Port:    cfg.SMTPPort,
+			User:    cfg.SMTPUser,
+			Pass:    cfg.SMTPPass,
+			From:    cfg.SMTPFrom,
+			BaseURL: cfg.BaseURL,
+		}
 	}
+
+	webhookSender := webhook.NewSender()
 
 	submitHandler := &handler.SubmitHandler{
 		Store:    s,
 		Notifier: mailer,
+		Webhook:  webhookSender,
 		BaseURL:  cfg.BaseURL,
 	}
 
@@ -335,6 +342,7 @@ func main() {
 		SecretKey: cfg.SecretKey,
 		BaseURL:   cfg.BaseURL,
 		Templates: templates,
+		Webhook:   webhookSender,
 	}
 
 	usersHandler := &handler.UsersHandler{
@@ -376,6 +384,7 @@ func main() {
 		r.Post("/admin/forms/{id}/delete", adminHandler.DeleteForm)
 		r.Get("/admin/forms/{id}", adminHandler.FormDetail)
 		r.Post("/admin/forms/{id}/read-all", adminHandler.MarkAllRead)
+		r.Post("/admin/forms/{id}/test-webhook", adminHandler.TestWebhook)
 		r.Get("/admin/forms/{id}/export", adminHandler.ExportCSV)
 		r.Get("/admin/forms/{formID}/submissions/{subID}", adminHandler.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", adminHandler.MarkRead)
