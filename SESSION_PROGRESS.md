@@ -306,33 +306,32 @@
 **Date:** 2026-03-25
 
 ### Files created
-- `templates/form_detail.html`
+- `templates/form_detail.html` — paginated submissions table
+- `templates/submission_detail.html` — individual submission view
 
 ### Files modified
-- `templates/base.html` — reader CSS (topbar, msg-list, pane, fields, responsive @640px)
-- `internal/handler/admin.go` — added FormDetail, MarkRead, MarkAllRead, DeleteSubmission, ExportCSV
-- `internal/handler/admin_test.go` — added 14 reader tests
-- `internal/store/store.go` — added GetSubmission
-- `internal/store/store_test.go` — added TestGetSubmission, TestGetSubmissionNotFound
-- `main.go` — FuncMap for `add` template function, form_detail template cloning, 5 new routes
+- `templates/base.html` — table styles (unread-dot, sub-name, pagination), field styles
+- `internal/handler/admin.go` — added FormDetail (paginated), SubmissionDetail (new), MarkRead, MarkAllRead, DeleteSubmission, ExportCSV
+- `internal/handler/admin_test.go` — reader tests including pagination + submission detail
+- `internal/store/store.go` — added GetSubmission, ListSubmissionsPaged, CountSubmissions
+- `internal/store/store_test.go` — tests for new store methods
+- `main.go` — FuncMap, template cloning for form_detail + submission_detail, 6 new routes
+- `.gitignore` — added .playwright-mcp/ and .remember/
 
 ### Test summary
-- 14 handler tests + 2 store tests = 16 new tests
-- Total project: 136 tests across 8 packages
-- go test -race: clean
+- go test -race: clean across all 8 packages
 - go vet: clean
 
 ### Decisions made
-- ActiveSub (not Active) for selected submission to avoid field name conflict
-- Template `add` FuncMap registered for prev/next pagination math
-- GetSubmission added to store for MarkRead/DeleteSubmission redirect logic
+- Refactored from two-pane "email client" to table + detail page (per user feedback — simpler for server-rendered HTML)
+- Added pagination (20 per page) with ListSubmissionsPaged + CountSubmissions
+- Separate SubmissionDetail page (GET /admin/forms/{formID}/submissions/{subID}) for viewing individual submissions
+- Auto-mark-read happens on SubmissionDetail view (not on list page)
 - CSV filename uses form ID (not name) to prevent header injection
-- Auto-mark-read means "Mark read" button is never visible on first load (consistent behavior)
-- Responsive reader stacks at 640px with msg-list max-height 240px
+- Go template `or` with piped `index` doesn't work — replaced with if/else blocks
 
 ### Deferred items
 - CSV flush error check — address in Session 12 (polish)
-- MarkRead button dead code in template (auto-mark makes it unreachable on first load) — harmless
 
 ### Known issues
 - None
