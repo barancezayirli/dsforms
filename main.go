@@ -28,6 +28,22 @@ var templateFS embed.FS
 func newRouter() *chi.Mux {
 	r := chi.NewRouter()
 
+	// Recovery middleware — must be first so it wraps all other middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Printf("panic recovered: %v", err)
+					w.WriteHeader(http.StatusInternalServerError)
+					if _, werr := w.Write([]byte("Internal Server Error")); werr != nil {
+						log.Printf("recovery write error: %v", werr)
+					}
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	// Security headers on all responses
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +72,13 @@ func newRouter() *chi.Mux {
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte("ok")); err != nil {
 			log.Printf("healthz write error: %v", err)
+		}
+	})
+
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		if _, err := w.Write([]byte("Page not found")); err != nil {
+			log.Printf("404 write error: %v", err)
 		}
 	})
 

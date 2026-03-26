@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +108,34 @@ func TestRateLimitMiddleware(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Errorf("status = %d, want 429", w.Code)
+	}
+}
+
+func TestNotFoundHandler(t *testing.T) {
+	t.Parallel()
+	r := newRouter()
+	req := httptest.NewRequest("GET", "/nonexistent-route", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Page not found") {
+		t.Error("404 page content not rendered")
+	}
+}
+
+func TestRecoveryMiddleware(t *testing.T) {
+	t.Parallel()
+	r := newRouter()
+	r.Get("/panic-test", func(w http.ResponseWriter, r *http.Request) {
+		panic("test panic")
+	})
+	req := httptest.NewRequest("GET", "/panic-test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
 	}
 }
 
