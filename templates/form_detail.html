@@ -41,11 +41,11 @@
         <td>{{if not .Read}}<span class="unread-dot"></span>{{end}}</td>
         <td>
           <a href="/admin/forms/{{$.Form.ID}}/submissions/{{.ID}}" class="sub-name{{if not .Read}} sub-unread{{end}}">
-            {{index .Data "name" | or (index .Data "email") | or "Submission"}}
+            {{if index .Data "name"}}{{index .Data "name"}}{{else if index .Data "email"}}{{index .Data "email"}}{{else}}Submission{{end}}
           </a>
           {{if index .Data "email"}}<div class="sub-email">{{index .Data "email"}}</div>{{end}}
         </td>
-        <td class="sub-preview">{{index .Data "message" | or (index .Data "body") | or (index .Data "content") | or "—"}}</td>
+        <td class="sub-preview">{{if index .Data "message"}}{{index .Data "message"}}{{else if index .Data "body"}}{{index .Data "body"}}{{else if index .Data "content"}}{{index .Data "content"}}{{else}}—{{end}}</td>
         <td class="text-muted" style="white-space:nowrap">{{.CreatedAt.Format "Jan 2, 3:04 PM"}}</td>
         <td class="actions">
           <form method="POST" action="/admin/submissions/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this submission?')">
