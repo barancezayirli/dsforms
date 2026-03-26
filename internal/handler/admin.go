@@ -517,7 +517,7 @@ func (h *AdminHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(keys)
 
-	filename := fmt.Sprintf("%s-submissions.csv", f.Name)
+	filename := fmt.Sprintf("%s-submissions.csv", f.ID)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 

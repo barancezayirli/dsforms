@@ -407,13 +407,14 @@ func TestFormDetailPrevNext(t *testing.T) {
 	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"name":"A"}`})
 	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f1", RawData: `{"name":"B"}`})
 	_ = s.CreateSubmission(store.Submission{ID: "s3", FormID: "f1", RawData: `{"name":"C"}`})
-	// Select middle submission
 	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1?sub=s2", "")
 	body := w.Body.String()
-	// Should have both prev and next
-	if !strings.Contains(body, `<span class="prev">`) || !strings.Contains(body, `<span class="next">`) {
-		// Check that prev and next are not empty
-		t.Log("body:", body)
+	// s2 is the middle submission — should have both prev and next
+	if !strings.Contains(body, `<span class="prev">s`) {
+		t.Errorf("expected non-empty prev ID, body: %s", body)
+	}
+	if !strings.Contains(body, `<span class="next">s`) {
+		t.Errorf("expected non-empty next ID, body: %s", body)
 	}
 }
 
