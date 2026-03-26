@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,16 +107,20 @@ func runMigrations(db *sql.DB) error {
 	return nil
 }
 
-// runAlterMigrations adds columns to existing tables. Errors are silently
-// ignored because SQLite returns an error when a column already exists.
-func runAlterMigrations(db *sql.DB) {
+// runAlterMigrations adds columns to existing tables. Only "duplicate column"
+// errors are ignored; all other errors are returned.
+func runAlterMigrations(db *sql.DB) error {
 	alters := []string{
 		"ALTER TABLE forms ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE forms ADD COLUMN webhook_format TEXT NOT NULL DEFAULT ''",
 	}
 	for _, q := range alters {
-		_, _ = db.Exec(q) // silently ignore "duplicate column" errors
+		_, err := db.Exec(q)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("alter migration: %w", err)
+		}
 	}
+	return nil
 }
 
 // New opens a SQLite database and runs migrations.
@@ -133,7 +138,9 @@ func New(path string) (*Store, error) {
 	if err := runMigrations(db); err != nil {
 		return nil, err
 	}
-	runAlterMigrations(db)
+	if err := runAlterMigrations(db); err != nil {
+		return nil, err
+	}
 
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
@@ -190,7 +197,10 @@ func (s *Store) Reopen(path string) error {
 		newDB.Close()
 		return fmt.Errorf("reopen: %w", err)
 	}
-	runAlterMigrations(newDB)
+	if err := runAlterMigrations(newDB); err != nil {
+		newDB.Close()
+		return fmt.Errorf("reopen: %w", err)
+	}
 	// Close old connection; ignore error — may already be closed by Import.
 	if s.db != nil {
 		s.db.Close()
