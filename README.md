@@ -16,6 +16,7 @@ dsforms gives you a form backend you fully own. Drop it on a $5 VPS, point your 
 
 ## Features
 
+- **Webhook notifications** to Slack, Discord, or any URL (generic JSON)
 - **Email notifications** on every submission (any SMTP provider)
 - **Admin UI** to view, search, and manage submissions
 - **CSV export** for spreadsheets and data analysis
@@ -27,7 +28,35 @@ dsforms gives you a form backend you fully own. Drop it on a $5 VPS, point your 
 
 ![Submission Reader](docs/screenshots/reader.png)
 
-## Quick Start
+## Docker Image
+
+Pre-built images are published to GitHub Container Registry on every release:
+
+```yaml
+services:
+  dsforms:
+    image: ghcr.io/barancezayirli/dsforms:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - dsforms_data:/data
+    environment:
+      - SECRET_KEY=your-secret-key
+      - BASE_URL=https://forms.yourdomain.com
+      - SMTP_HOST=smtp.example.com
+      - SMTP_PORT=587
+      - SMTP_USER=you@example.com
+      - SMTP_PASS=your-password
+      - SMTP_FROM=DSForms <noreply@example.com>
+
+volumes:
+  dsforms_data:
+```
+
+You can pin to a specific version (e.g. `ghcr.io/barancezayirli/dsforms:1.2.3`) or use `latest` for the most recent release.
+
+## Quick Start (from source)
 
 ### 1. Clone and configure
 
@@ -216,7 +245,7 @@ Set `BASE_URL=https://forms.example.com` in `.env` so session cookies get the `S
 ## Development
 
 ```bash
-# Run locally (needs Go 1.23+)
+# Run locally (needs Go 1.25+)
 cp .env.example .env
 SECRET_KEY=dev SMTP_HOST=localhost SMTP_PORT=1025 SMTP_FROM="Dev <dev@test.com>" go run .
 
