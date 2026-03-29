@@ -1,4 +1,4 @@
-.PHONY: test build docker-build docker-up docker-down dev-up dev-down lint
+.PHONY: test build docker-build docker-up docker-down dev-up dev-down dev-rebuild lint
 
 test:
 	go test ./... -race -count=1
@@ -22,6 +22,10 @@ dev-up:
 
 dev-down:
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+dev-rebuild:
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 lint:
 	go vet ./...

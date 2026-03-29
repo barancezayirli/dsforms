@@ -19,10 +19,16 @@ type Notifier interface {
 	SendNotification(form store.Form, sub store.Submission) error
 }
 
+// WebhookSender sends webhook notifications.
+type WebhookSender interface {
+	Send(form store.Form, sub store.Submission) error
+}
+
 // SubmitHandler handles form submissions via POST /f/{formID}.
 type SubmitHandler struct {
 	Store    *store.Store
 	Notifier Notifier
+	Webhook  WebhookSender
 	BaseURL  string
 }
 
@@ -116,11 +122,18 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("submit: panic in email for form %s submission %s: %v", formID, sub.ID, r)
+				log.Printf("submit: panic in notification for form %s submission %s: %v", formID, sub.ID, r)
 			}
 		}()
-		if err := h.Notifier.SendNotification(form, sub); err != nil {
-			log.Printf("submit: failed to send email for form %s submission %s: %v", formID, sub.ID, err)
+		if form.EmailTo != "" && h.Notifier != nil {
+			if err := h.Notifier.SendNotification(form, sub); err != nil {
+				log.Printf("submit: email failed for form %s submission %s: %v", formID, sub.ID, err)
+			}
+		}
+		if form.WebhookURL != "" && h.Webhook != nil {
+			if err := h.Webhook.Send(form, sub); err != nil {
+				log.Printf("submit: webhook failed for form %s submission %s: %v", formID, sub.ID, err)
+			}
 		}
 	}()
 

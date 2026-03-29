@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -14,6 +15,12 @@ import (
 	"github.com/youruser/dsforms/internal/auth"
 	"github.com/youruser/dsforms/internal/store"
 )
+
+type noopWebhookSender struct{}
+
+func (n *noopWebhookSender) Send(form store.Form, sub store.Submission) error {
+	return nil
+}
 
 func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 	t.Helper()
@@ -82,6 +89,7 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 		SecretKey: testSecretKey,
 		BaseURL:   "https://example.com",
 		Templates: templates,
+		Webhook:   &noopWebhookSender{},
 	}
 
 	r := chi.NewRouter()
@@ -99,6 +107,7 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 		r.Get("/admin/forms/{formID}/submissions/{subID}", ah.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", ah.MarkRead)
 		r.Post("/admin/submissions/{id}/delete", ah.DeleteSubmission)
+		r.Post("/admin/forms/{id}/test-webhook", ah.TestWebhook)
 	})
 	r.Get("/success", ah.Success)
 
@@ -231,8 +240,8 @@ func TestCreateFormEmptyEmail(t *testing.T) {
 	s, r := setupAdmin(t)
 	form := url.Values{"name": {"Contact"}, "email_to": {""}}
 	w := doAdminRequest(t, s, r, "POST", "/admin/forms/new", form.Encode())
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 (re-render)", w.Code)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
 	}
 }
 
@@ -289,16 +298,12 @@ func TestEditFormEmptyEmail(t *testing.T) {
 	_ = s.CreateForm(store.Form{ID: "f1", Name: "Old", EmailTo: "old@example.com"})
 	form := url.Values{"name": {"New"}, "email_to": {""}}
 	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/edit", form.Encode())
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 (re-render)", w.Code)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "error") {
-		t.Error("error message not shown")
-	}
-	// Ensure the form was NOT updated.
 	f, _ := s.GetForm("f1")
-	if f.EmailTo != "old@example.com" {
-		t.Errorf("EmailTo = %q, want old@example.com (should not have been updated)", f.EmailTo)
+	if f.EmailTo != "" {
+		t.Errorf("EmailTo = %q, want empty", f.EmailTo)
 	}
 }
 
@@ -572,5 +577,177 @@ func TestExportCSVEmpty(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(body), "\n")
 	if len(lines) != 1 {
 		t.Errorf("lines = %d, want 1 (header only)", len(lines))
+	}
+}
+
+func TestCreateFormWebhookFields(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	form := url.Values{
+		"name":           {"Contact"},
+		"email_to":       {"me@example.com"},
+		"webhook_url":    {"https://hooks.slack.com/services/T00/B00/xxx"},
+		"webhook_format": {"slack"},
+	}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/new", form.Encode())
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	forms, _ := s.ListForms()
+	if len(forms) != 1 {
+		t.Fatalf("forms = %d, want 1", len(forms))
+	}
+	if forms[0].WebhookURL != "https://hooks.slack.com/services/T00/B00/xxx" {
+		t.Errorf("WebhookURL = %q", forms[0].WebhookURL)
+	}
+	if forms[0].WebhookFormat != "slack" {
+		t.Errorf("WebhookFormat = %q", forms[0].WebhookFormat)
+	}
+}
+
+func TestEditFormWebhookFields(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Old", EmailTo: "old@example.com"})
+	form := url.Values{
+		"name":           {"New"},
+		"email_to":       {"new@example.com"},
+		"webhook_url":    {"https://discord.com/api/webhooks/123/abc"},
+		"webhook_format": {"discord"},
+	}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/edit", form.Encode())
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	f, _ := s.GetForm("f1")
+	if f.WebhookURL != "https://discord.com/api/webhooks/123/abc" {
+		t.Errorf("WebhookURL = %q", f.WebhookURL)
+	}
+	if f.WebhookFormat != "discord" {
+		t.Errorf("WebhookFormat = %q", f.WebhookFormat)
+	}
+}
+
+func TestCreateFormEmailOptional(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	form := url.Values{
+		"name":           {"WebhookOnly"},
+		"webhook_url":    {"https://hooks.slack.com/services/T00/B00/xxx"},
+		"webhook_format": {"slack"},
+	}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/new", form.Encode())
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302 (email should be optional now)", w.Code)
+	}
+	forms, _ := s.ListForms()
+	if len(forms) != 1 {
+		t.Fatalf("forms = %d, want 1", len(forms))
+	}
+}
+
+func TestEditFormEmailOptional(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Test", EmailTo: "old@example.com"})
+	form := url.Values{"name": {"Test"}, "email_to": {""}}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/edit", form.Encode())
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302 (email should be optional)", w.Code)
+	}
+	f, _ := s.GetForm("f1")
+	if f.EmailTo != "" {
+		t.Errorf("EmailTo = %q, want empty", f.EmailTo)
+	}
+}
+
+func TestTestWebhookSuccess(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{
+		ID: "f1", Name: "Test", EmailTo: "a@b.com",
+		WebhookURL: "https://hooks.example.com", WebhookFormat: "generic",
+	})
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/test-webhook", "")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+	// noopWebhookSender always succeeds, so we should get success: true
+	if resp["success"] != true {
+		t.Errorf("success = %v, want true", resp["success"])
+	}
+}
+
+func TestTestWebhookNoWebhook(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Test", EmailTo: "a@b.com"})
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/test-webhook", "")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["success"] != false {
+		t.Error("expected success=false for form without webhook")
+	}
+}
+
+func TestCreateFormWebhookFormatDefaulting(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	form := url.Values{
+		"name":           {"Test"},
+		"webhook_url":    {"https://example.com/hook"},
+		"webhook_format": {"teams"}, // invalid format
+	}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/new", form.Encode())
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	forms, _ := s.ListForms()
+	if len(forms) != 1 {
+		t.Fatalf("forms = %d, want 1", len(forms))
+	}
+	if forms[0].WebhookFormat != "generic" {
+		t.Errorf("WebhookFormat = %q, want generic (default)", forms[0].WebhookFormat)
+	}
+}
+
+func TestCreateFormWebhookFormatClearedWhenNoURL(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	form := url.Values{
+		"name":           {"Test"},
+		"webhook_url":    {""},
+		"webhook_format": {"slack"},
+	}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/new", form.Encode())
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	forms, _ := s.ListForms()
+	if forms[0].WebhookFormat != "" {
+		t.Errorf("WebhookFormat = %q, want empty (URL is empty)", forms[0].WebhookFormat)
+	}
+}
+
+func TestCreateFormWebhookInvalidURL(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	form := url.Values{
+		"name":           {"Test"},
+		"webhook_url":    {"not-a-url"},
+		"webhook_format": {"generic"},
+	}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/new", form.Encode())
+	// Should re-render with error (200), not redirect (302)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (validation error)", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "error") {
+		t.Error("expected validation error message")
 	}
 }
