@@ -16,12 +16,26 @@
       </div>
       <div class="form-group">
         <label for="email_to">Email To</label>
-        <input type="email" id="email_to" name="email_to" value="{{.Form.EmailTo}}" required placeholder="Where notifications go">
+        <input type="email" id="email_to" name="email_to" value="{{.Form.EmailTo}}" placeholder="Where notifications go (optional)">
       </div>
       <div class="form-group">
         <label for="redirect">Redirect URL</label>
         <input type="text" id="redirect" name="redirect" value="{{.Form.Redirect}}" placeholder="https://yoursite.com/thanks (optional)">
         <div class="form-hint">Where to send users after submission. Leave empty for default.</div>
+      </div>
+      <div class="form-group">
+        <label for="webhook_url">Webhook URL</label>
+        <input type="text" id="webhook_url" name="webhook_url" value="{{.Form.WebhookURL}}" placeholder="https://hooks.slack.com/services/...">
+        <div class="form-hint">Optional. POST submission data to an external service.</div>
+      </div>
+      <div class="form-group">
+        <label for="webhook_format">Webhook Format</label>
+        <select id="webhook_format" name="webhook_format">
+          <option value=""{{if eq .Form.WebhookFormat ""}} selected{{end}}>None</option>
+          <option value="generic"{{if eq .Form.WebhookFormat "generic"}} selected{{end}}>Generic JSON</option>
+          <option value="slack"{{if eq .Form.WebhookFormat "slack"}} selected{{end}}>Slack</option>
+          <option value="discord"{{if eq .Form.WebhookFormat "discord"}} selected{{end}}>Discord</option>
+        </select>
       </div>
       <div style="display:flex;gap:8px;margin-top:20px">
         <button type="submit" class="btn btn-mint">Create Form</button>
