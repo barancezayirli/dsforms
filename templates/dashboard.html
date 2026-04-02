@@ -35,7 +35,7 @@
     <tbody>
       {{range .Forms}}
       <tr>
-        <td><a href="/admin/forms/{{.ID}}/edit">{{.Name}}</a></td>
+        <td><a href="/admin/forms/{{.ID}}">{{.Name}}</a></td>
         <td class="text-muted">{{.EmailTo}}</td>
         <td>{{if gt .UnreadCount 0}}<strong>{{.UnreadCount}}</strong>{{else}}0{{end}}</td>
         <td class="text-muted">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
