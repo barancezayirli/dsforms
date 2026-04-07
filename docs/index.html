@@ -237,6 +237,33 @@
     .footer-brand { font-family: var(--font-mono); color: var(--green); }
     .footer-links { margin-top: 12px; display: flex; gap: 16px; justify-content: center; }
 
+    /* Webhook format badges */
+    .webhook-section { margin-bottom: 48px; }
+    .webhook-formats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 24px 0;
+    }
+    .webhook-format {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 18px;
+    }
+    .webhook-format-name {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--green);
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    .webhook-format-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
     /* Animation */
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(16px); }
@@ -249,6 +276,7 @@
       .hero { padding: 60px 0 40px; }
       .steps { grid-template-columns: 1fr; }
       .features { grid-template-columns: 1fr; }
+      .webhook-formats { grid-template-columns: 1fr; }
       .nav-links { gap: 12px; }
     }
   </style>
@@ -259,6 +287,7 @@
   <span class="nav-brand">dsforms</span>
   <div class="nav-links">
     <a href="https://github.com/barancezayirli/dsforms" target="_blank">GitHub ↗</a>
+    <a href="#webhooks">Webhooks ↓</a>
     <a href="#self-host">Self-host ↓</a>
   </div>
 </nav>
@@ -332,6 +361,7 @@
     <div class="section-title">// what you get</div>
     <div class="features">
       <div class="feature">Email notifications on every submission</div>
+      <div class="feature">Webhook notifications (Slack, Discord, JSON)</div>
       <div class="feature">Submissions stored in SQLite</div>
       <div class="feature">Simple admin UI to view &amp; manage</div>
       <div class="feature">CSV export</div>
@@ -340,6 +370,52 @@
       <div class="feature">Open source — MIT license</div>
       <div class="feature">No per-submission fees, ever</div>
     </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- Webhooks -->
+  <section id="webhooks" class="webhook-section">
+    <div class="section-title">// webhook notifications</div>
+    <p style="color:var(--muted);font-size:15px;margin-bottom:24px;">
+      Get notified on every submission — in your Slack workspace, Discord server, or any HTTP endpoint. Configure per-form in the admin UI. Email remains optional.
+    </p>
+
+    <div class="webhook-formats">
+      <div class="webhook-format">
+        <div class="webhook-format-name">Slack</div>
+        <div class="webhook-format-desc">Block Kit layout. Short fields appear side-by-side; long fields get their own row. Drop in your Incoming Webhook URL and done.</div>
+      </div>
+      <div class="webhook-format">
+        <div class="webhook-format-name">Discord</div>
+        <div class="webhook-format-desc">Rich embed with inline fields. Short values are inline (up to 3 per row); long values span the full width. Username set to "DSForms".</div>
+      </div>
+      <div class="webhook-format">
+        <div class="webhook-format-name">Generic JSON</div>
+        <div class="webhook-format-desc">Flat JSON payload for Zapier, n8n, Make, or any custom endpoint. Includes form name, form ID, timestamp, and all submitted fields.</div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-bar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="code-filename">generic payload</span>
+      </div>
+      <pre class="code-body">{
+  <span class="t-attr">"form_name"</span>:    <span class="t-val">"Contact"</span>,
+  <span class="t-attr">"form_id"</span>:      <span class="t-val">"abc123"</span>,
+  <span class="t-attr">"submitted_at"</span>: <span class="t-val">"2026-03-26T14:30:00Z"</span>,
+  <span class="t-attr">"fields"</span>: {
+    <span class="t-attr">"name"</span>:    <span class="t-val">"Jane"</span>,
+    <span class="t-attr">"email"</span>:   <span class="t-val">"jane@example.com"</span>,
+    <span class="t-attr">"message"</span>: <span class="t-val">"Hello!"</span>
+  }
+}</pre>
+    </div>
+
+    <p style="font-size:13px;color:var(--muted);">
+      Webhooks fire in a background goroutine — never blocking the form response. A built-in "Test Webhook" button in the admin UI lets you verify your endpoint before going live.
+    </p>
   </section>
 
   <hr class="divider">
