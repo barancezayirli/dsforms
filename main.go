@@ -24,6 +24,13 @@ import (
 	"github.com/youruser/dsforms/internal/webhook"
 )
 
+// Compile-time checks that *mail.Mailer satisfies the consumer interfaces it is wired into.
+var (
+	_ handler.Notifier           = (*mail.Mailer)(nil)
+	_ handler.ConfirmationMailer = (*mail.Mailer)(nil)
+	_ broadcaster.Mailer         = (*mail.Mailer)(nil)
+)
+
 //go:embed templates/*
 var templateFS embed.FS
 
@@ -332,6 +339,9 @@ func main() {
 		worker.Mailer = sendMailer
 	}
 	worker.Start()
+	if sendMailer == nil {
+		log.Println("broadcast worker started without SMTP — broadcasts will be marked failed until SMTP_HOST/SMTP_FROM are configured")
+	}
 
 	submitHandler := &handler.SubmitHandler{
 		Store:    s,

@@ -163,3 +163,30 @@ func TestWaitlistSubmitNormalizesEmail(t *testing.T) {
 		t.Errorf("stored email = %q, want normalized al@x.com", entries[0].Email)
 	}
 }
+
+func TestSubstituteVars(t *testing.T) {
+	t.Parallel()
+	vars := map[string]string{"email": "a@x.com", "name": "Al", "position": "42"}
+	cases := map[string]string{
+		"Hi {{name}}":                "Hi Al",
+		"{{email}} is #{{position}}": "a@x.com is #42",
+		"no tokens here":             "no tokens here",
+		"{{unknown}} stays":          "{{unknown}} stays",
+		"{{name}} and {{name}}":      "Al and Al",
+	}
+	for in, want := range cases {
+		if got := substituteVars(in, vars); got != want {
+			t.Errorf("substituteVars(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSubstituteVarsNoTemplateInjection(t *testing.T) {
+	t.Parallel()
+	// A signup-supplied name containing template-like text must NOT be re-evaluated.
+	vars := map[string]string{"email": "a@x.com", "name": "{{email}}", "position": "1"}
+	got := substituteVars("Hi {{name}}", vars)
+	if got != "Hi {{email}}" {
+		t.Errorf("substituteVars should not recursively expand injected tokens; got %q", got)
+	}
+}

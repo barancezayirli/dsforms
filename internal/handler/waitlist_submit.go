@@ -30,7 +30,7 @@ type WaitlistSubmitHandler struct {
 
 // Handle processes a waitlist signup.
 // Flow: lookup waitlist → honeypot → validate email → dedup upsert → position →
-// async confirmation (if configured and newly joined) → JSON or redirect.
+// async confirmation (if ConfirmSubject is set, the signup is new, and a Mailer is configured) → JSON or redirect.
 func (h *WaitlistSubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	waitlistID := chi.URLParam(r, "waitlistID")
 	wl, err := h.Store.GetWaitlist(waitlistID)
@@ -138,8 +138,9 @@ func (h *WaitlistSubmitHandler) sendConfirmation(wl store.Waitlist, email, name 
 	}
 }
 
-// substituteVars replaces {{key}} tokens with values. Fixed replacement (not
-// template execution) to avoid injection.
+// substituteVars replaces {{key}} tokens with literal values via strings.NewReplacer.
+// Using literal replacement (not text/template execution) means signup-supplied
+// values cannot inject template directives.
 func substituteVars(s string, vars map[string]string) string {
 	pairs := make([]string, 0, len(vars)*2)
 	for k, v := range vars {

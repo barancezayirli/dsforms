@@ -11,7 +11,8 @@ import (
 	"github.com/youruser/dsforms/internal/store"
 )
 
-// Mailer implements handler.Notifier using SMTP.
+// Mailer sends email over SMTP. It implements handler.Notifier (SendNotification)
+// as well as handler.ConfirmationMailer and broadcaster.Mailer (both via SendMail).
 type Mailer struct {
 	Host    string
 	Port    int
@@ -93,7 +94,7 @@ func (m *Mailer) SendMail(to, subject, body string) error {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("From: %s\r\n", m.From))
+	b.WriteString(fmt.Sprintf("From: %s\r\n", stripHeaderChars(m.From)))
 	b.WriteString(fmt.Sprintf("To: %s\r\n", to))
 	b.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
 	b.WriteString("MIME-Version: 1.0\r\n")
