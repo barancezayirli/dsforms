@@ -244,6 +244,46 @@ func TestWaitlistExportCSV(t *testing.T) {
 	}
 }
 
+func TestWaitlistExportCSVSanitizesFormulas(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	// Malicious extra field value starting with '=' (formula trigger).
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{"note":"=cmd|'/c calc'!A1"}`})
+
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/wl/export", nil))
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.ExportCSV(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	// The dangerous value must be neutralized with a leading apostrophe.
+	if !strings.Contains(body, "'=cmd") {
+		t.Errorf("formula not sanitized; CSV body = %q", body)
+	}
+}
+
+func TestCSVSafe(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"=danger": "'=danger",
+		"+danger": "'+danger",
+		"-danger": "'-danger",
+		"@danger": "'@danger",
+		"safe":    "safe",
+		"":        "",
+		"a=b":     "a=b",
+	}
+	for in, want := range cases {
+		if got := csvSafe(in); got != want {
+			t.Errorf("csvSafe(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // recordingNotifier counts Notify calls.
 type recordingNotifier struct{ calls int }
 

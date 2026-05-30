@@ -274,6 +274,19 @@ func (h *WaitlistHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/waitlists/"+id, http.StatusFound)
 }
 
+// csvSafe neutralizes CSV formula injection by prefixing values that begin with
+// a formula trigger character with a single quote. Entry data comes from public
+// signups, so it is untrusted.
+func csvSafe(s string) string {
+	if len(s) > 0 {
+		switch s[0] {
+		case '=', '+', '-', '@', '\t', '\r':
+			return "'" + s
+		}
+	}
+	return s
+}
+
 // ExportCSV handles GET to export entries as CSV.
 func (h *WaitlistHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -306,15 +319,19 @@ func (h *WaitlistHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-waitlist.csv"`, wl.ID))
 
 	cw := csv.NewWriter(w)
-	header := append([]string{"position", "email", "joined_at"}, keys...)
+	safeKeys := make([]string, len(keys))
+	for i, k := range keys {
+		safeKeys[i] = csvSafe(k)
+	}
+	header := append([]string{"position", "email", "joined_at"}, safeKeys...)
 	if err := cw.Write(header); err != nil {
 		log.Printf("waitlist export: write header: %v", err)
 		return
 	}
 	for _, e := range entries {
-		row := []string{strconv.Itoa(e.Position), e.Email, e.CreatedAt.Format("2006-01-02T15:04:05Z")}
+		row := []string{strconv.Itoa(e.Position), csvSafe(e.Email), e.CreatedAt.Format("2006-01-02T15:04:05Z")}
 		for _, k := range keys {
-			row = append(row, e.Data[k])
+			row = append(row, csvSafe(e.Data[k]))
 		}
 		if err := cw.Write(row); err != nil {
 			log.Printf("waitlist export: write row: %v", err)
