@@ -1,0 +1,32 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Waitlists</h1>
+  <a href="/admin/waitlists/new" class="btn btn-mint">New Waitlist</a>
+</div>
+
+{{if .Waitlists}}
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr><th>Name</th><th>Signups</th><th>Created</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{range .Waitlists}}
+      <tr>
+        <td><a href="/admin/waitlists/{{.ID}}">{{.Name}}</a></td>
+        <td>{{.EntryCount}}</td>
+        <td class="text-muted">{{.CreatedAt.Format "2006-01-02"}}</td>
+        <td class="actions"><a href="/admin/waitlists/{{.ID}}/edit">Edit</a></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="empty-state">
+  <p>No waitlists yet.</p>
+  <p class="text-muted">Create one to start collecting signups.</p>
+</div>
+{{end}}
+{{end}}
