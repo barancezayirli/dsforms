@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/youruser/dsforms/internal/auth"
 	"github.com/youruser/dsforms/internal/backup"
+	"github.com/youruser/dsforms/internal/broadcaster"
 	"github.com/youruser/dsforms/internal/config"
 	"github.com/youruser/dsforms/internal/handler"
 	"github.com/youruser/dsforms/internal/mail"
@@ -282,7 +283,7 @@ func main() {
 	}
 
 	templates := make(map[string]*template.Template)
-	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html", "users.html", "users_new.html", "account.html", "backups.html"} {
+	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html", "users.html", "users_new.html", "account.html", "backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html", "waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html"} {
 		t, err := baseTmpl.Clone()
 		if err != nil {
 			log.Fatalf("failed to clone base template: %v", err)
@@ -303,8 +304,9 @@ func main() {
 	}
 
 	var mailer handler.Notifier
+	var sendMailer *mail.Mailer
 	if cfg.SMTPHost != "" && cfg.SMTPFrom != "" {
-		mailer = &mail.Mailer{
+		sendMailer = &mail.Mailer{
 			Host:    cfg.SMTPHost,
 			Port:    cfg.SMTPPort,
 			User:    cfg.SMTPUser,
@@ -312,12 +314,24 @@ func main() {
 			From:    cfg.SMTPFrom,
 			BaseURL: cfg.BaseURL,
 		}
+		mailer = sendMailer
 		log.Printf("email notifications enabled (SMTP: %s)", cfg.SMTPHost)
 	} else {
 		log.Println("email notifications disabled (SMTP_HOST or SMTP_FROM not set)")
 	}
 
 	webhookSender := webhook.NewSender()
+
+	worker := &broadcaster.Worker{
+		Store:       s,
+		BatchSize:   50,
+		MaxAttempts: cfg.BroadcastMaxAttempts,
+		Throttle:    time.Duration(cfg.BroadcastThrottleMs) * time.Millisecond,
+	}
+	if sendMailer != nil {
+		worker.Mailer = sendMailer
+	}
+	worker.Start()
 
 	submitHandler := &handler.SubmitHandler{
 		Store:    s,
@@ -363,8 +377,25 @@ func main() {
 		Templates: templates,
 	}
 
+	waitlistSubmitHandler := &handler.WaitlistSubmitHandler{
+		Store:   s,
+		BaseURL: cfg.BaseURL,
+	}
+	if sendMailer != nil {
+		waitlistSubmitHandler.Mailer = sendMailer
+	}
+
+	waitlistHandler := &handler.WaitlistHandler{
+		Store:       s,
+		SecretKey:   cfg.SecretKey,
+		BaseURL:     cfg.BaseURL,
+		Templates:   templates,
+		Broadcaster: worker,
+	}
+
 	r := newRouter()
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
+	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/forms", http.StatusFound)
@@ -392,6 +423,18 @@ func main() {
 		r.Get("/admin/forms/{formID}/submissions/{subID}", adminHandler.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", adminHandler.MarkRead)
 		r.Post("/admin/submissions/{id}/delete", adminHandler.DeleteSubmission)
+		r.Get("/admin/waitlists", waitlistHandler.List)
+		r.Get("/admin/waitlists/new", waitlistHandler.NewPage)
+		r.Post("/admin/waitlists/new", waitlistHandler.Create)
+		r.Get("/admin/waitlists/{id}/edit", waitlistHandler.EditPage)
+		r.Post("/admin/waitlists/{id}/edit", waitlistHandler.Edit)
+		r.Post("/admin/waitlists/{id}/delete", waitlistHandler.Delete)
+		r.Get("/admin/waitlists/{id}", waitlistHandler.Detail)
+		r.Get("/admin/waitlists/{id}/export", waitlistHandler.ExportCSV)
+		r.Post("/admin/waitlists/{id}/entries/{entryID}/delete", waitlistHandler.DeleteEntry)
+		r.Get("/admin/waitlists/{id}/broadcast", waitlistHandler.BroadcastPage)
+		r.Post("/admin/waitlists/{id}/broadcast", waitlistHandler.CreateBroadcast)
+		r.Get("/admin/waitlists/{id}/broadcasts/{bid}", waitlistHandler.BroadcastDetail)
 		r.Get("/admin/users", usersHandler.ListUsers)
 		r.Get("/admin/users/new", usersHandler.NewUserPage)
 		r.Post("/admin/users/new", usersHandler.CreateUser)
