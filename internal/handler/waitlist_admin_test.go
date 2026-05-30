@@ -244,3 +244,78 @@ func TestWaitlistExportCSV(t *testing.T) {
 	}
 }
 
+// recordingNotifier counts Notify calls.
+type recordingNotifier struct{ calls int }
+
+func (n *recordingNotifier) Notify() { n.calls++ }
+
+func TestBroadcastCreateEnqueuesAndNotifies(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	notifier := &recordingNotifier{}
+	h.Broadcaster = notifier
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e2", WaitlistID: "wl", Email: "b@x.com", RawData: `{}`})
+
+	form := url.Values{"subject": {"We launched"}, "body": {"Come back"}}
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wl/broadcast", strings.NewReader(form.Encode())))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.CreateBroadcast(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", w.Code)
+	}
+	if notifier.calls != 1 {
+		t.Errorf("Notify calls = %d, want 1", notifier.calls)
+	}
+	pending, _ := s.NextPendingDeliveries(10)
+	if len(pending) != 2 {
+		t.Errorf("pending deliveries = %d, want 2", len(pending))
+	}
+}
+
+func TestBroadcastCreateRequiresSubjectAndBody(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`})
+
+	form := url.Values{"subject": {""}, "body": {"x"}}
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wl/broadcast", strings.NewReader(form.Encode())))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.CreateBroadcast(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render with error)", w.Code)
+	}
+	pending, _ := s.NextPendingDeliveries(10)
+	if len(pending) != 0 {
+		t.Errorf("pending = %d, want 0 (nothing enqueued on validation error)", len(pending))
+	}
+}
+
+func TestBroadcastDetailShowsCounts(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	_ = s.CreateBroadcast(store.Broadcast{ID: "b1", WaitlistID: "wl", Subject: "S", Body: "B"}, []string{"a@x.com"})
+
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/wl/broadcasts/b1", nil))
+	req = withURLParam(req, "id", "wl")
+	req = withURLParam(req, "bid", "b1")
+	w := httptest.NewRecorder()
+	h.BroadcastDetail(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Pending") {
+		t.Error("body should show delivery status counts")
+	}
+}
+

@@ -323,3 +323,139 @@ func (h *WaitlistHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	cw.Flush()
 }
+
+type broadcastNewData struct {
+	Title       string
+	Active      string
+	CurrentUser store.User
+	Flash       *FlashData
+	Waitlist    store.Waitlist
+	EntryCount  int
+	Broadcasts  []store.BroadcastSummary
+	Subject     string
+	Body        string
+	Error       string
+}
+
+type broadcastDetailData struct {
+	Title       string
+	Active      string
+	CurrentUser store.User
+	Flash       *FlashData
+	Waitlist    store.Waitlist
+	Broadcast   store.BroadcastSummary
+}
+
+// BroadcastPage renders the compose form plus past broadcasts.
+func (h *WaitlistHandler) BroadcastPage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	wl, ok := h.getWaitlistOr404(w, id)
+	if !ok {
+		return
+	}
+	user, _ := auth.UserFromContext(r.Context())
+	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+	count, _ := h.Store.CountEntries(id)
+	past, _ := h.Store.ListBroadcasts(id)
+
+	h.render(w, "broadcast_new.html", broadcastNewData{
+		Title:       "Broadcast",
+		Active:      "waitlists",
+		CurrentUser: user,
+		Flash:       newFlash(flashType, flashMsg),
+		Waitlist:    wl,
+		EntryCount:  count,
+		Broadcasts:  past,
+	})
+}
+
+// CreateBroadcast validates input, snapshots recipients into a queue, and wakes the worker.
+func (h *WaitlistHandler) CreateBroadcast(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	wl, ok := h.getWaitlistOr404(w, id)
+	if !ok {
+		return
+	}
+	user, _ := auth.UserFromContext(r.Context())
+
+	subject := r.FormValue("subject")
+	body := r.FormValue("body")
+
+	rerender := func(errMsg string) {
+		count, _ := h.Store.CountEntries(id)
+		past, _ := h.Store.ListBroadcasts(id)
+		h.render(w, "broadcast_new.html", broadcastNewData{
+			Title: "Broadcast", Active: "waitlists", CurrentUser: user,
+			Waitlist: wl, EntryCount: count, Broadcasts: past,
+			Subject: subject, Body: body, Error: errMsg,
+		})
+	}
+
+	if subject == "" || body == "" {
+		rerender("Subject and body are required.")
+		return
+	}
+
+	entries, err := h.Store.ListEntries(id)
+	if err != nil {
+		log.Printf("broadcast create: list entries %s: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(entries) == 0 {
+		rerender("This waitlist has no signups to send to.")
+		return
+	}
+	emails := make([]string, 0, len(entries))
+	for _, e := range entries {
+		emails = append(emails, e.Email)
+	}
+
+	b := store.Broadcast{
+		ID:         uuid.New().String(),
+		WaitlistID: id,
+		Subject:    subject,
+		Body:       body,
+	}
+	if err := h.Store.CreateBroadcast(b, emails); err != nil {
+		log.Printf("broadcast create %s: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if h.Broadcaster != nil {
+		h.Broadcaster.Notify()
+	}
+	http.Redirect(w, r, "/admin/waitlists/"+id+"/broadcasts/"+b.ID, http.StatusFound)
+}
+
+// BroadcastDetail renders a single broadcast's progress.
+func (h *WaitlistHandler) BroadcastDetail(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	bid := chi.URLParam(r, "bid")
+	wl, ok := h.getWaitlistOr404(w, id)
+	if !ok {
+		return
+	}
+	sum, err := h.Store.GetBroadcastSummary(bid)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "broadcast not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("broadcast detail %s: %v", bid, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	user, _ := auth.UserFromContext(r.Context())
+	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+
+	h.render(w, "broadcast_detail.html", broadcastDetailData{
+		Title:       "Broadcast",
+		Active:      "waitlists",
+		CurrentUser: user,
+		Flash:       newFlash(flashType, flashMsg),
+		Waitlist:    wl,
+		Broadcast:   sum,
+	})
+}

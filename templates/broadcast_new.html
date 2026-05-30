@@ -1,2 +1,47 @@
 {{template "base" .}}
-{{define "content"}}<div class="page"></div>{{end}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Broadcast — {{.Waitlist.Name}}</h1>
+  <a href="/admin/waitlists/{{.Waitlist.ID}}" class="btn">Back</a>
+</div>
+
+<div class="card" style="max-width:600px">
+  <div class="card-body">
+    {{if .Error}}<div class="form-error-banner">{{.Error}}</div>{{end}}
+    <p class="form-hint" style="margin-bottom:16px">This message will be sent to all <strong>{{.EntryCount}}</strong> signups.</p>
+    <form method="POST" action="/admin/waitlists/{{.Waitlist.ID}}/broadcast">
+      <div class="form-group">
+        <label for="subject">Subject</label>
+        <input type="text" id="subject" name="subject" value="{{.Subject}}" required>
+      </div>
+      <div class="form-group">
+        <label for="body">Body</label>
+        <textarea id="body" name="body" rows="8" required>{{.Body}}</textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:20px">
+        <button type="submit" class="btn btn-mint" onclick="return confirm('Send to {{.EntryCount}} recipients?')">Send Broadcast</button>
+        <a href="/admin/waitlists/{{.Waitlist.ID}}" class="btn">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{if .Broadcasts}}
+<div class="card" style="max-width:600px;margin-top:20px">
+  <div class="card-head">Past Broadcasts</div>
+  <table class="table">
+    <thead><tr><th>Subject</th><th>Status</th><th>Sent</th><th>Sent At</th></tr></thead>
+    <tbody>
+      {{range .Broadcasts}}
+      <tr>
+        <td><a href="/admin/waitlists/{{$.Waitlist.ID}}/broadcasts/{{.ID}}">{{.Subject}}</a></td>
+        <td>{{.Status}}</td>
+        <td>{{.Sent}}/{{.Total}}</td>
+        <td class="text-muted">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+{{end}}
