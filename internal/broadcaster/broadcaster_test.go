@@ -10,19 +10,21 @@ import (
 
 // fakeStore implements the Store interface for deterministic worker tests.
 type fakeStore struct {
-	mu        sync.Mutex
-	pending   []store.Delivery
-	sent      []string
-	failed    map[string]int // id -> attempts recorded
-	broadcast store.Broadcast
-	doneCalls []string
+	mu               sync.Mutex
+	pending          []store.Delivery
+	sent             []string
+	failed           map[string]int // id -> attempts recorded
+	broadcast        store.Broadcast
+	doneCalls        []string
+	failNextPending  bool
+	failGetBroadcast bool
 }
 
 func newFakeStore(b store.Broadcast, emails []string) *fakeStore {
 	f := &fakeStore{broadcast: b, failed: map[string]int{}}
 	for i, e := range emails {
 		f.pending = append(f.pending, store.Delivery{
-			ID: string(rune('a' + i)), BroadcastID: b.ID, Email: e, Status: "pending",
+			ID: string(rune('a' + i)), BroadcastID: b.ID, Email: e, Status: store.DeliveryStatusPending,
 		})
 	}
 	return f
@@ -31,9 +33,12 @@ func newFakeStore(b store.Broadcast, emails []string) *fakeStore {
 func (f *fakeStore) NextPendingDeliveries(limit int) ([]store.Delivery, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failNextPending {
+		return nil, errors.New("next pending boom")
+	}
 	var out []store.Delivery
 	for _, d := range f.pending {
-		if d.Status == "pending" {
+		if d.Status == store.DeliveryStatusPending {
 			out = append(out, d)
 			if len(out) >= limit {
 				break
@@ -44,6 +49,9 @@ func (f *fakeStore) NextPendingDeliveries(limit int) ([]store.Delivery, error) {
 }
 
 func (f *fakeStore) GetBroadcast(id string) (store.Broadcast, error) {
+	if f.failGetBroadcast {
+		return store.Broadcast{}, errors.New("get broadcast boom")
+	}
 	return f.broadcast, nil
 }
 
@@ -53,7 +61,7 @@ func (f *fakeStore) MarkDeliverySent(id string) error {
 	f.sent = append(f.sent, id)
 	for i := range f.pending {
 		if f.pending[i].ID == id {
-			f.pending[i].Status = "sent"
+			f.pending[i].Status = store.DeliveryStatusSent
 		}
 	}
 	return nil
@@ -67,7 +75,7 @@ func (f *fakeStore) MarkDeliveryFailed(id, errMsg string, maxAttempts int) error
 		if f.pending[i].ID == id {
 			f.pending[i].Attempts++
 			if f.pending[i].Attempts >= maxAttempts {
-				f.pending[i].Status = "failed"
+				f.pending[i].Status = store.DeliveryStatusFailed
 			}
 		}
 	}
@@ -178,5 +186,36 @@ func TestRunOnceNilMailerFails(t *testing.T) {
 	}
 	if fs.failed["a"] == 0 {
 		t.Error("expected delivery marked failed when mailer is nil")
+	}
+}
+
+func TestRunOnceReturnsErrorWhenNextPendingFails(t *testing.T) {
+	t.Parallel()
+	fs := newFakeStore(store.Broadcast{ID: "b1"}, []string{"a@x.com"})
+	fs.failNextPending = true
+	w := newTestWorker(fs, &fakeMailer{})
+	n, err := w.RunOnce()
+	if err == nil {
+		t.Error("RunOnce should surface the NextPendingDeliveries error")
+	}
+	if n != 0 {
+		t.Errorf("processed = %d, want 0", n)
+	}
+}
+
+func TestRunOnceMarksFailedWhenGetBroadcastFails(t *testing.T) {
+	t.Parallel()
+	fs := newFakeStore(store.Broadcast{ID: "b1", Subject: "S", Body: "B"}, []string{"a@x.com"})
+	fs.failGetBroadcast = true
+	fm := &fakeMailer{}
+	w := newTestWorker(fs, fm)
+	if _, err := w.RunOnce(); err != nil {
+		t.Fatalf("RunOnce error = %v", err)
+	}
+	if len(fm.sent) != 0 {
+		t.Errorf("no email should be sent when broadcast lookup fails; sent = %d", len(fm.sent))
+	}
+	if fs.failed["a"] == 0 {
+		t.Error("delivery should be marked failed when GetBroadcast fails")
 	}
 }

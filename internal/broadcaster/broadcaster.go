@@ -1,7 +1,8 @@
 // Package broadcaster runs a background worker that drains pending broadcast
 // deliveries, sending one email per recipient with throttling and retry. It is
-// safe across restarts: pending deliveries left by a previous run are resumed,
-// and a delivery already marked 'sent' is never re-sent.
+// safe across restarts: pending deliveries left by a previous run are resumed.
+// Idempotency is enforced by the store — NextPendingDeliveries returns only
+// status='pending' rows, so deliveries already marked sent are never fetched again.
 package broadcaster
 
 import (
@@ -31,7 +32,10 @@ type Mailer interface {
 	SendMail(to, subject, body string) error
 }
 
-// Worker drains the delivery queue.
+// Worker drains the delivery queue. Exported configuration fields (Store,
+// Mailer, BatchSize, MaxAttempts, Throttle, Idle) must be set before Start()
+// and must not be mutated afterward (they are read by the worker goroutine
+// without synchronization).
 type Worker struct {
 	Store       Store
 	Mailer      Mailer
@@ -42,7 +46,8 @@ type Worker struct {
 
 	signal     chan struct{}
 	signalOnce sync.Once
-	sleepFn    func() // overridable in tests; nil → time.Sleep(Throttle)
+	startOnce  sync.Once
+	sleepFn    func() // overridable in tests; nil → time.Sleep(Throttle) when Throttle > 0, else no-op
 }
 
 func (w *Worker) sleep() {
@@ -77,7 +82,9 @@ func (w *Worker) RunOnce() (int, error) {
 			loaded, gerr := w.Store.GetBroadcast(d.BroadcastID)
 			if gerr != nil {
 				log.Printf("broadcaster: get broadcast %s: %v", d.BroadcastID, gerr)
-				_ = w.Store.MarkDeliveryFailed(d.ID, "broadcast lookup failed", w.MaxAttempts)
+				if err := w.Store.MarkDeliveryFailed(d.ID, "broadcast lookup failed", w.MaxAttempts); err != nil {
+					log.Printf("broadcaster: mark failed (lookup) %s: %v", d.ID, err)
+				}
 				continue
 			}
 			bcache[d.BroadcastID] = loaded
@@ -85,7 +92,9 @@ func (w *Worker) RunOnce() (int, error) {
 		}
 
 		if w.Mailer == nil {
-			_ = w.Store.MarkDeliveryFailed(d.ID, "email sending not configured", w.MaxAttempts)
+			if err := w.Store.MarkDeliveryFailed(d.ID, "email sending not configured", w.MaxAttempts); err != nil {
+				log.Printf("broadcaster: mark failed (no mailer) %s: %v", d.ID, err)
+			}
 			continue
 		}
 
@@ -127,34 +136,37 @@ func (w *Worker) finalize() {
 }
 
 // Start launches the worker goroutine. It runs until the process exits, waking
-// on Notify() or every Idle interval to check for new work.
+// on Notify() or every Idle interval to check for new work. Calling Start()
+// more than once is a no-op; only one goroutine is ever launched.
 func (w *Worker) Start() {
-	if w.BatchSize <= 0 {
-		w.BatchSize = 50
-	}
-	if w.MaxAttempts <= 0 {
-		w.MaxAttempts = 3
-	}
-	if w.Idle <= 0 {
-		w.Idle = 5 * time.Second
-	}
-	w.ensureSignal()
-	go func() {
-		for {
-			n, err := w.RunOnce()
-			if err != nil {
-				log.Printf("broadcaster: run error: %v", err)
-				time.Sleep(w.Idle)
-				continue
-			}
-			if n == 0 {
-				select {
-				case <-w.signal:
-				case <-time.After(w.Idle):
+	w.startOnce.Do(func() {
+		if w.BatchSize <= 0 {
+			w.BatchSize = 50
+		}
+		if w.MaxAttempts <= 0 {
+			w.MaxAttempts = 3
+		}
+		if w.Idle <= 0 {
+			w.Idle = 5 * time.Second
+		}
+		w.ensureSignal()
+		go func() {
+			for {
+				n, err := w.RunOnce()
+				if err != nil {
+					log.Printf("broadcaster: run error: %v", err)
+					time.Sleep(w.Idle)
+					continue
+				}
+				if n == 0 {
+					select {
+					case <-w.signal:
+					case <-time.After(w.Idle):
+					}
 				}
 			}
-		}
-	}()
+		}()
+	})
 }
 
 // Notify signals the worker that new deliveries may be available (non-blocking).
