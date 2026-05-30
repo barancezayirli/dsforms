@@ -141,6 +141,50 @@ curl -X POST https://your-server.com/f/FORM_ID \
 # {"success": true}
 ```
 
+## Waitlist
+
+Waitlists are distinct from regular forms. A regular form notifies the admin on each submission. A waitlist collects unique signups by email, assigns each subscriber a position, and can email *them* back — both a per-signup confirmation and a broadcast to everyone when you're ready to launch.
+
+### Setting one up
+
+Go to **Waitlists → + New waitlist** in the admin. Give it a name and a redirect URL (where visitors land after signing up). Optionally fill in a confirmation email subject and body — if left blank no email is sent to subscribers.
+
+### Embedding on your site
+
+```html
+<form action="https://your-dsforms-host/w/YOUR_WAITLIST_ID" method="POST">
+  <input type="email" name="email" required>
+  <button type="submit">Join the waitlist</button>
+</form>
+```
+
+Any extra fields you include (e.g. `name`) are stored alongside the entry.
+
+### Response
+
+**Plain form post** — redirects to your redirect URL with `?position=N` appended so you can show a "You're #42 on the list" message.
+
+**AJAX (`Accept: application/json`):**
+
+```json
+{ "success": true, "position": 42, "already_joined": false }
+```
+
+If the email was already signed up, the response returns the original position with `"already_joined": true`. No duplicate entries are created.
+
+### Confirmation email
+
+Set a subject and body on the waitlist to send each new subscriber a confirmation on first signup. Available template variables: `{{email}}`, `{{name}}`, `{{position}}`. SMTP must be configured.
+
+### Broadcasting to all signups
+
+From the **Waitlists** admin page, open a waitlist and click **Send broadcast**. The send queue is restart-safe — if the server restarts mid-send, it picks up where it left off. Two env vars control pacing:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BROADCAST_THROTTLE_MS` | `200` | Pause in ms between individual sends |
+| `BROADCAST_MAX_ATTEMPTS` | `3` | Delivery retries before marking a recipient failed |
+
 ## Configuration
 
 All configuration is via environment variables in `.env`:
@@ -159,6 +203,8 @@ All configuration is via environment variables in `.env`:
 | `RATE_BURST` | No | `5` | Max form submissions per IP in a burst |
 | `RATE_PER_MINUTE` | No | `6` | Sustained submission rate per IP per minute |
 | `BACKUP_LOCAL_DIR` | No | — | Directory for CLI backup snapshots |
+| `BROADCAST_THROTTLE_MS` | No | `200` | Pause in ms between individual waitlist broadcast sends |
+| `BROADCAST_MAX_ATTEMPTS` | No | `3` | Delivery retries before marking a broadcast recipient failed |
 
 ### SMTP Providers
 
