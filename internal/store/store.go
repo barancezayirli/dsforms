@@ -58,6 +58,65 @@ type Submission struct {
 	CreatedAt time.Time
 }
 
+// Waitlist represents an email-keyed signup list.
+type Waitlist struct {
+	ID             string
+	Name           string
+	Redirect       string
+	ConfirmSubject string
+	ConfirmBody    string
+	CreatedAt      time.Time
+}
+
+// WaitlistSummary is a Waitlist with its entry count.
+type WaitlistSummary struct {
+	Waitlist
+	EntryCount int
+}
+
+// WaitlistEntry represents one person on a waitlist. Email is the identity;
+// any extra submitted fields are stored as JSON in Data.
+type WaitlistEntry struct {
+	ID         string
+	WaitlistID string
+	Email      string
+	Data       map[string]string
+	RawData    string // raw JSON stored in the DB; Data is its decoded form
+	IP         string
+	Position   int // computed (signup rank), populated by list/create
+	CreatedAt  time.Time
+}
+
+// Broadcast represents one bulk message to a waitlist.
+type Broadcast struct {
+	ID         string
+	WaitlistID string
+	Subject    string
+	Body       string
+	Status     string // "sending" | "done"
+	CreatedAt  time.Time
+}
+
+// BroadcastSummary is a Broadcast with per-status delivery counts.
+type BroadcastSummary struct {
+	Broadcast
+	Total   int
+	Sent    int
+	Failed  int
+	Pending int
+}
+
+// Delivery represents one recipient's delivery within a broadcast.
+type Delivery struct {
+	ID          string
+	BroadcastID string
+	Email       string
+	Status      string // "pending" | "sent" | "failed"
+	Error       string
+	Attempts    int
+	UpdatedAt   time.Time
+}
+
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
     id                  TEXT PRIMARY KEY,
@@ -97,6 +156,48 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS waitlists (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    redirect        TEXT NOT NULL DEFAULT '',
+    confirm_subject TEXT NOT NULL DEFAULT '',
+    confirm_body    TEXT NOT NULL DEFAULT '',
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS waitlist_entries (
+    id          TEXT PRIMARY KEY,
+    waitlist_id TEXT NOT NULL REFERENCES waitlists(id) ON DELETE CASCADE,
+    email       TEXT NOT NULL,
+    data        TEXT NOT NULL DEFAULT '{}',
+    ip          TEXT NOT NULL DEFAULT '',
+    created_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(waitlist_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_waitlist_entries_waitlist_id ON waitlist_entries(waitlist_id);
+
+CREATE TABLE IF NOT EXISTS broadcasts (
+    id          TEXT PRIMARY KEY,
+    waitlist_id TEXT NOT NULL REFERENCES waitlists(id) ON DELETE CASCADE,
+    subject     TEXT NOT NULL DEFAULT '',
+    body        TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'sending',
+    created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_waitlist_id ON broadcasts(waitlist_id);
+
+CREATE TABLE IF NOT EXISTS deliveries (
+    id           TEXT PRIMARY KEY,
+    broadcast_id TEXT NOT NULL REFERENCES broadcasts(id) ON DELETE CASCADE,
+    email        TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    error        TEXT NOT NULL DEFAULT '',
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    updated_at   DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries(status);
+CREATE INDEX IF NOT EXISTS idx_deliveries_broadcast_id ON deliveries(broadcast_id);
 `
 
 // runMigrations applies the schema to db. Safe to call on an existing DB (idempotent).
@@ -657,6 +758,91 @@ func (s *Store) CleanExpiredSessions() error {
 	_, err := s.db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 	if err != nil {
 		return fmt.Errorf("clean expired sessions: %w", err)
+	}
+	return nil
+}
+
+// CreateWaitlist creates a new waitlist.
+func (s *Store) CreateWaitlist(wl Waitlist) error {
+	_, err := s.db.Exec(
+		"INSERT INTO waitlists (id, name, redirect, confirm_subject, confirm_body) VALUES (?, ?, ?, ?, ?)",
+		wl.ID, wl.Name, wl.Redirect, wl.ConfirmSubject, wl.ConfirmBody,
+	)
+	if err != nil {
+		return fmt.Errorf("create waitlist: %w", err)
+	}
+	return nil
+}
+
+// GetWaitlist returns a waitlist by ID.
+func (s *Store) GetWaitlist(id string) (Waitlist, error) {
+	var wl Waitlist
+	err := s.db.QueryRow(
+		"SELECT id, name, redirect, confirm_subject, confirm_body, created_at FROM waitlists WHERE id = ?",
+		id,
+	).Scan(&wl.ID, &wl.Name, &wl.Redirect, &wl.ConfirmSubject, &wl.ConfirmBody, &wl.CreatedAt)
+	if err != nil {
+		return Waitlist{}, fmt.Errorf("get waitlist: %w", err)
+	}
+	return wl, nil
+}
+
+// ListWaitlists returns all waitlists with entry counts.
+func (s *Store) ListWaitlists() ([]WaitlistSummary, error) {
+	rows, err := s.db.Query(`
+		SELECT w.id, w.name, w.redirect, w.confirm_subject, w.confirm_body, w.created_at,
+		       COUNT(e.id) AS entry_count
+		FROM waitlists w
+		LEFT JOIN waitlist_entries e ON e.waitlist_id = w.id
+		GROUP BY w.id
+		ORDER BY w.created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list waitlists: %w", err)
+	}
+	defer rows.Close()
+
+	var out []WaitlistSummary
+	for rows.Next() {
+		var ws WaitlistSummary
+		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Redirect, &ws.ConfirmSubject, &ws.ConfirmBody, &ws.CreatedAt, &ws.EntryCount); err != nil {
+			return nil, fmt.Errorf("list waitlists: %w", err)
+		}
+		out = append(out, ws)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list waitlists: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateWaitlist updates a waitlist's editable fields.
+// Returns sql.ErrNoRows if no waitlist with the given ID exists.
+func (s *Store) UpdateWaitlist(wl Waitlist) error {
+	result, err := s.db.Exec(
+		"UPDATE waitlists SET name = ?, redirect = ?, confirm_subject = ?, confirm_body = ? WHERE id = ?",
+		wl.Name, wl.Redirect, wl.ConfirmSubject, wl.ConfirmBody, wl.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update waitlist: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("update waitlist: %w", sql.ErrNoRows)
+	}
+	return nil
+}
+
+// DeleteWaitlist deletes a waitlist and its entries/broadcasts (cascade).
+// Returns sql.ErrNoRows if no waitlist with the given ID exists.
+func (s *Store) DeleteWaitlist(id string) error {
+	result, err := s.db.Exec("DELETE FROM waitlists WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete waitlist: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("delete waitlist: %w", sql.ErrNoRows)
 	}
 	return nil
 }

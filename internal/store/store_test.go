@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -793,5 +795,72 @@ func TestGetFormDefaultWebhookEmpty(t *testing.T) {
 	}
 	if got.WebhookFormat != "" {
 		t.Errorf("WebhookFormat = %q, want empty", got.WebhookFormat)
+	}
+}
+
+func TestWaitlistCRUD(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+
+	wl := Waitlist{
+		ID:             "wl-1",
+		Name:           "Launch List",
+		Redirect:       "https://site.com/joined",
+		ConfirmSubject: "You're in!",
+		ConfirmBody:    "Hi {{email}}, you are #{{position}}.",
+	}
+	if err := s.CreateWaitlist(wl); err != nil {
+		t.Fatalf("CreateWaitlist error = %v", err)
+	}
+
+	got, err := s.GetWaitlist("wl-1")
+	if err != nil {
+		t.Fatalf("GetWaitlist error = %v", err)
+	}
+	if got.Name != "Launch List" || got.Redirect != "https://site.com/joined" ||
+		got.ConfirmSubject != "You're in!" || got.ConfirmBody != "Hi {{email}}, you are #{{position}}." {
+		t.Errorf("GetWaitlist = %+v, want all fields round-tripped", got)
+	}
+
+	wl.Name = "Renamed"
+	if err := s.UpdateWaitlist(wl); err != nil {
+		t.Fatalf("UpdateWaitlist error = %v", err)
+	}
+	got, _ = s.GetWaitlist("wl-1")
+	if got.Name != "Renamed" {
+		t.Errorf("after update Name = %q, want Renamed", got.Name)
+	}
+
+	list, err := s.ListWaitlists()
+	if err != nil {
+		t.Fatalf("ListWaitlists error = %v", err)
+	}
+	if len(list) != 1 || list[0].EntryCount != 0 {
+		t.Errorf("ListWaitlists = %+v, want 1 item with EntryCount 0", list)
+	}
+
+	if err := s.DeleteWaitlist("wl-1"); err != nil {
+		t.Fatalf("DeleteWaitlist error = %v", err)
+	}
+	if _, err := s.GetWaitlist("wl-1"); err == nil {
+		t.Error("GetWaitlist after delete: want error, got nil")
+	}
+}
+
+func TestDeleteWaitlistNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	err := s.DeleteWaitlist("missing")
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("DeleteWaitlist(missing) error = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestUpdateWaitlistNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	err := s.UpdateWaitlist(Waitlist{ID: "missing", Name: "X"})
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("UpdateWaitlist(missing) error = %v, want sql.ErrNoRows", err)
 	}
 }
