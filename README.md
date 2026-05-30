@@ -172,6 +172,8 @@ Any extra fields you include (e.g. `name`) are stored alongside the entry.
 
 If the email was already signed up, the response returns the original position with `"already_joined": true`. No duplicate entries are created.
 
+> **Launch traffic:** the public `/w/{id}` endpoint shares the per-IP rate limiter with form submissions (`RATE_BURST` / `RATE_PER_MINUTE`). If signups arrive through a shared proxy/CDN egress IP, raise these limits before a launch spike so legitimate visitors aren't throttled.
+
 ### Confirmation email
 
 Set a subject and body on the waitlist to send each new subscriber a confirmation on first signup. Available template variables: `{{email}}`, `{{name}}`, `{{position}}`. SMTP must be configured.
