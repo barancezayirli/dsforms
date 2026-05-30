@@ -2,10 +2,14 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
+	"sort"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -202,4 +206,120 @@ func (h *WaitlistHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/waitlists", http.StatusFound)
+}
+
+type waitlistDetailData struct {
+	Title       string
+	Active      string
+	CurrentUser store.User
+	Flash       *FlashData
+	Waitlist    store.Waitlist
+	Entries     []store.WaitlistEntry
+	TotalCount  int
+	Page        int
+	HasPrev     bool
+	HasNext     bool
+	PrevPage    int
+	NextPage    int
+}
+
+// Detail renders the paginated entries table for a waitlist.
+func (h *WaitlistHandler) Detail(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	wl, ok := h.getWaitlistOr404(w, id)
+	if !ok {
+		return
+	}
+
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			page = n
+		}
+	}
+	offset := (page - 1) * pageSize
+
+	user, _ := auth.UserFromContext(r.Context())
+	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
+
+	entries, _ := h.Store.ListEntriesPaged(id, pageSize, offset)
+	total, _ := h.Store.CountEntries(id)
+
+	data := waitlistDetailData{
+		Title:       wl.Name,
+		Active:      "waitlists",
+		CurrentUser: user,
+		Flash:       newFlash(flashType, flashMsg),
+		Waitlist:    wl,
+		Entries:     entries,
+		TotalCount:  total,
+		Page:        page,
+		HasPrev:     page > 1,
+		HasNext:     offset+pageSize < total,
+		PrevPage:    page - 1,
+		NextPage:    page + 1,
+	}
+	h.render(w, "waitlist_detail.html", data)
+}
+
+// DeleteEntry handles POST to delete one entry.
+func (h *WaitlistHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	entryID := chi.URLParam(r, "entryID")
+	if err := h.Store.DeleteEntry(entryID); err != nil {
+		log.Printf("waitlist delete entry %s: %v", entryID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/waitlists/"+id, http.StatusFound)
+}
+
+// ExportCSV handles GET to export entries as CSV.
+func (h *WaitlistHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	wl, ok := h.getWaitlistOr404(w, id)
+	if !ok {
+		return
+	}
+
+	entries, err := h.Store.ListEntries(id)
+	if err != nil {
+		log.Printf("waitlist export %s: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Union of all extra-field keys.
+	keySet := map[string]struct{}{}
+	for _, e := range entries {
+		for k := range e.Data {
+			keySet[k] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(keySet))
+	for k := range keySet {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-waitlist.csv"`, wl.ID))
+
+	cw := csv.NewWriter(w)
+	header := append([]string{"position", "email", "joined_at"}, keys...)
+	if err := cw.Write(header); err != nil {
+		log.Printf("waitlist export: write header: %v", err)
+		return
+	}
+	for _, e := range entries {
+		row := []string{strconv.Itoa(e.Position), e.Email, e.CreatedAt.Format("2006-01-02T15:04:05Z")}
+		for _, k := range keys {
+			row = append(row, e.Data[k])
+		}
+		if err := cw.Write(row); err != nil {
+			log.Printf("waitlist export: write row: %v", err)
+			return
+		}
+	}
+	cw.Flush()
 }

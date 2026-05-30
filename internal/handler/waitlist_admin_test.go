@@ -184,3 +184,63 @@ func TestWaitlistDelete(t *testing.T) {
 	}
 }
 
+func TestWaitlistDetailShowsEntries(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`})
+
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/wl", nil))
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.Detail(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "a@x.com") {
+		t.Error("body should list the entry email")
+	}
+}
+
+func TestWaitlistEntryDelete(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`})
+
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wl/entries/e1/delete", nil))
+	req = withURLParam(req, "id", "wl")
+	req = withURLParam(req, "entryID", "e1")
+	w := httptest.NewRecorder()
+	h.DeleteEntry(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", w.Code)
+	}
+	n, _ := s.CountEntries("wl")
+	if n != 0 {
+		t.Errorf("entries = %d, want 0", n)
+	}
+}
+
+func TestWaitlistExportCSV(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{"name":"Al"}`})
+
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/wl/export", nil))
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.ExportCSV(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "email") || !strings.Contains(body, "a@x.com") {
+		t.Errorf("CSV missing expected content: %q", body)
+	}
+}
+
