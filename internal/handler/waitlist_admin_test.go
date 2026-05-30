@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/youruser/dsforms/internal/auth"
 	"github.com/youruser/dsforms/internal/store"
 )
@@ -59,6 +60,16 @@ func setupWaitlistAdmin(t *testing.T) (*store.Store, *WaitlistHandler) {
 func withUser(req *http.Request) *http.Request {
 	ctx := auth.WithUser(req.Context(), store.User{ID: "u1", Username: "admin"})
 	return req.WithContext(ctx)
+}
+
+// withURLParam injects a chi URL param into the request context (accumulates).
+func withURLParam(req *http.Request, key, val string) *http.Request {
+	rctx, _ := req.Context().Value(chi.RouteCtxKey).(*chi.Context)
+	if rctx == nil {
+		rctx = chi.NewRouteContext()
+	}
+	rctx.URLParams.Add(key, val)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
 func TestWaitlistListPage(t *testing.T) {
@@ -112,4 +123,64 @@ func TestWaitlistCreateRequiresName(t *testing.T) {
 	}
 }
 
-var _ = context.Background // keep context import (used by later tasks' helpers)
+func TestWaitlistEditPage(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch List"})
+
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/wl/edit", nil))
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.EditPage(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Launch List") {
+		t.Error("body should show the waitlist name")
+	}
+	if !strings.Contains(body, "/w/wl") {
+		t.Error("body should show the public endpoint snippet with /w/{id}")
+	}
+}
+
+func TestWaitlistUpdate(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Old"})
+
+	form := url.Values{"name": {"New Name"}, "confirm_subject": {"Hi"}}
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wl/edit", strings.NewReader(form.Encode())))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.Edit(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", w.Code)
+	}
+	got, _ := s.GetWaitlist("wl")
+	if got.Name != "New Name" || got.ConfirmSubject != "Hi" {
+		t.Errorf("after update = %+v, want New Name / Hi", got)
+	}
+}
+
+func TestWaitlistDelete(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "X"})
+
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wl/delete", nil))
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.Delete(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", w.Code)
+	}
+	if _, err := s.GetWaitlist("wl"); err == nil {
+		t.Error("waitlist should be deleted")
+	}
+}
+
