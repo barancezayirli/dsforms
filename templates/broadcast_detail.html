@@ -22,7 +22,7 @@
       <div class="field-label">Body</div>
       <div class="field-msg">{{.Broadcast.Body}}</div>
     </div>
-    {{if eq .Broadcast.Status "sending"}}
+    {{if .Broadcast.IsSending}}
     <p class="form-hint">Sending in progress. Refresh to update counts.</p>
     {{end}}
   </div>

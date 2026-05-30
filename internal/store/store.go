@@ -52,7 +52,7 @@ type Submission struct {
 	ID        string
 	FormID    string
 	Data      map[string]string
-	RawData   string
+	RawData   string // raw JSON stored in the DB; Data is its decoded form
 	IP        string
 	Read      bool
 	CreatedAt time.Time
@@ -83,7 +83,7 @@ type WaitlistEntry struct {
 	Data       map[string]string
 	RawData    string // raw JSON stored in the DB; Data is its decoded form
 	IP         string
-	Position   int // computed (signup rank), populated by list/create
+	Position   int // computed signup rank; set only by ListEntries/ListEntriesPaged. CreateEntry returns position separately, not via this field.
 	CreatedAt  time.Time
 }
 
@@ -96,6 +96,9 @@ type Broadcast struct {
 	Status     string // "sending" | "done"
 	CreatedAt  time.Time
 }
+
+// IsSending reports whether the broadcast is still being delivered.
+func (b Broadcast) IsSending() bool { return b.Status == BroadcastStatusSending }
 
 // BroadcastSummary is a Broadcast with per-status delivery counts.
 type BroadcastSummary struct {
@@ -116,6 +119,16 @@ type Delivery struct {
 	Attempts    int
 	UpdatedAt   time.Time
 }
+
+// Broadcast and delivery status values.
+const (
+	BroadcastStatusSending = "sending"
+	BroadcastStatusDone    = "done"
+
+	DeliveryStatusPending = "pending"
+	DeliveryStatusSent    = "sent"
+	DeliveryStatusFailed  = "failed"
+)
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -182,7 +195,7 @@ CREATE TABLE IF NOT EXISTS broadcasts (
     waitlist_id TEXT NOT NULL REFERENCES waitlists(id) ON DELETE CASCADE,
     subject     TEXT NOT NULL DEFAULT '',
     body        TEXT NOT NULL DEFAULT '',
-    status      TEXT NOT NULL DEFAULT 'sending',
+    status      TEXT NOT NULL DEFAULT 'sending' CHECK(status IN ('sending','done')),
     created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_broadcasts_waitlist_id ON broadcasts(waitlist_id);
@@ -191,7 +204,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
     id           TEXT PRIMARY KEY,
     broadcast_id TEXT NOT NULL REFERENCES broadcasts(id) ON DELETE CASCADE,
     email        TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'pending',
+    status       TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','sent','failed')),
     error        TEXT NOT NULL DEFAULT '',
     attempts     INTEGER NOT NULL DEFAULT 0,
     updated_at   DATETIME NOT NULL DEFAULT (datetime('now'))
@@ -850,6 +863,9 @@ func (s *Store) DeleteWaitlist(id string) error {
 // CreateEntry inserts a waitlist entry, deduping by (waitlist_id, email).
 // Returns the entry's signup position and whether the email was already present.
 func (s *Store) CreateEntry(e WaitlistEntry) (position int, alreadyJoined bool, err error) {
+	if e.Email == "" {
+		return 0, false, fmt.Errorf("create entry: email must not be empty")
+	}
 	rawData := e.RawData
 	if rawData == "" {
 		rawData = "{}"
@@ -959,8 +975,8 @@ func (s *Store) DeleteEntry(id string) error {
 	return nil
 }
 
-// CreateBroadcast inserts a broadcast (status 'sending') plus one pending
-// delivery per email, atomically.
+// CreateBroadcast inserts a broadcast (always created with status 'sending';
+// the b.Status field is ignored) plus one pending delivery per email, atomically.
 func (s *Store) CreateBroadcast(b Broadcast, emails []string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
