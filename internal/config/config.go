@@ -22,6 +22,9 @@ type Config struct {
 	RateBurst     int
 	RatePerMinute int
 
+	BroadcastThrottleMs  int
+	BroadcastMaxAttempts int
+
 	BackupLocalDir string
 }
 
@@ -38,9 +41,11 @@ func Load() Config {
 		SMTPUser:       os.Getenv("SMTP_USER"),
 		SMTPPass:       os.Getenv("SMTP_PASS"),
 		SMTPFrom:       os.Getenv("SMTP_FROM"),
-		RateBurst:      envOrInt("RATE_BURST", 5),
-		RatePerMinute:  envOrInt("RATE_PER_MINUTE", 6),
-		BackupLocalDir: os.Getenv("BACKUP_LOCAL_DIR"),
+		RateBurst:            envOrInt("RATE_BURST", 5),
+		RatePerMinute:        envOrInt("RATE_PER_MINUTE", 6),
+		BroadcastThrottleMs:  envOrInt("BROADCAST_THROTTLE_MS", 200),
+		BroadcastMaxAttempts: envOrInt("BROADCAST_MAX_ATTEMPTS", 3),
+		BackupLocalDir:       os.Getenv("BACKUP_LOCAL_DIR"),
 	}
 }
 
