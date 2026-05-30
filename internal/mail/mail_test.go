@@ -35,6 +35,39 @@ func TestMockMailerWait(t *testing.T) {
 	}
 }
 
+func TestMockMailerSendMail(t *testing.T) {
+	t.Parallel()
+	m := NewMockMailer()
+	if err := m.SendMail("to@x.com", "Subj", "Body"); err != nil {
+		t.Fatalf("SendMail error = %v", err)
+	}
+	if !m.Wait(time.Second) {
+		t.Fatal("expected SendMail call to be signaled")
+	}
+	if got := m.SendMailCount(); got != 1 {
+		t.Errorf("SendMailCount = %d, want 1", got)
+	}
+	if m.SentMails[0].To != "to@x.com" || m.SentMails[0].Subject != "Subj" {
+		t.Errorf("recorded mail = %+v, want To/Subject set", m.SentMails[0])
+	}
+}
+
+func TestStripHeaderChars(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"normal subject":            "normal subject",
+		"inject\r\nBcc: evil@x.com": "injectBcc: evil@x.com",
+		"line\nbreak":               "linebreak",
+		"carriage\rreturn":          "carriagereturn",
+		"":                          "",
+	}
+	for in, want := range cases {
+		if got := stripHeaderChars(in); got != want {
+			t.Errorf("stripHeaderChars(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestBuildMessage(t *testing.T) {
 	t.Parallel()
 	m := &Mailer{

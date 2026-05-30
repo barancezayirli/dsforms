@@ -1,0 +1,30 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">Broadcast</h1>
+  <a href="/admin/waitlists/{{.Waitlist.ID}}/broadcast" class="btn">Back</a>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-label">Sent</div><div class="stat-val">{{.Broadcast.Sent}}</div></div>
+  <div class="stat"><div class="stat-label">Pending</div><div class="stat-val">{{.Broadcast.Pending}}</div></div>
+  <div class="stat"><div class="stat-label">Failed</div><div class="stat-val">{{.Broadcast.Failed}}</div></div>
+</div>
+
+<div class="card">
+  <div class="card-head">Status: {{.Broadcast.Status}}</div>
+  <div class="card-body">
+    <div class="field-block">
+      <div class="field-label">Subject</div>
+      <div class="field-val">{{.Broadcast.Subject}}</div>
+    </div>
+    <div class="field-block">
+      <div class="field-label">Body</div>
+      <div class="field-msg">{{.Broadcast.Body}}</div>
+    </div>
+    {{if .Broadcast.IsSending}}
+    <p class="form-hint">Sending in progress. Refresh to update counts.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

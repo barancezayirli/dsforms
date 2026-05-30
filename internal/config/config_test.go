@@ -170,3 +170,27 @@ func TestLoad(t *testing.T) {
 		})
 	}
 }
+
+// TestBroadcastConfigDefaults and TestBroadcastConfigOverride do not use
+// t.Parallel because t.Setenv is incompatible with parallel test execution.
+
+func TestBroadcastConfigDefaults(t *testing.T) {
+	t.Setenv("SECRET_KEY", "x")
+	cfg := Load()
+	if cfg.BroadcastThrottleMs != 200 {
+		t.Errorf("BroadcastThrottleMs = %d, want 200", cfg.BroadcastThrottleMs)
+	}
+	if cfg.BroadcastMaxAttempts != 3 {
+		t.Errorf("BroadcastMaxAttempts = %d, want 3", cfg.BroadcastMaxAttempts)
+	}
+}
+
+func TestBroadcastConfigOverride(t *testing.T) {
+	t.Setenv("SECRET_KEY", "x")
+	t.Setenv("BROADCAST_THROTTLE_MS", "50")
+	t.Setenv("BROADCAST_MAX_ATTEMPTS", "5")
+	cfg := Load()
+	if cfg.BroadcastThrottleMs != 50 || cfg.BroadcastMaxAttempts != 5 {
+		t.Errorf("override failed: %+v", cfg)
+	}
+}

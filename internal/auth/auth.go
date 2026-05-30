@@ -87,3 +87,8 @@ func UserFromContext(ctx context.Context) (store.User, bool) {
 	u, ok := ctx.Value(userContextKey).(store.User)
 	return u, ok
 }
+
+// WithUser returns a context with the user stored. Used by middleware and tests.
+func WithUser(ctx context.Context, u store.User) context.Context {
+	return context.WithValue(ctx, userContextKey, u)
+}

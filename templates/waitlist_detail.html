@@ -1,0 +1,55 @@
+{{template "base" .}}
+{{define "content"}}
+<div class="page-header">
+  <h1 class="page-title">{{.Waitlist.Name}}</h1>
+  <div style="display:flex;gap:8px">
+    <a href="/admin/waitlists/{{.Waitlist.ID}}/broadcast" class="btn btn-mint">Broadcast</a>
+    <a href="/admin/waitlists/{{.Waitlist.ID}}/export" class="btn">Export CSV</a>
+    <a href="/admin/waitlists/{{.Waitlist.ID}}/edit" class="btn">Settings</a>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat stat-accent">
+    <div class="stat-label">Total Signups</div>
+    <div class="stat-val">{{.TotalCount}}</div>
+  </div>
+</div>
+
+{{if .Entries}}
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr><th>#</th><th>Email</th><th>Joined</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{range .Entries}}
+      <tr>
+        <td>{{.Position}}</td>
+        <td>{{.Email}}</td>
+        <td class="text-muted">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+        <td class="actions">
+          <form method="POST" action="/admin/waitlists/{{$.Waitlist.ID}}/entries/{{.ID}}/delete" style="margin:0" onsubmit="return confirm('Remove this signup?')">
+            <button type="submit" class="btn-ghost btn-ghost-danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+
+{{if or .HasPrev .HasNext}}
+<div class="pagination">
+  {{if .HasPrev}}<a class="btn" href="/admin/waitlists/{{.Waitlist.ID}}?page={{.PrevPage}}">Previous</a>{{end}}
+  <span class="text-muted">Page {{.Page}}</span>
+  {{if .HasNext}}<a class="btn" href="/admin/waitlists/{{.Waitlist.ID}}?page={{.NextPage}}">Next</a>{{end}}
+</div>
+{{end}}
+{{else}}
+<div class="empty-state">
+  <p>No signups yet.</p>
+  <p class="text-muted">Add the signup form to your site (see Settings for the snippet).</p>
+</div>
+{{end}}
+{{end}}

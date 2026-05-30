@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -793,5 +795,347 @@ func TestGetFormDefaultWebhookEmpty(t *testing.T) {
 	}
 	if got.WebhookFormat != "" {
 		t.Errorf("WebhookFormat = %q, want empty", got.WebhookFormat)
+	}
+}
+
+func TestWaitlistCRUD(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+
+	wl := Waitlist{
+		ID:             "wl-1",
+		Name:           "Launch List",
+		Redirect:       "https://site.com/joined",
+		ConfirmSubject: "You're in!",
+		ConfirmBody:    "Hi {{email}}, you are #{{position}}.",
+	}
+	if err := s.CreateWaitlist(wl); err != nil {
+		t.Fatalf("CreateWaitlist error = %v", err)
+	}
+
+	got, err := s.GetWaitlist("wl-1")
+	if err != nil {
+		t.Fatalf("GetWaitlist error = %v", err)
+	}
+	if got.Name != "Launch List" || got.Redirect != "https://site.com/joined" ||
+		got.ConfirmSubject != "You're in!" || got.ConfirmBody != "Hi {{email}}, you are #{{position}}." {
+		t.Errorf("GetWaitlist = %+v, want all fields round-tripped", got)
+	}
+
+	wl.Name = "Renamed"
+	if err := s.UpdateWaitlist(wl); err != nil {
+		t.Fatalf("UpdateWaitlist error = %v", err)
+	}
+	got, _ = s.GetWaitlist("wl-1")
+	if got.Name != "Renamed" {
+		t.Errorf("after update Name = %q, want Renamed", got.Name)
+	}
+
+	list, err := s.ListWaitlists()
+	if err != nil {
+		t.Fatalf("ListWaitlists error = %v", err)
+	}
+	if len(list) != 1 || list[0].EntryCount != 0 {
+		t.Errorf("ListWaitlists = %+v, want 1 item with EntryCount 0", list)
+	}
+
+	if err := s.DeleteWaitlist("wl-1"); err != nil {
+		t.Fatalf("DeleteWaitlist error = %v", err)
+	}
+	if _, err := s.GetWaitlist("wl-1"); err == nil {
+		t.Error("GetWaitlist after delete: want error, got nil")
+	}
+}
+
+func TestDeleteWaitlistNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	err := s.DeleteWaitlist("missing")
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("DeleteWaitlist(missing) error = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestUpdateWaitlistNotFound(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	err := s.UpdateWaitlist(Waitlist{ID: "missing", Name: "X"})
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("UpdateWaitlist(missing) error = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func seedWaitlist(t *testing.T, s *Store) {
+	t.Helper()
+	if err := s.CreateWaitlist(Waitlist{ID: "wl", Name: "WL"}); err != nil {
+		t.Fatalf("seed waitlist: %v", err)
+	}
+}
+
+func TestCreateEntryDedupAndPosition(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+
+	pos, already, err := s.CreateEntry(WaitlistEntry{
+		ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{"name":"Al"}`, IP: "1.1.1.1",
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry e1 error = %v", err)
+	}
+	if pos != 1 || already {
+		t.Errorf("first entry: pos=%d already=%v, want 1/false", pos, already)
+	}
+
+	pos2, already2, err := s.CreateEntry(WaitlistEntry{
+		ID: "e2", WaitlistID: "wl", Email: "b@x.com", RawData: `{}`,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry e2 error = %v", err)
+	}
+	if pos2 != 2 || already2 {
+		t.Errorf("second entry: pos=%d already=%v, want 2/false", pos2, already2)
+	}
+
+	// Duplicate email → no new row, alreadyJoined true, original position returned.
+	posDup, alreadyDup, err := s.CreateEntry(WaitlistEntry{
+		ID: "e3", WaitlistID: "wl", Email: "a@x.com", RawData: `{"name":"changed"}`,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry dup error = %v", err)
+	}
+	if posDup != 1 || !alreadyDup {
+		t.Errorf("dup entry: pos=%d already=%v, want 1/true", posDup, alreadyDup)
+	}
+
+	n, err := s.CountEntries("wl")
+	if err != nil {
+		t.Fatalf("CountEntries error = %v", err)
+	}
+	if n != 2 {
+		t.Errorf("CountEntries = %d, want 2", n)
+	}
+}
+
+func TestListEntriesPagedWithPosition(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	for i, email := range []string{"a@x.com", "b@x.com", "c@x.com"} {
+		if _, _, err := s.CreateEntry(WaitlistEntry{
+			ID: fmt.Sprintf("e%d", i), WaitlistID: "wl", Email: email, RawData: `{}`,
+		}); err != nil {
+			t.Fatalf("seed entry %s: %v", email, err)
+		}
+	}
+
+	entries, err := s.ListEntriesPaged("wl", 10, 0)
+	if err != nil {
+		t.Fatalf("ListEntriesPaged error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	// Newest first; c@x.com is position 3.
+	if entries[0].Email != "c@x.com" || entries[0].Position != 3 {
+		t.Errorf("entries[0] = %s pos %d, want c@x.com pos 3", entries[0].Email, entries[0].Position)
+	}
+	if entries[0].Data == nil {
+		t.Error("Data should be a non-nil map")
+	}
+}
+
+func TestDeleteEntry(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	if _, _, err := s.CreateEntry(WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+	if err := s.DeleteEntry("wl", "e1"); err != nil {
+		t.Fatalf("DeleteEntry error = %v", err)
+	}
+	n, _ := s.CountEntries("wl")
+	if n != 0 {
+		t.Errorf("CountEntries after delete = %d, want 0", n)
+	}
+}
+
+func TestDeleteEntryWrongWaitlist(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	if _, _, err := s.CreateEntry(WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Deleting under the wrong waitlist must not delete and must report ErrNoRows.
+	if err := s.DeleteEntry("other", "e1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("DeleteEntry wrong waitlist err = %v, want sql.ErrNoRows", err)
+	}
+	if n, _ := s.CountEntries("wl"); n != 1 {
+		t.Errorf("entry should remain; count = %d, want 1", n)
+	}
+}
+
+func TestListEntriesAll(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	for i, email := range []string{"a@x.com", "b@x.com"} {
+		if _, _, err := s.CreateEntry(WaitlistEntry{
+			ID: fmt.Sprintf("le%d", i), WaitlistID: "wl", Email: email, RawData: `{}`,
+		}); err != nil {
+			t.Fatalf("seed entry %s: %v", email, err)
+		}
+	}
+	entries, err := s.ListEntries("wl")
+	if err != nil {
+		t.Fatalf("ListEntries error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("ListEntries returned %d, want 2", len(entries))
+	}
+	// Newest first, with positions.
+	if entries[0].Email != "b@x.com" || entries[0].Position != 2 {
+		t.Errorf("entries[0] = %s pos %d, want b@x.com pos 2", entries[0].Email, entries[0].Position)
+	}
+}
+
+func TestBroadcastAndDeliveries(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+
+	b := Broadcast{ID: "b1", WaitlistID: "wl", Subject: "Launch", Body: "We are live"}
+	if err := s.CreateBroadcast(b, []string{"a@x.com", "b@x.com"}); err != nil {
+		t.Fatalf("CreateBroadcast error = %v", err)
+	}
+
+	got, err := s.GetBroadcast("b1")
+	if err != nil {
+		t.Fatalf("GetBroadcast error = %v", err)
+	}
+	if got.Status != "sending" || got.Subject != "Launch" {
+		t.Errorf("GetBroadcast = %+v, want status sending subject Launch", got)
+	}
+
+	pending, err := s.NextPendingDeliveries(10)
+	if err != nil {
+		t.Fatalf("NextPendingDeliveries error = %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("pending = %d, want 2", len(pending))
+	}
+
+	if err := s.MarkDeliverySent(pending[0].ID); err != nil {
+		t.Fatalf("MarkDeliverySent error = %v", err)
+	}
+	if err := s.MarkDeliveryFailed(pending[1].ID, "smtp 550", 3); err != nil {
+		t.Fatalf("MarkDeliveryFailed error = %v", err)
+	}
+
+	hasPending, _ := s.HasPendingDeliveries("b1")
+	if !hasPending {
+		t.Error("HasPendingDeliveries = false, want true (failed-but-under-cap stays pending)")
+	}
+
+	again, _ := s.NextPendingDeliveries(10)
+	_ = s.MarkDeliveryFailed(again[0].ID, "smtp 550", 3) // attempts 2
+	last, _ := s.NextPendingDeliveries(10)
+	_ = s.MarkDeliveryFailed(last[0].ID, "smtp 550", 3) // attempts 3 → failed
+	hasPending, _ = s.HasPendingDeliveries("b1")
+	if hasPending {
+		t.Error("HasPendingDeliveries = true, want false after reaching attempt cap")
+	}
+
+	sum, err := s.GetBroadcastSummary("b1")
+	if err != nil {
+		t.Fatalf("GetBroadcastSummary error = %v", err)
+	}
+	if sum.Total != 2 || sum.Sent != 1 || sum.Failed != 1 || sum.Pending != 0 {
+		t.Errorf("summary = %+v, want total2 sent1 failed1 pending0", sum)
+	}
+
+	if err := s.MarkBroadcastDone("b1"); err != nil {
+		t.Fatalf("MarkBroadcastDone error = %v", err)
+	}
+	sending, _ := s.ListSendingBroadcasts()
+	if len(sending) != 0 {
+		t.Errorf("ListSendingBroadcasts = %v, want empty", sending)
+	}
+}
+
+func TestListBroadcasts(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	if err := s.CreateBroadcast(Broadcast{ID: "b1", WaitlistID: "wl", Subject: "S", Body: "B"}, []string{"a@x.com"}); err != nil {
+		t.Fatalf("CreateBroadcast error = %v", err)
+	}
+	list, err := s.ListBroadcasts("wl")
+	if err != nil {
+		t.Fatalf("ListBroadcasts error = %v", err)
+	}
+	if len(list) != 1 || list[0].Subject != "S" || list[0].Total != 1 || list[0].Pending != 1 {
+		t.Errorf("ListBroadcasts = %+v, want one summary total1 pending1", list)
+	}
+}
+
+func TestCreateEntryRejectsEmptyEmail(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	_, _, err := s.CreateEntry(WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "", RawData: `{}`})
+	if err == nil {
+		t.Error("CreateEntry with empty email: want error, got nil")
+	}
+}
+
+func TestListWaitlistsCountsEntries(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	for i, e := range []string{"a@x.com", "b@x.com"} {
+		if _, _, err := s.CreateEntry(WaitlistEntry{ID: fmt.Sprintf("e%d", i), WaitlistID: "wl", Email: e, RawData: `{}`}); err != nil {
+			t.Fatalf("seed %s: %v", e, err)
+		}
+	}
+	list, err := s.ListWaitlists()
+	if err != nil {
+		t.Fatalf("ListWaitlists: %v", err)
+	}
+	if len(list) != 1 || list[0].EntryCount != 2 {
+		t.Errorf("EntryCount = %+v, want 2", list)
+	}
+}
+
+func TestDeleteWaitlistCascades(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	if _, _, err := s.CreateEntry(WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+	if err := s.CreateBroadcast(Broadcast{ID: "b1", WaitlistID: "wl", Subject: "S", Body: "B"}, []string{"a@x.com"}); err != nil {
+		t.Fatalf("seed broadcast: %v", err)
+	}
+	if err := s.DeleteWaitlist("wl"); err != nil {
+		t.Fatalf("DeleteWaitlist: %v", err)
+	}
+	if n, _ := s.CountEntries("wl"); n != 0 {
+		t.Errorf("entries after cascade = %d, want 0", n)
+	}
+	if list, _ := s.ListBroadcasts("wl"); len(list) != 0 {
+		t.Errorf("broadcasts after cascade = %d, want 0", len(list))
+	}
+}
+
+func TestBroadcastIsSending(t *testing.T) {
+	t.Parallel()
+	if !(Broadcast{Status: BroadcastStatusSending}).IsSending() {
+		t.Error("IsSending should be true for sending status")
+	}
+	if (Broadcast{Status: BroadcastStatusDone}).IsSending() {
+		t.Error("IsSending should be false for done status")
 	}
 }

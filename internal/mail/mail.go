@@ -11,7 +11,8 @@ import (
 	"github.com/youruser/dsforms/internal/store"
 )
 
-// Mailer implements handler.Notifier using SMTP.
+// Mailer sends email over SMTP. It implements handler.Notifier (SendNotification)
+// as well as handler.ConfirmationMailer and broadcaster.Mailer (both via SendMail).
 type Mailer struct {
 	Host    string
 	Port    int
@@ -69,17 +70,63 @@ func (m *Mailer) buildMessage(form store.Form, sub store.Submission) string {
 	return b.String()
 }
 
+// stripHeaderChars removes CR and LF to prevent SMTP header injection when a
+// value is interpolated into an email header. Confirmation subjects can contain
+// untrusted signup input via template variables.
+func stripHeaderChars(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r", ""), "\n", "")
+}
+
+// SendMail sends a plain-text email to a single recipient. Used for waitlist
+// confirmation and broadcast emails (sends to the subscriber, not the admin).
+func (m *Mailer) SendMail(to, subject, body string) error {
+	to = stripHeaderChars(to)
+	subject = stripHeaderChars(subject)
+	addr := net.JoinHostPort(m.Host, fmt.Sprintf("%d", m.Port))
+
+	var auth smtp.Auth
+	if m.User != "" && m.Pass != "" {
+		auth = smtp.PlainAuth("", m.User, m.Pass, m.Host)
+	}
+	from := m.User
+	if from == "" {
+		from = m.From
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("From: %s\r\n", stripHeaderChars(m.From)))
+	b.WriteString(fmt.Sprintf("To: %s\r\n", to))
+	b.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(body)
+
+	if err := smtp.SendMail(addr, auth, from, []string{to}, []byte(b.String())); err != nil {
+		return fmt.Errorf("send mail: %w", err)
+	}
+	return nil
+}
+
 // MockCall records a single call to SendNotification.
 type MockCall struct {
 	Form store.Form
 	Sub  store.Submission
 }
 
+// SentMail records a single SendMail call.
+type SentMail struct {
+	To      string
+	Subject string
+	Body    string
+}
+
 // MockMailer records calls for testing. Use NewMockMailer() to create.
 type MockMailer struct {
-	mu    sync.Mutex
-	Calls []MockCall
-	ch    chan struct{}
+	mu        sync.Mutex
+	Calls     []MockCall
+	SentMails []SentMail
+	ch        chan struct{}
 }
 
 // NewMockMailer creates a MockMailer with a signaling channel.
@@ -101,6 +148,22 @@ func (m *MockMailer) CallCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.Calls)
+}
+
+// SendMail records the call and signals waiters.
+func (m *MockMailer) SendMail(to, subject, body string) error {
+	m.mu.Lock()
+	m.SentMails = append(m.SentMails, SentMail{To: to, Subject: subject, Body: body})
+	m.mu.Unlock()
+	m.ch <- struct{}{}
+	return nil
+}
+
+// SendMailCount returns the number of SendMail calls recorded.
+func (m *MockMailer) SendMailCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.SentMails)
 }
 
 // Wait blocks until at least one call is recorded, or timeout elapses.

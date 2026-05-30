@@ -288,6 +288,7 @@
   <div class="nav-links">
     <a href="https://github.com/barancezayirli/dsforms" target="_blank">GitHub ↗</a>
     <a href="#webhooks">Webhooks ↓</a>
+    <a href="#waitlist">Waitlist ↓</a>
     <a href="#self-host">Self-host ↓</a>
   </div>
 </nav>
@@ -362,6 +363,7 @@
     <div class="features">
       <div class="feature">Email notifications on every submission</div>
       <div class="feature">Webhook notifications (Slack, Discord, JSON)</div>
+      <div class="feature">Waitlist mode — positions, confirmations &amp; broadcasts</div>
       <div class="feature">Submissions stored in SQLite</div>
       <div class="feature">Simple admin UI to view &amp; manage</div>
       <div class="feature">CSV export</div>
@@ -415,6 +417,53 @@
 
     <p style="font-size:13px;color:var(--muted);">
       Webhooks fire in a background goroutine — never blocking the form response. A built-in "Test Webhook" button in the admin UI lets you verify your endpoint before going live.
+    </p>
+  </section>
+
+  <hr class="divider">
+
+  <!-- Waitlist -->
+  <section id="waitlist" class="webhook-section">
+    <div class="section-title">// waitlist mode</div>
+    <p style="color:var(--muted);font-size:15px;margin-bottom:24px;">
+      A form notifies <em>you</em>. A waitlist captures unique people and emails <em>them</em> back. Collect signups by email, show each person their place in line, and broadcast to the whole list when you launch — all self-hosted, no mailing-list SaaS.
+    </p>
+
+    <div class="webhook-formats">
+      <div class="webhook-format">
+        <div class="webhook-format-name">Dedup by email</div>
+        <div class="webhook-format-desc">One row per email address. A repeat signup returns the existing position instead of creating a duplicate.</div>
+      </div>
+      <div class="webhook-format">
+        <div class="webhook-format-name">Position</div>
+        <div class="webhook-format-desc">Every signup gets a place in line — "you're #1,247" — returned instantly so your page can show it.</div>
+      </div>
+      <div class="webhook-format">
+        <div class="webhook-format-name">Broadcast</div>
+        <div class="webhook-format-desc">Compose once, send to everyone. A restart-safe queue delivers each email with throttling and retries.</div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-bar">
+        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <span class="code-filename">POST /w/YOUR_WAITLIST_ID</span>
+      </div>
+      <pre class="code-body"><span class="t-tag">&lt;form</span> <span class="t-attr">action</span>=<span class="t-val">"https://your-server.com/w/YOUR_WAITLIST_ID"</span> <span class="t-attr">method</span>=<span class="t-val">"POST"</span><span class="t-tag">&gt;</span>
+  <span class="t-tag">&lt;input</span> <span class="t-attr">type</span>=<span class="t-val">"email"</span> <span class="t-attr">name</span>=<span class="t-val">"email"</span> <span class="t-attr">required</span><span class="t-tag">&gt;</span>
+  <span class="t-tag">&lt;button&gt;</span>Join the waitlist<span class="t-tag">&lt;/button&gt;</span>
+<span class="t-tag">&lt;/form&gt;</span>
+
+<span class="t-val">// JSON response (Accept: application/json)</span>
+{
+  <span class="t-attr">"success"</span>:        <span class="t-val">true</span>,
+  <span class="t-attr">"position"</span>:       <span class="t-val">1247</span>,
+  <span class="t-attr">"already_joined"</span>: <span class="t-val">false</span>
+}</pre>
+    </div>
+
+    <p style="font-size:13px;color:var(--muted);">
+      Optional per-waitlist confirmation email sends the moment someone joins — with <span style="font-family:var(--font-mono)">{{name}}</span>, <span style="font-family:var(--font-mono)">{{position}}</span> and <span style="font-family:var(--font-mono)">{{email}}</span> variables — fired in a background goroutine so it never blocks the response. Manage waitlists, signups, CSV export and broadcasts from the admin <strong>Waitlist</strong> tab.
     </p>
   </section>
 
