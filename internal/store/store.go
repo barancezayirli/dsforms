@@ -846,3 +846,115 @@ func (s *Store) DeleteWaitlist(id string) error {
 	}
 	return nil
 }
+
+// CreateEntry inserts a waitlist entry, deduping by (waitlist_id, email).
+// Returns the entry's signup position and whether the email was already present.
+func (s *Store) CreateEntry(e WaitlistEntry) (position int, alreadyJoined bool, err error) {
+	rawData := e.RawData
+	if rawData == "" {
+		rawData = "{}"
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO waitlist_entries (id, waitlist_id, email, data, ip)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(waitlist_id, email) DO NOTHING`,
+		e.ID, e.WaitlistID, e.Email, rawData, e.IP,
+	)
+	if err != nil {
+		return 0, false, fmt.Errorf("create entry: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	alreadyJoined = n == 0
+
+	position, err = s.entryPosition(e.WaitlistID, e.Email)
+	if err != nil {
+		return 0, alreadyJoined, fmt.Errorf("create entry: %w", err)
+	}
+	return position, alreadyJoined, nil
+}
+
+// entryPosition returns the signup rank (1-based) of an email within a waitlist.
+func (s *Store) entryPosition(waitlistID, email string) (int, error) {
+	var pos int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM waitlist_entries
+		WHERE waitlist_id = ?
+		  AND rowid <= (SELECT rowid FROM waitlist_entries WHERE waitlist_id = ? AND email = ?)
+	`, waitlistID, waitlistID, email).Scan(&pos)
+	if err != nil {
+		return 0, fmt.Errorf("entry position: %w", err)
+	}
+	return pos, nil
+}
+
+// CountEntries returns the number of entries on a waitlist.
+func (s *Store) CountEntries(waitlistID string) (int, error) {
+	var n int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM waitlist_entries WHERE waitlist_id = ?", waitlistID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count entries: %w", err)
+	}
+	return n, nil
+}
+
+// scanEntries reads entry rows (with a trailing position column) into structs.
+func scanEntries(rows *sql.Rows) ([]WaitlistEntry, error) {
+	var out []WaitlistEntry
+	for rows.Next() {
+		var e WaitlistEntry
+		var rawData string
+		if err := rows.Scan(&e.ID, &e.WaitlistID, &e.Email, &rawData, &e.IP, &e.CreatedAt, &e.Position); err != nil {
+			return nil, fmt.Errorf("scan entry: %w", err)
+		}
+		e.RawData = rawData
+		if err := json.Unmarshal([]byte(rawData), &e.Data); err != nil {
+			log.Printf("warning: failed to unmarshal entry %s data: %v", e.ID, err)
+			e.Data = map[string]string{"_raw": rawData}
+		}
+		if e.Data == nil {
+			e.Data = map[string]string{}
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan entries: %w", err)
+	}
+	return out, nil
+}
+
+const entrySelectWithPosition = `
+	SELECT e.id, e.waitlist_id, e.email, e.data, e.ip, e.created_at,
+	       (SELECT COUNT(*) FROM waitlist_entries e2
+	        WHERE e2.waitlist_id = e.waitlist_id AND e2.rowid <= e.rowid) AS position
+	FROM waitlist_entries e
+	WHERE e.waitlist_id = ?
+	ORDER BY e.rowid DESC`
+
+// ListEntriesPaged returns a page of entries (newest first) with positions.
+func (s *Store) ListEntriesPaged(waitlistID string, limit, offset int) ([]WaitlistEntry, error) {
+	rows, err := s.db.Query(entrySelectWithPosition+" LIMIT ? OFFSET ?", waitlistID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list entries paged: %w", err)
+	}
+	defer rows.Close()
+	return scanEntries(rows)
+}
+
+// ListEntries returns all entries for a waitlist (newest first) with positions.
+func (s *Store) ListEntries(waitlistID string) ([]WaitlistEntry, error) {
+	rows, err := s.db.Query(entrySelectWithPosition, waitlistID)
+	if err != nil {
+		return nil, fmt.Errorf("list entries: %w", err)
+	}
+	defer rows.Close()
+	return scanEntries(rows)
+}
+
+// DeleteEntry deletes a single waitlist entry by ID.
+func (s *Store) DeleteEntry(id string) error {
+	_, err := s.db.Exec("DELETE FROM waitlist_entries WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete entry: %w", err)
+	}
+	return nil
+}

@@ -864,3 +864,123 @@ func TestUpdateWaitlistNotFound(t *testing.T) {
 		t.Errorf("UpdateWaitlist(missing) error = %v, want sql.ErrNoRows", err)
 	}
 }
+
+func seedWaitlist(t *testing.T, s *Store) {
+	t.Helper()
+	if err := s.CreateWaitlist(Waitlist{ID: "wl", Name: "WL"}); err != nil {
+		t.Fatalf("seed waitlist: %v", err)
+	}
+}
+
+func TestCreateEntryDedupAndPosition(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+
+	pos, already, err := s.CreateEntry(WaitlistEntry{
+		ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{"name":"Al"}`, IP: "1.1.1.1",
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry e1 error = %v", err)
+	}
+	if pos != 1 || already {
+		t.Errorf("first entry: pos=%d already=%v, want 1/false", pos, already)
+	}
+
+	pos2, already2, err := s.CreateEntry(WaitlistEntry{
+		ID: "e2", WaitlistID: "wl", Email: "b@x.com", RawData: `{}`,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry e2 error = %v", err)
+	}
+	if pos2 != 2 || already2 {
+		t.Errorf("second entry: pos=%d already=%v, want 2/false", pos2, already2)
+	}
+
+	// Duplicate email → no new row, alreadyJoined true, original position returned.
+	posDup, alreadyDup, err := s.CreateEntry(WaitlistEntry{
+		ID: "e3", WaitlistID: "wl", Email: "a@x.com", RawData: `{"name":"changed"}`,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry dup error = %v", err)
+	}
+	if posDup != 1 || !alreadyDup {
+		t.Errorf("dup entry: pos=%d already=%v, want 1/true", posDup, alreadyDup)
+	}
+
+	n, err := s.CountEntries("wl")
+	if err != nil {
+		t.Fatalf("CountEntries error = %v", err)
+	}
+	if n != 2 {
+		t.Errorf("CountEntries = %d, want 2", n)
+	}
+}
+
+func TestListEntriesPagedWithPosition(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	for i, email := range []string{"a@x.com", "b@x.com", "c@x.com"} {
+		if _, _, err := s.CreateEntry(WaitlistEntry{
+			ID: fmt.Sprintf("e%d", i), WaitlistID: "wl", Email: email, RawData: `{}`,
+		}); err != nil {
+			t.Fatalf("seed entry %s: %v", email, err)
+		}
+	}
+
+	entries, err := s.ListEntriesPaged("wl", 10, 0)
+	if err != nil {
+		t.Fatalf("ListEntriesPaged error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	// Newest first; c@x.com is position 3.
+	if entries[0].Email != "c@x.com" || entries[0].Position != 3 {
+		t.Errorf("entries[0] = %s pos %d, want c@x.com pos 3", entries[0].Email, entries[0].Position)
+	}
+	if entries[0].Data == nil {
+		t.Error("Data should be a non-nil map")
+	}
+}
+
+func TestDeleteEntry(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	if _, _, err := s.CreateEntry(WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+	if err := s.DeleteEntry("e1"); err != nil {
+		t.Fatalf("DeleteEntry error = %v", err)
+	}
+	n, _ := s.CountEntries("wl")
+	if n != 0 {
+		t.Errorf("CountEntries after delete = %d, want 0", n)
+	}
+}
+
+func TestListEntriesAll(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	for i, email := range []string{"a@x.com", "b@x.com"} {
+		if _, _, err := s.CreateEntry(WaitlistEntry{
+			ID: fmt.Sprintf("le%d", i), WaitlistID: "wl", Email: email, RawData: `{}`,
+		}); err != nil {
+			t.Fatalf("seed entry %s: %v", email, err)
+		}
+	}
+	entries, err := s.ListEntries("wl")
+	if err != nil {
+		t.Fatalf("ListEntries error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("ListEntries returned %d, want 2", len(entries))
+	}
+	// Newest first, with positions.
+	if entries[0].Email != "b@x.com" || entries[0].Position != 2 {
+		t.Errorf("entries[0] = %s pos %d, want b@x.com pos 2", entries[0].Email, entries[0].Position)
+	}
+}
