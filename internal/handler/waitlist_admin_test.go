@@ -359,3 +359,44 @@ func TestBroadcastDetailShowsCounts(t *testing.T) {
 	}
 }
 
+func TestBroadcastDetailUnknownReturns404(t *testing.T) {
+	t.Parallel()
+	_, h := setupWaitlistAdmin(t)
+	// Need a real waitlist so getWaitlistOr404 passes; the broadcast id is bogus.
+	if err := h.Store.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"}); err != nil {
+		t.Fatalf("seed waitlist: %v", err)
+	}
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/wl/broadcasts/nope", nil))
+	req = withURLParam(req, "id", "wl")
+	req = withURLParam(req, "bid", "nope")
+	w := httptest.NewRecorder()
+	h.BroadcastDetail(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for unknown broadcast", w.Code)
+	}
+}
+
+func TestBroadcastDetailWrongWaitlistReturns404(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	if err := s.CreateWaitlist(store.Waitlist{ID: "wlA", Name: "A"}); err != nil {
+		t.Fatalf("seed A: %v", err)
+	}
+	if err := s.CreateWaitlist(store.Waitlist{ID: "wlB", Name: "B"}); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	// Broadcast belongs to wlB.
+	if err := s.CreateBroadcast(store.Broadcast{ID: "bB", WaitlistID: "wlB", Subject: "S", Body: "B"}, []string{"a@x.com"}); err != nil {
+		t.Fatalf("seed broadcast: %v", err)
+	}
+	// Request it under wlA's URL → must 404.
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/wlA/broadcasts/bB", nil))
+	req = withURLParam(req, "id", "wlA")
+	req = withURLParam(req, "bid", "bB")
+	w := httptest.NewRecorder()
+	h.BroadcastDetail(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for cross-waitlist broadcast", w.Code)
+	}
+}
+

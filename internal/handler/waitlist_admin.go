@@ -464,6 +464,10 @@ func (h *WaitlistHandler) BroadcastDetail(w http.ResponseWriter, r *http.Request
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	if sum.WaitlistID != id {
+		http.Error(w, "broadcast not found", http.StatusNotFound)
+		return
+	}
 	user, _ := auth.UserFromContext(r.Context())
 	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
