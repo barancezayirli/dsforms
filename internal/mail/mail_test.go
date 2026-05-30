@@ -52,6 +52,22 @@ func TestMockMailerSendMail(t *testing.T) {
 	}
 }
 
+func TestStripHeaderChars(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"normal subject":            "normal subject",
+		"inject\r\nBcc: evil@x.com": "injectBcc: evil@x.com",
+		"line\nbreak":               "linebreak",
+		"carriage\rreturn":          "carriagereturn",
+		"":                          "",
+	}
+	for in, want := range cases {
+		if got := stripHeaderChars(in); got != want {
+			t.Errorf("stripHeaderChars(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestBuildMessage(t *testing.T) {
 	t.Parallel()
 	m := &Mailer{

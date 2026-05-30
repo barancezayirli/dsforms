@@ -69,9 +69,18 @@ func (m *Mailer) buildMessage(form store.Form, sub store.Submission) string {
 	return b.String()
 }
 
+// stripHeaderChars removes CR and LF to prevent SMTP header injection when a
+// value is interpolated into an email header. Confirmation subjects can contain
+// untrusted signup input via template variables.
+func stripHeaderChars(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r", ""), "\n", "")
+}
+
 // SendMail sends a plain-text email to a single recipient. Used for waitlist
 // confirmation and broadcast emails (sends to the subscriber, not the admin).
 func (m *Mailer) SendMail(to, subject, body string) error {
+	to = stripHeaderChars(to)
+	subject = stripHeaderChars(subject)
 	addr := net.JoinHostPort(m.Host, fmt.Sprintf("%d", m.Port))
 
 	var auth smtp.Auth
