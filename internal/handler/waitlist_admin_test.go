@@ -276,6 +276,8 @@ func TestCSVSafe(t *testing.T) {
 		"safe":    "safe",
 		"":        "",
 		"a=b":     "a=b",
+		"\tdanger": "'\tdanger",
+		"\rdanger": "'\rdanger",
 	}
 	for in, want := range cases {
 		if got := csvSafe(in); got != want {
@@ -397,6 +399,129 @@ func TestBroadcastDetailWrongWaitlistReturns404(t *testing.T) {
 	h.BroadcastDetail(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for cross-waitlist broadcast", w.Code)
+	}
+}
+
+func TestWaitlistNewPage(t *testing.T) {
+	t.Parallel()
+	_, h := setupWaitlistAdmin(t)
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/new", nil))
+	w := httptest.NewRecorder()
+	h.NewPage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "New Waitlist") {
+		t.Error("body should contain the new-waitlist form heading")
+	}
+}
+
+func TestBroadcastPageRenders(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`})
+	req := withUser(httptest.NewRequest("GET", "/admin/waitlists/wl/broadcast", nil))
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.BroadcastPage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Broadcast") {
+		t.Error("body should render the broadcast compose page")
+	}
+}
+
+func TestWaitlistEditRequiresName(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Old"})
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wl/edit", strings.NewReader("name=")))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.Edit(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render)", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "name is required") {
+		t.Error("expected validation error in body")
+	}
+	got, _ := s.GetWaitlist("wl")
+	if got.Name != "Old" {
+		t.Errorf("name should be unchanged on validation failure, got %q", got.Name)
+	}
+}
+
+func TestWaitlistDeleteNotFound(t *testing.T) {
+	t.Parallel()
+	_, h := setupWaitlistAdmin(t)
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/missing/delete", nil))
+	req = withURLParam(req, "id", "missing")
+	w := httptest.NewRecorder()
+	h.Delete(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestBroadcastCreateEmptyWaitlist(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	form := url.Values{"subject": {"S"}, "body": {"B"}}
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wl/broadcast", strings.NewReader(form.Encode())))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.CreateBroadcast(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render, no signups)", w.Code)
+	}
+	pending, _ := s.NextPendingDeliveries(10)
+	if len(pending) != 0 {
+		t.Errorf("pending = %d, want 0 (nothing enqueued)", len(pending))
+	}
+}
+
+func TestBroadcastCreateRequiresBody(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl", Name: "Launch"})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`})
+	form := url.Values{"subject": {"has subject"}, "body": {""}}
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wl/broadcast", strings.NewReader(form.Encode())))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = withURLParam(req, "id", "wl")
+	w := httptest.NewRecorder()
+	h.CreateBroadcast(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render, empty body)", w.Code)
+	}
+	pending, _ := s.NextPendingDeliveries(10)
+	if len(pending) != 0 {
+		t.Errorf("pending = %d, want 0", len(pending))
+	}
+}
+
+func TestWaitlistEntryDeleteWrongWaitlist(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wlA", Name: "A"})
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wlB", Name: "B"})
+	_, _, _ = s.CreateEntry(store.WaitlistEntry{ID: "eB", WaitlistID: "wlB", Email: "a@x.com", RawData: `{}`})
+	// Try to delete wlB's entry via wlA's URL → 404, entry survives.
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/wlA/entries/eB/delete", nil))
+	req = withURLParam(req, "id", "wlA")
+	req = withURLParam(req, "entryID", "eB")
+	w := httptest.NewRecorder()
+	h.DeleteEntry(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+	if n, _ := s.CountEntries("wlB"); n != 1 {
+		t.Errorf("wlB entry should survive; count = %d, want 1", n)
 	}
 }
 

@@ -966,11 +966,16 @@ func (s *Store) ListEntries(waitlistID string) ([]WaitlistEntry, error) {
 	return scanEntries(rows)
 }
 
-// DeleteEntry deletes a single waitlist entry by ID.
-func (s *Store) DeleteEntry(id string) error {
-	_, err := s.db.Exec("DELETE FROM waitlist_entries WHERE id = ?", id)
+// DeleteEntry deletes a single waitlist entry scoped to its waitlist.
+// Returns sql.ErrNoRows if no matching entry exists.
+func (s *Store) DeleteEntry(waitlistID, id string) error {
+	result, err := s.db.Exec("DELETE FROM waitlist_entries WHERE id = ? AND waitlist_id = ?", id, waitlistID)
 	if err != nil {
 		return fmt.Errorf("delete entry: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("delete entry: %w", sql.ErrNoRows)
 	}
 	return nil
 }

@@ -952,12 +952,28 @@ func TestDeleteEntry(t *testing.T) {
 	if _, _, err := s.CreateEntry(WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`}); err != nil {
 		t.Fatalf("seed entry: %v", err)
 	}
-	if err := s.DeleteEntry("e1"); err != nil {
+	if err := s.DeleteEntry("wl", "e1"); err != nil {
 		t.Fatalf("DeleteEntry error = %v", err)
 	}
 	n, _ := s.CountEntries("wl")
 	if n != 0 {
 		t.Errorf("CountEntries after delete = %d, want 0", n)
+	}
+}
+
+func TestDeleteEntryWrongWaitlist(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	if _, _, err := s.CreateEntry(WaitlistEntry{ID: "e1", WaitlistID: "wl", Email: "a@x.com", RawData: `{}`}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Deleting under the wrong waitlist must not delete and must report ErrNoRows.
+	if err := s.DeleteEntry("other", "e1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("DeleteEntry wrong waitlist err = %v, want sql.ErrNoRows", err)
+	}
+	if n, _ := s.CountEntries("wl"); n != 1 {
+		t.Errorf("entry should remain; count = %d, want 1", n)
 	}
 }
 

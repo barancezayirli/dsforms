@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/csv"
 	"errors"
@@ -116,11 +117,18 @@ func (h *WaitlistHandler) Create(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/waitlists/"+wl.ID+"/edit", http.StatusFound)
 }
 
-// render executes a template against the base layout.
+// render executes a template against the base layout, buffering first so a
+// mid-render error produces a clean 500 rather than corrupted partial output.
 func (h *WaitlistHandler) render(w http.ResponseWriter, name string, data any) {
-	if err := h.Templates[name].ExecuteTemplate(w, "base", data); err != nil {
+	var buf bytes.Buffer
+	if err := h.Templates[name].ExecuteTemplate(&buf, "base", data); err != nil {
 		log.Printf("%s template error: %v", name, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if _, err := buf.WriteTo(w); err != nil {
+		log.Printf("%s write error: %v", name, err)
 	}
 }
 
@@ -242,8 +250,18 @@ func (h *WaitlistHandler) Detail(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.UserFromContext(r.Context())
 	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
-	entries, _ := h.Store.ListEntriesPaged(id, pageSize, offset)
-	total, _ := h.Store.CountEntries(id)
+	entries, err := h.Store.ListEntriesPaged(id, pageSize, offset)
+	if err != nil {
+		log.Printf("waitlist detail: list entries %s: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	total, err := h.Store.CountEntries(id)
+	if err != nil {
+		log.Printf("waitlist detail: count entries %s: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	data := waitlistDetailData{
 		Title:       wl.Name,
@@ -262,12 +280,16 @@ func (h *WaitlistHandler) Detail(w http.ResponseWriter, r *http.Request) {
 	h.render(w, "waitlist_detail.html", data)
 }
 
-// DeleteEntry handles POST to delete one entry.
+// DeleteEntry handles POST to delete one entry, scoped to its waitlist.
 func (h *WaitlistHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	entryID := chi.URLParam(r, "entryID")
-	if err := h.Store.DeleteEntry(entryID); err != nil {
-		log.Printf("waitlist delete entry %s: %v", entryID, err)
+	if err := h.Store.DeleteEntry(id, entryID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "entry not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("waitlist delete entry %s/%s: %v", id, entryID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -339,6 +361,9 @@ func (h *WaitlistHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cw.Flush()
+	if err := cw.Error(); err != nil {
+		log.Printf("waitlist export: flush %s: %v", id, err)
+	}
 }
 
 type broadcastNewData struct {
@@ -372,8 +397,18 @@ func (h *WaitlistHandler) BroadcastPage(w http.ResponseWriter, r *http.Request) 
 	}
 	user, _ := auth.UserFromContext(r.Context())
 	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
-	count, _ := h.Store.CountEntries(id)
-	past, _ := h.Store.ListBroadcasts(id)
+	count, err := h.Store.CountEntries(id)
+	if err != nil {
+		log.Printf("broadcast page: count entries %s: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	past, err := h.Store.ListBroadcasts(id)
+	if err != nil {
+		log.Printf("broadcast page: list broadcasts %s: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	h.render(w, "broadcast_new.html", broadcastNewData{
 		Title:       "Broadcast",
@@ -399,8 +434,14 @@ func (h *WaitlistHandler) CreateBroadcast(w http.ResponseWriter, r *http.Request
 	body := r.FormValue("body")
 
 	rerender := func(errMsg string) {
-		count, _ := h.Store.CountEntries(id)
-		past, _ := h.Store.ListBroadcasts(id)
+		count, err := h.Store.CountEntries(id)
+		if err != nil {
+			log.Printf("broadcast rerender: count entries %s: %v", id, err)
+		}
+		past, err := h.Store.ListBroadcasts(id)
+		if err != nil {
+			log.Printf("broadcast rerender: list broadcasts %s: %v", id, err)
+		}
 		h.render(w, "broadcast_new.html", broadcastNewData{
 			Title: "Broadcast", Active: "waitlists", CurrentUser: user,
 			Waitlist: wl, EntryCount: count, Broadcasts: past,
