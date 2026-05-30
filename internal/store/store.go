@@ -958,3 +958,194 @@ func (s *Store) DeleteEntry(id string) error {
 	}
 	return nil
 }
+
+// CreateBroadcast inserts a broadcast (status 'sending') plus one pending
+// delivery per email, atomically.
+func (s *Store) CreateBroadcast(b Broadcast, emails []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("create broadcast: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
+		"INSERT INTO broadcasts (id, waitlist_id, subject, body, status) VALUES (?, ?, ?, ?, 'sending')",
+		b.ID, b.WaitlistID, b.Subject, b.Body,
+	)
+	if err != nil {
+		return fmt.Errorf("create broadcast: %w", err)
+	}
+	for _, email := range emails {
+		_, err = tx.Exec(
+			"INSERT INTO deliveries (id, broadcast_id, email) VALUES (?, ?, ?)",
+			uuid.New().String(), b.ID, email,
+		)
+		if err != nil {
+			return fmt.Errorf("create broadcast delivery: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// GetBroadcast returns a broadcast by ID.
+func (s *Store) GetBroadcast(id string) (Broadcast, error) {
+	var b Broadcast
+	err := s.db.QueryRow(
+		"SELECT id, waitlist_id, subject, body, status, created_at FROM broadcasts WHERE id = ?",
+		id,
+	).Scan(&b.ID, &b.WaitlistID, &b.Subject, &b.Body, &b.Status, &b.CreatedAt)
+	if err != nil {
+		return Broadcast{}, fmt.Errorf("get broadcast: %w", err)
+	}
+	return b, nil
+}
+
+// GetBroadcastSummary returns a broadcast with per-status delivery counts.
+func (s *Store) GetBroadcastSummary(id string) (BroadcastSummary, error) {
+	b, err := s.GetBroadcast(id)
+	if err != nil {
+		return BroadcastSummary{}, err
+	}
+	sum := BroadcastSummary{Broadcast: b}
+	err = s.db.QueryRow(`
+		SELECT
+			COUNT(*),
+			COUNT(CASE WHEN status = 'sent' THEN 1 END),
+			COUNT(CASE WHEN status = 'failed' THEN 1 END),
+			COUNT(CASE WHEN status = 'pending' THEN 1 END)
+		FROM deliveries WHERE broadcast_id = ?`, id,
+	).Scan(&sum.Total, &sum.Sent, &sum.Failed, &sum.Pending)
+	if err != nil {
+		return BroadcastSummary{}, fmt.Errorf("get broadcast summary: %w", err)
+	}
+	return sum, nil
+}
+
+// ListBroadcasts returns all broadcasts for a waitlist (newest first) with counts.
+func (s *Store) ListBroadcasts(waitlistID string) ([]BroadcastSummary, error) {
+	rows, err := s.db.Query(`
+		SELECT b.id, b.waitlist_id, b.subject, b.body, b.status, b.created_at,
+			COUNT(d.id),
+			COUNT(CASE WHEN d.status = 'sent' THEN 1 END),
+			COUNT(CASE WHEN d.status = 'failed' THEN 1 END),
+			COUNT(CASE WHEN d.status = 'pending' THEN 1 END)
+		FROM broadcasts b
+		LEFT JOIN deliveries d ON d.broadcast_id = b.id
+		WHERE b.waitlist_id = ?
+		GROUP BY b.id
+		ORDER BY b.created_at DESC`, waitlistID)
+	if err != nil {
+		return nil, fmt.Errorf("list broadcasts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BroadcastSummary
+	for rows.Next() {
+		var sum BroadcastSummary
+		if err := rows.Scan(&sum.ID, &sum.WaitlistID, &sum.Subject, &sum.Body, &sum.Status, &sum.CreatedAt,
+			&sum.Total, &sum.Sent, &sum.Failed, &sum.Pending); err != nil {
+			return nil, fmt.Errorf("list broadcasts: %w", err)
+		}
+		out = append(out, sum)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list broadcasts: %w", err)
+	}
+	return out, nil
+}
+
+// NextPendingDeliveries returns up to limit pending deliveries (oldest first).
+func (s *Store) NextPendingDeliveries(limit int) ([]Delivery, error) {
+	rows, err := s.db.Query(
+		"SELECT id, broadcast_id, email, status, error, attempts, updated_at FROM deliveries WHERE status = 'pending' ORDER BY rowid LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("next pending deliveries: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Delivery
+	for rows.Next() {
+		var d Delivery
+		if err := rows.Scan(&d.ID, &d.BroadcastID, &d.Email, &d.Status, &d.Error, &d.Attempts, &d.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("next pending deliveries: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("next pending deliveries: %w", err)
+	}
+	return out, nil
+}
+
+// MarkDeliverySent marks a delivery as sent.
+func (s *Store) MarkDeliverySent(id string) error {
+	_, err := s.db.Exec(
+		"UPDATE deliveries SET status = 'sent', error = '', updated_at = datetime('now') WHERE id = ?",
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("mark delivery sent: %w", err)
+	}
+	return nil
+}
+
+// MarkDeliveryFailed records a failed attempt. The delivery stays 'pending'
+// (eligible for retry) until attempts reach maxAttempts, then becomes 'failed'.
+func (s *Store) MarkDeliveryFailed(id, errMsg string, maxAttempts int) error {
+	_, err := s.db.Exec(`
+		UPDATE deliveries
+		SET attempts = attempts + 1,
+		    error = ?,
+		    status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END,
+		    updated_at = datetime('now')
+		WHERE id = ?`, errMsg, maxAttempts, id)
+	if err != nil {
+		return fmt.Errorf("mark delivery failed: %w", err)
+	}
+	return nil
+}
+
+// HasPendingDeliveries reports whether a broadcast still has pending deliveries.
+func (s *Store) HasPendingDeliveries(broadcastID string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM deliveries WHERE broadcast_id = ? AND status = 'pending'",
+		broadcastID,
+	).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("has pending deliveries: %w", err)
+	}
+	return n > 0, nil
+}
+
+// ListSendingBroadcasts returns the IDs of broadcasts still in 'sending' state.
+func (s *Store) ListSendingBroadcasts() ([]string, error) {
+	rows, err := s.db.Query("SELECT id FROM broadcasts WHERE status = 'sending'")
+	if err != nil {
+		return nil, fmt.Errorf("list sending broadcasts: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("list sending broadcasts: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list sending broadcasts: %w", err)
+	}
+	return ids, nil
+}
+
+// MarkBroadcastDone marks a broadcast as done.
+func (s *Store) MarkBroadcastDone(id string) error {
+	_, err := s.db.Exec("UPDATE broadcasts SET status = 'done' WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("mark broadcast done: %w", err)
+	}
+	return nil
+}

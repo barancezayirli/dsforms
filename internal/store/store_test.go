@@ -984,3 +984,83 @@ func TestListEntriesAll(t *testing.T) {
 		t.Errorf("entries[0] = %s pos %d, want b@x.com pos 2", entries[0].Email, entries[0].Position)
 	}
 }
+
+func TestBroadcastAndDeliveries(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+
+	b := Broadcast{ID: "b1", WaitlistID: "wl", Subject: "Launch", Body: "We are live"}
+	if err := s.CreateBroadcast(b, []string{"a@x.com", "b@x.com"}); err != nil {
+		t.Fatalf("CreateBroadcast error = %v", err)
+	}
+
+	got, err := s.GetBroadcast("b1")
+	if err != nil {
+		t.Fatalf("GetBroadcast error = %v", err)
+	}
+	if got.Status != "sending" || got.Subject != "Launch" {
+		t.Errorf("GetBroadcast = %+v, want status sending subject Launch", got)
+	}
+
+	pending, err := s.NextPendingDeliveries(10)
+	if err != nil {
+		t.Fatalf("NextPendingDeliveries error = %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("pending = %d, want 2", len(pending))
+	}
+
+	if err := s.MarkDeliverySent(pending[0].ID); err != nil {
+		t.Fatalf("MarkDeliverySent error = %v", err)
+	}
+	if err := s.MarkDeliveryFailed(pending[1].ID, "smtp 550", 3); err != nil {
+		t.Fatalf("MarkDeliveryFailed error = %v", err)
+	}
+
+	hasPending, _ := s.HasPendingDeliveries("b1")
+	if !hasPending {
+		t.Error("HasPendingDeliveries = false, want true (failed-but-under-cap stays pending)")
+	}
+
+	again, _ := s.NextPendingDeliveries(10)
+	_ = s.MarkDeliveryFailed(again[0].ID, "smtp 550", 3) // attempts 2
+	last, _ := s.NextPendingDeliveries(10)
+	_ = s.MarkDeliveryFailed(last[0].ID, "smtp 550", 3) // attempts 3 → failed
+	hasPending, _ = s.HasPendingDeliveries("b1")
+	if hasPending {
+		t.Error("HasPendingDeliveries = true, want false after reaching attempt cap")
+	}
+
+	sum, err := s.GetBroadcastSummary("b1")
+	if err != nil {
+		t.Fatalf("GetBroadcastSummary error = %v", err)
+	}
+	if sum.Total != 2 || sum.Sent != 1 || sum.Failed != 1 || sum.Pending != 0 {
+		t.Errorf("summary = %+v, want total2 sent1 failed1 pending0", sum)
+	}
+
+	if err := s.MarkBroadcastDone("b1"); err != nil {
+		t.Fatalf("MarkBroadcastDone error = %v", err)
+	}
+	sending, _ := s.ListSendingBroadcasts()
+	if len(sending) != 0 {
+		t.Errorf("ListSendingBroadcasts = %v, want empty", sending)
+	}
+}
+
+func TestListBroadcasts(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedWaitlist(t, s)
+	if err := s.CreateBroadcast(Broadcast{ID: "b1", WaitlistID: "wl", Subject: "S", Body: "B"}, []string{"a@x.com"}); err != nil {
+		t.Fatalf("CreateBroadcast error = %v", err)
+	}
+	list, err := s.ListBroadcasts("wl")
+	if err != nil {
+		t.Fatalf("ListBroadcasts error = %v", err)
+	}
+	if len(list) != 1 || list[0].Subject != "S" || list[0].Total != 1 || list[0].Pending != 1 {
+		t.Errorf("ListBroadcasts = %+v, want one summary total1 pending1", list)
+	}
+}
