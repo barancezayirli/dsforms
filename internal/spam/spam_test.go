@@ -59,6 +59,16 @@ func TestScore(t *testing.T) {
 			data: map[string]string{"message": "Cheap BACKLINKS"},
 			want: 5,
 		},
+		{
+			name: "markup link plus extra plain link",
+			data: map[string]string{"message": "[url=http://x.com]hi[/url] also http://y.com"},
+			want: 7,
+		},
+		{
+			name: "url in mixed-case name field",
+			data: map[string]string{"Name": "http://spam.com", "message": "hi"},
+			want: 4,
+		},
 	}
 	for _, tt := range tests {
 		tt := tt

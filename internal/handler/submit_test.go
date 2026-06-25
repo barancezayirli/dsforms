@@ -404,6 +404,35 @@ func TestSubmitSpamDropped(t *testing.T) {
 	}
 }
 
+func TestSubmitSpamDroppedJSON(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+	form := url.Values{
+		"name":    {"bot"},
+		"message": {"casino and forex deals, buy backlinks"},
+	}
+	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (JSON silent drop)", w.Code)
+	}
+	var body map[string]bool
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if !body["success"] {
+		t.Errorf("body = %v, want success=true", body)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 0 {
+		t.Errorf("submissions = %d, want 0 (spam dropped)", len(subs))
+	}
+}
+
 func TestSubmitHamWithOneLinkStored(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)

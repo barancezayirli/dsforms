@@ -12,6 +12,7 @@ const threshold = 6
 
 // spamKeywords are high-confidence content-spam tokens, lowercased. Kept short
 // on purpose — broad word lists are how filters eat legitimate messages.
+// Matching is substring-based (strings.Contains), not word-boundary — keep entries long/specific enough that a substring hit implies spam.
 var spamKeywords = []string{
 	"casino",
 	"viagra",
