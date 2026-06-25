@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/youruser/dsforms/internal/spam"
 	"github.com/youruser/dsforms/internal/store"
 )
 
@@ -72,13 +73,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	// Honeypot check — silently succeed without storing anything.
 	if r.FormValue("_honeypot") != "" {
-		redirectURL := determineRedirect(r.FormValue("_redirect"), form.Redirect)
-		if strings.Contains(r.Header.Get("Accept"), "application/json") {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
-			return
-		}
-		http.Redirect(w, r, redirectURL, http.StatusFound)
+		respondSuccess(w, r, formID, determineRedirect(r.FormValue("_redirect"), form.Redirect))
 		return
 	}
 
@@ -97,6 +92,13 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	redirectURL := determineRedirect(r.FormValue("_redirect"), form.Redirect)
+
+	// Content spam — silently drop like the honeypot: look successful, store nothing.
+	if spam.IsSpam(data) {
+		respondSuccess(w, r, formID, redirectURL)
+		return
+	}
+
 	ip := ExtractIP(r)
 
 	rawData, err := json.Marshal(data)
@@ -137,6 +139,13 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	respondSuccess(w, r, formID, redirectURL)
+}
+
+// respondSuccess writes a successful submission response — JSON if the client
+// asked for it, otherwise a redirect. Shared by the honeypot, spam-drop, and
+// normal-success paths so they cannot drift apart.
+func respondSuccess(w http.ResponseWriter, r *http.Request, formID, redirectURL string) {
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {

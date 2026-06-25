@@ -382,6 +382,49 @@ func TestSubmitNoWebhook(t *testing.T) {
 	}
 }
 
+func TestSubmitSpamDropped(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+	form := url.Values{
+		"name":    {"bot"},
+		"message": {"casino and forex deals, buy backlinks"},
+	}
+	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Mirrors the honeypot: looks successful (redirect), stores nothing.
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302 (silent drop)", w.Code)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 0 {
+		t.Errorf("submissions = %d, want 0 (spam dropped)", len(subs))
+	}
+}
+
+func TestSubmitHamWithOneLinkStored(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+	form := url.Values{
+		"name":    {"Jane Doe"},
+		"message": {"Loved the talk! Slides at https://example.com — thanks."},
+	}
+	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 1 {
+		t.Errorf("submissions = %d, want 1 (ham stored)", len(subs))
+	}
+}
+
 func TestSubmitNoEmailNoWebhook(t *testing.T) {
 	t.Parallel()
 	s, err := store.New(":memory:")
