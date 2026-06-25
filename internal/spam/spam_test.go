@@ -40,8 +40,33 @@ func TestScore(t *testing.T) {
 			want: 6,
 		},
 		{
+			name: "bare bbcode url marker is instant drop",
+			data: map[string]string{"message": "[url]http://x.com[/url]"},
+			want: 6,
+		},
+		{
+			name: "bbcode link marker is instant drop",
+			data: map[string]string{"message": "[link]http://x.com[/link]"},
+			want: 6,
+		},
+		{
 			name: "single keyword",
 			data: map[string]string{"message": "buy backlinks now"},
+			want: 5,
+		},
+		{
+			name: "bare forex no longer matches (substring narrowed)",
+			data: map[string]string{"message": "we offer the best forex deals around"},
+			want: 0,
+		},
+		{
+			name: "forex trading keyword matches",
+			data: map[string]string{"message": "join our forex trading group"},
+			want: 5,
+		},
+		{
+			name: "forex signals keyword matches",
+			data: map[string]string{"message": "daily forex signals here"},
 			want: 5,
 		},
 		{

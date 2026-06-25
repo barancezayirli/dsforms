@@ -387,7 +387,7 @@ func TestSubmitSpamDropped(t *testing.T) {
 	s, _, r := setupSubmit(t)
 	form := url.Values{
 		"name":    {"bot"},
-		"message": {"casino and forex deals, buy backlinks"},
+		"message": {"casino deals, buy backlinks now"},
 	}
 	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -409,7 +409,7 @@ func TestSubmitSpamDroppedJSON(t *testing.T) {
 	s, _, r := setupSubmit(t)
 	form := url.Values{
 		"name":    {"bot"},
-		"message": {"casino and forex deals, buy backlinks"},
+		"message": {"casino deals, buy backlinks now"},
 	}
 	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

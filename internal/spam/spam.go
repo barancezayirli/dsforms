@@ -13,16 +13,23 @@ const threshold = 6
 // markupWeight is the score for each HTML/BBCode link marker. It equals the
 // threshold so a single markup link drops on its own: a plain static-site form
 // never legitimately contains <a href> or [url] markup, so it is a near-certain
-// bot signature. Real captured spam relies on it (see the design doc revision).
+// bot signature. Real captured spam relies on it (see the 2026-06-25 revision in
+// docs/superpowers/specs/2026-06-25-spam-filter-design.md).
 const markupWeight = threshold
+
+// keywordWeight is the score for each spamKeywords hit. It is below the
+// threshold by design, so a single keyword never drops a message on its own —
+// it only contributes to a pile-up alongside another signal.
+const keywordWeight = 5
 
 // spamKeywords are high-confidence content-spam tokens, lowercased. Kept short
 // on purpose — broad word lists are how filters eat legitimate messages.
 // Matching is substring-based (strings.Contains), not word-boundary — keep
 // entries long/specific enough that a substring hit implies spam (this is why
-// "forex" is qualified to "forex trading"/"forex signals"). A single keyword
-// hit (+5) stays below the threshold, so it only drops alongside another signal:
-// e.g. "unsubscribe" is bulk-email leakage, harmless alone but damning with links.
+// "forex" is qualified to "forex trading"/"forex signals"). Because a single
+// keyword hit (keywordWeight) stays below the threshold, it only drops alongside
+// another signal: e.g. "unsubscribe" is bulk-email leakage, harmless alone but
+// damning combined with link markup or multiple raw URLs.
 var spamKeywords = []string{
 	"casino",
 	"viagra",
@@ -73,7 +80,7 @@ func Score(data map[string]string) int {
 		// High-confidence keyword hits.
 		for _, kw := range spamKeywords {
 			if strings.Contains(lower, kw) {
-				score += 5
+				score += keywordWeight
 			}
 		}
 
