@@ -43,3 +43,25 @@ jobs:
         run: |
           git tag "${{ steps.bump.outputs.new_tag }}"
           git push origin "${{ steps.bump.outputs.new_tag }}"
+
+      - name: Regenerate changelog on main
+        env:
+          NEW_TAG: ${{ steps.bump.outputs.new_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The pull_request checkout is a detached merge ref; move onto main so
+          # the changelog commit lands there. The new tag is already in the local
+          # tag db, so the generator picks it up.
+          git fetch origin main
+          git checkout -B main origin/main
+
+          bash scripts/changelog.sh > CHANGELOG.md
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md already up to date."
+            exit 0
+          fi
+          git add CHANGELOG.md
+          git commit -m "docs: update CHANGELOG for ${NEW_TAG}"
+          git push origin HEAD:main
