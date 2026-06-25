@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/youruser/dsforms/internal/spam"
 	"github.com/youruser/dsforms/internal/store"
 )
 
@@ -47,10 +48,11 @@ var internalFields = map[string]bool{
 //  4. Filter internal fields, build data map
 //  5. Validate: data map must have ≥1 key → else 400
 //  6. Determine redirect: _redirect > form.Redirect > /success
-//  7. Extract client IP
-//  8. Save submission to DB
-//  9. Send email async
-//  10. Respond (JSON or redirect)
+//  7. Spam check: if IsSpam(data) → silently succeed without saving (mirrors honeypot)
+//  8. Extract client IP
+//  9. Save submission to DB
+//  10. Send email and webhook notifications async
+//  11. Respond (JSON or redirect)
 func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "formID")
 	form, err := h.Store.GetForm(formID)
@@ -72,13 +74,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	// Honeypot check — silently succeed without storing anything.
 	if r.FormValue("_honeypot") != "" {
-		redirectURL := determineRedirect(r.FormValue("_redirect"), form.Redirect)
-		if strings.Contains(r.Header.Get("Accept"), "application/json") {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
-			return
-		}
-		http.Redirect(w, r, redirectURL, http.StatusFound)
+		respondSuccess(w, r, formID, determineRedirect(r.FormValue("_redirect"), form.Redirect))
 		return
 	}
 
@@ -97,6 +93,13 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	redirectURL := determineRedirect(r.FormValue("_redirect"), form.Redirect)
+
+	// Content spam — silently drop like the honeypot: look successful, store nothing.
+	if spam.IsSpam(data) {
+		respondSuccess(w, r, formID, redirectURL)
+		return
+	}
+
 	ip := ExtractIP(r)
 
 	rawData, err := json.Marshal(data)
@@ -137,6 +140,13 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	respondSuccess(w, r, formID, redirectURL)
+}
+
+// respondSuccess writes a successful submission response — JSON if the client
+// asked for it, otherwise a redirect. Shared by the honeypot, spam-drop, and
+// normal-success paths so they cannot drift apart.
+func respondSuccess(w http.ResponseWriter, r *http.Request, formID, redirectURL string) {
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {
