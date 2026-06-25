@@ -48,10 +48,11 @@ var internalFields = map[string]bool{
 //  4. Filter internal fields, build data map
 //  5. Validate: data map must have ≥1 key → else 400
 //  6. Determine redirect: _redirect > form.Redirect > /success
-//  7. Extract client IP
-//  8. Save submission to DB
-//  9. Send email async
-//  10. Respond (JSON or redirect)
+//  7. Spam check: if IsSpam(data) → silently succeed without saving (mirrors honeypot)
+//  8. Extract client IP
+//  9. Save submission to DB
+//  10. Send email and webhook notifications async
+//  11. Respond (JSON or redirect)
 func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "formID")
 	form, err := h.Store.GetForm(formID)

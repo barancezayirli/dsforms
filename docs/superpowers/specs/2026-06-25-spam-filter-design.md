@@ -50,8 +50,8 @@ stored), case-insensitively. Representative weights — exact numbers locked dow
 | Signal | Rationale | Weight |
 |---|---|---|
 | Each link past the 1st (`http://`, `https://`, `www.`) | Contact forms rarely need multiple URLs; bots stuff many | +2 each |
-| Markup link (`[url=`, `[link]`, `<a href`) | Almost never legitimate in a plain static-site form | +5 each |
-| High-confidence keyword hit (small baked-in list: casino / pharma / SEO-backlink / crypto-pump terms) | Direct content-spam signal | +5 each |
+| Markup link (`[url=`, `[url]`, `[link]`, `<a href`) | Almost never legitimate in a plain static-site form | **+6 each (= threshold; instant drop — see Revision)** |
+| High-confidence keyword hit (casino / pharma / SEO-backlink / crypto-pump / `unsubscribe` — see Revision) | Direct content-spam signal | +5 each |
 | A URL inside a short "name"-like field | Names are not URLs | +4 |
 
 The keyword list stays short and high-confidence on purpose — broad word lists are how
@@ -109,3 +109,38 @@ func respondSuccess(w http.ResponseWriter, r *http.Request, redirectURL string)
 - Env-tunable weights/threshold (chosen: fully hardcoded).
 - IP reputation, time-trap, or burst detection (existing rate limiter covers floods;
   honeypot covers dumb bots).
+
+---
+
+## Revision 2026-06-25 — real-sample-driven retune
+
+After shipping the first version, real spam samples from production showed the original
+threat model (multi-link / keyword pile-ups) was wrong. Three captured samples scored:
+
+| Sample | Original score | Original outcome |
+|---|---|---|
+| AutoMisto24 — `<a href>` + the URL repeated bare | 7 | caught (only because the URL was duplicated) |
+| Jayrn / marketersmentor — 3 links + gibberish + "Unsubscribe", no markup | 4 | **missed** |
+| Russian proctology — single `<a href>`, punycode domain | 5 | **missed** |
+
+Two of three slipped through. The shared, high-confidence signatures in the real spam are
+**HTML/BBCode markup** (a near-certain bot signature in a plain form) and **bulk-email
+leakage** ("Unsubscribe"). Retune:
+
+1. **Markup link is an instant drop.** Markup weight raised from +5 to the threshold
+   (`markupWeight = threshold`), so a single `<a href` / `[url=` / `[url]` / `[link]`
+   occurrence alone crosses. Near-zero false positives — plain forms never contain markup.
+2. **Add `"unsubscribe"` to the keyword list** (+5). A genuine contact message never
+   carries an unsubscribe link; combined with the sample's links it clears the threshold.
+   Conservatism preserved: "please unsubscribe me" alone scores 5 and is kept.
+3. **Narrow `"forex"` → `"forex trading"` / `"forex signals"`** to remove the substring
+   false positive flagged in review (e.g. "Foreximate").
+
+Post-retune scores: AutoMisto24 → 8, Jayrn → 9, Russian → 6 — all dropped; a legit
+one-link message stays at 0. All three real samples are baked in as regression tests.
+
+**Still deferred (YAGNI):** gibberish-token detection and punycode/IDN flagging — present
+in the samples but redundant (markup and unsubscribe+links already catch those), and
+gibberish detection is the most false-positive-prone signal. Add only if a future sample
+evades the above. The "4 plain links alone = 6 → dropped" edge from review is left as-is
+(out of scope for this retune).

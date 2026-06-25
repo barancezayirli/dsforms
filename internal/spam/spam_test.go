@@ -30,9 +30,14 @@ func TestScore(t *testing.T) {
 			want: 0,
 		},
 		{
-			name: "markup link",
+			name: "bbcode markup link alone is instant drop",
 			data: map[string]string{"message": "[url=http://x.com]click[/url]"},
-			want: 5,
+			want: 6,
+		},
+		{
+			name: "html anchor markup alone is instant drop",
+			data: map[string]string{"message": "<a href=\"http://x.com\">click</a>"},
+			want: 6,
 		},
 		{
 			name: "single keyword",
@@ -40,13 +45,23 @@ func TestScore(t *testing.T) {
 			want: 5,
 		},
 		{
+			name: "multi-word keyword",
+			data: map[string]string{"message": "buy seo service packages"},
+			want: 5,
+		},
+		{
+			name: "unsubscribe keyword",
+			data: map[string]string{"message": "click here to unsubscribe"},
+			want: 5,
+		},
+		{
 			name: "two keywords",
-			data: map[string]string{"message": "casino and forex deals"},
+			data: map[string]string{"message": "casino and viagra deals"},
 			want: 10,
 		},
 		{
 			name: "three links plus keyword",
-			data: map[string]string{"message": "forex http://a.com http://b.com http://c.com"},
+			data: map[string]string{"message": "casino http://a.com http://b.com http://c.com"},
 			want: 9,
 		},
 		{
@@ -62,7 +77,7 @@ func TestScore(t *testing.T) {
 		{
 			name: "markup link plus extra plain link",
 			data: map[string]string{"message": "[url=http://x.com]hi[/url] also http://y.com"},
-			want: 7,
+			want: 8,
 		},
 		{
 			name: "url in mixed-case name field",
@@ -89,18 +104,33 @@ func TestIsSpam(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "below threshold (score 5) kept",
-			data: map[string]string{"message": "[url=http://x.com]click[/url]"},
+			name: "below threshold (single keyword, score 5) kept",
+			data: map[string]string{"message": "buy backlinks now"},
 			want: false,
 		},
 		{
-			name: "at threshold (score 6) dropped",
+			name: "genuine unsubscribe request alone kept",
+			data: map[string]string{"message": "Please unsubscribe me from your newsletter"},
+			want: false,
+		},
+		{
+			name: "url in name field alone (score 4) kept",
+			data: map[string]string{"name": "http://spam.com", "message": "hi"},
+			want: false,
+		},
+		{
+			name: "markup link alone dropped",
+			data: map[string]string{"message": "<a href=\"http://x.com\">hi</a>"},
+			want: true,
+		},
+		{
+			name: "four links at threshold dropped",
 			data: map[string]string{"message": "http://a.com http://b.com http://c.com http://d.com"},
 			want: true,
 		},
 		{
-			name: "well over threshold dropped",
-			data: map[string]string{"message": "casino and forex deals"},
+			name: "two keywords well over threshold dropped",
+			data: map[string]string{"message": "casino and viagra deals"},
 			want: true,
 		},
 		{
@@ -115,6 +145,47 @@ func TestIsSpam(t *testing.T) {
 			t.Parallel()
 			if got := IsSpam(tt.data); got != tt.want {
 				t.Errorf("IsSpam() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRealSpamSamples pins the filter against spam actually captured in
+// production. Each must be dropped; these are the regression guard for the
+// 2026-06-25 retune (see the design doc revision). The originals scored
+// 7/4/5 on the pre-retune filter — two of three slipped through.
+func TestRealSpamSamples(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		data      map[string]string
+		wantScore int
+	}{
+		{
+			name: "automisto24 html anchor plus repeated url",
+			data: map[string]string{"message": "Here to explore discussions, exchange ideas, and gain fresh perspectives throughout the journey. I like learning from different perspectives and contributing whenever I can. Here is my site-<a href=\"https://automisto24.com.ua/\">AutoMisto24</a> https://automisto24.com.ua/ sample"},
+			wantScore: 8,
+		},
+		{
+			name: "jayrn marketersmentor three links plus unsubscribe",
+			data: map[string]string{"message": "Hi, it’s Jayrn. Watch it here: https://marketersmentor.com/referral-system.php?refer=openapps.pro To multiplying your leverage, Jayrn My Blog: https://www.jayrn.com Unsubscribe: https://marketersmentor.com/unsubscribe.php?d=openapps.pro gzlrmkmdswesheytngrwediuoipqzm"},
+			wantScore: 9,
+		},
+		{
+			name: "russian proctology single html anchor punycode",
+			data: map[string]string{"message": "Проктологическое заболевание — это повсеместная патология. <a href=\"https://xn----etbhrcdtbbfidklik5p.xn--p1ai/service/hemorrhoid/\">удаление геморроя цена в москве</a> Ранняя помощь даёт возможность."},
+			wantScore: 6,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Score(tt.data); got != tt.wantScore {
+				t.Errorf("Score() = %d, want %d", got, tt.wantScore)
+			}
+			if !IsSpam(tt.data) {
+				t.Errorf("IsSpam() = false, want true (real spam must be dropped)")
 			}
 		})
 	}

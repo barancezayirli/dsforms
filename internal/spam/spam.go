@@ -10,9 +10,19 @@ import "strings"
 // callers drop matches silently and a false positive is unrecoverable.
 const threshold = 6
 
+// markupWeight is the score for each HTML/BBCode link marker. It equals the
+// threshold so a single markup link drops on its own: a plain static-site form
+// never legitimately contains <a href> or [url] markup, so it is a near-certain
+// bot signature. Real captured spam relies on it (see the design doc revision).
+const markupWeight = threshold
+
 // spamKeywords are high-confidence content-spam tokens, lowercased. Kept short
 // on purpose — broad word lists are how filters eat legitimate messages.
-// Matching is substring-based (strings.Contains), not word-boundary — keep entries long/specific enough that a substring hit implies spam.
+// Matching is substring-based (strings.Contains), not word-boundary — keep
+// entries long/specific enough that a substring hit implies spam (this is why
+// "forex" is qualified to "forex trading"/"forex signals"). A single keyword
+// hit (+5) stays below the threshold, so it only drops alongside another signal:
+// e.g. "unsubscribe" is bulk-email leakage, harmless alone but damning with links.
 var spamKeywords = []string{
 	"casino",
 	"viagra",
@@ -20,12 +30,15 @@ var spamKeywords = []string{
 	"backlinks",
 	"seo service",
 	"binary options",
-	"forex",
+	"forex trading",
+	"forex signals",
 	"crypto pump",
+	"unsubscribe",
 }
 
 // markupLinkMarkers indicate HTML/BBCode link markup, which has near-zero
-// legitimate use in a plain static-site form.
+// legitimate use in a plain static-site form. Each match scores markupWeight,
+// enough to drop a submission on its own.
 var markupLinkMarkers = []string{"[url=", "[url]", "[link]", "<a href"}
 
 // nameFieldKeys are field names treated as "name-like"; a URL inside one is
@@ -52,9 +65,9 @@ func Score(data map[string]string) int {
 		// (e.g. https://www.example.com) counts once, not twice.
 		links += strings.Count(lower, "http") + strings.Count(lower, "www.") - strings.Count(lower, "//www.")
 
-		// HTML/BBCode link markup.
+		// HTML/BBCode link markup — each match alone is enough to drop.
 		for _, marker := range markupLinkMarkers {
-			score += 5 * strings.Count(lower, marker)
+			score += markupWeight * strings.Count(lower, marker)
 		}
 
 		// High-confidence keyword hits.
