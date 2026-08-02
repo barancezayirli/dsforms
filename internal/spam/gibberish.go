@@ -87,7 +87,12 @@ func fieldHasGibberish(value string) bool {
 }
 
 // isTokenTooNonLatin reports whether a token contains too few Latin letters
-// to be reliably evaluated by the Latin-based gibberish heuristic.
+// to be reliably evaluated by the Latin-based gibberish heuristic. This prevents
+// false positives when evaluating tokens in Cyrillic, CJK, Arabic, or other
+// non-Latin scripts, where the vowel-ratio check only recognizes Latin vowels
+// (aeiouAEIOU) and would incorrectly flag all-Cyrillic tokens as gibberish (0 vowels).
+// The 33% Latin threshold is chosen to protect primarily non-Latin text while
+// allowing mixed-script tokens to still be evaluated if they contain other signals.
 func isTokenTooNonLatin(token string) bool {
 	latinLetters := 0
 	totalLetters := 0
@@ -96,12 +101,14 @@ func isTokenTooNonLatin(token string) bool {
 			continue
 		}
 		totalLetters++
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+		// Use unicode.Is(unicode.Latin, r) to properly count all Latin letters
+		// including accented ones (é, ñ, ö, ü, etc.), not just ASCII a-z/A-Z.
+		if unicode.Is(unicode.Latin, r) {
 			latinLetters++
 		}
 	}
-	// Skip if < 33% of letters are Latin (to avoid flagging Cyrillic, CJK, Arabic, etc.)
-	if totalLetters > 0 && float64(latinLetters)/float64(totalLetters) < 0.33 {
+	// Skip if <= 33% of letters are Latin (to avoid flagging Cyrillic, CJK, Arabic, etc.)
+	if totalLetters > 0 && float64(latinLetters)/float64(totalLetters) <= 0.33 {
 		return true
 	}
 	return false
