@@ -129,6 +129,11 @@ func TestScore(t *testing.T) {
 			data: map[string]string{"company": "Dropbox"},
 			want: 0,
 		},
+		{
+			name: "url and gibberish in same field detected (token-scoped exemption)",
+			data: map[string]string{"message": "visit http://spam.com Gfngfxr"},
+			want: 3,
+		},
 	}
 	for _, tt := range tests {
 		tt := tt

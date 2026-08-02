@@ -100,9 +100,8 @@ func Score(data map[string]string) int {
 
 		// Gibberish/synthetic-looking field value. Deliberately checked against
 		// the original-case value, not lower — lowercasing would destroy the
-		// case-transition signal fieldHasGibberish relies on. Skip if field
-		// contains a URL (domains naturally have low vowel ratios).
-		if !containsLink(lower) && fieldHasGibberish(value) {
+		// case-transition signal fieldHasGibberish relies on.
+		if fieldHasGibberish(value) {
 			score += gibberishWeight
 		}
 	}

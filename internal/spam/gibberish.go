@@ -67,11 +67,48 @@ func isGibberishToken(token string) bool {
 }
 
 // fieldHasGibberish reports whether value contains at least one gibberish token.
+// Skips tokens that look URL-shaped (contain "http" or "www.") since domains
+// naturally have low vowel ratios and are not synthetic text. Also skips tokens
+// with very few Latin characters, since the vowel-ratio heuristic only works for
+// Latin-based text and would incorrectly flag Cyrillic, Arabic, CJK, etc.
 func fieldHasGibberish(value string) bool {
 	for _, token := range strings.Fields(value) {
+		if isURLShapedToken(token) {
+			continue
+		}
+		if isTokenTooNonLatin(token) {
+			continue
+		}
 		if isGibberishToken(token) {
 			return true
 		}
 	}
 	return false
+}
+
+// isTokenTooNonLatin reports whether a token contains too few Latin letters
+// to be reliably evaluated by the Latin-based gibberish heuristic.
+func isTokenTooNonLatin(token string) bool {
+	latinLetters := 0
+	totalLetters := 0
+	for _, r := range token {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		totalLetters++
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			latinLetters++
+		}
+	}
+	// Skip if < 33% of letters are Latin (to avoid flagging Cyrillic, CJK, Arabic, etc.)
+	if totalLetters > 0 && float64(latinLetters)/float64(totalLetters) < 0.33 {
+		return true
+	}
+	return false
+}
+
+// isURLShapedToken reports whether a token looks like it could be a URL by
+// containing the same URL markers used by the main spam filter's containsLink logic.
+func isURLShapedToken(token string) bool {
+	return strings.Contains(token, "http") || strings.Contains(token, "www.")
 }
