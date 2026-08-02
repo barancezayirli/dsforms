@@ -31,6 +31,7 @@ type SubmitHandler struct {
 	Notifier Notifier
 	Webhook  WebhookSender
 	BaseURL  string
+	Tracker  *spam.Tracker
 }
 
 // internalFields lists form field names that are never stored in submission data.
@@ -47,12 +48,12 @@ var internalFields = map[string]bool{
 //  3. Honeypot: if _honeypot non-empty → silently succeed without saving
 //  4. Filter internal fields, build data map
 //  5. Validate: data map must have ≥1 key → else 400
-//  6. Determine redirect: _redirect > form.Redirect > /success
-//  7. Spam check: if IsSpam(data) → silently succeed without saving (mirrors honeypot)
-//  8. Extract client IP
-//  9. Save submission to DB
-//  10. Send email and webhook notifications async
-//  11. Respond (JSON or redirect)
+//  6. Determine redirect: _redirect > form.Redirect > /success; extract client IP
+//  7. Spam check: if IsSpam(data) or this is the 3rd+ submission from this IP to
+//     this form → silently succeed without saving (mirrors honeypot)
+//  8. Save submission to DB
+//  9. Send email and webhook notifications async
+//  10. Respond (JSON or redirect)
 func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "formID")
 	form, err := h.Store.GetForm(formID)
@@ -93,14 +94,18 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	redirectURL := determineRedirect(r.FormValue("_redirect"), form.Redirect)
+	ip := ExtractIP(r)
 
-	// Content spam — silently drop like the honeypot: look successful, store nothing.
-	if spam.IsSpam(data) {
+	// Content spam or repeat-IP abuse — silently drop like the honeypot: look
+	// successful, store nothing. Tracker.Seen must run unconditionally — it also
+	// records the submission, so short-circuiting on IsSpam via || would skip
+	// the call and undercount this IP's repeat tally whenever content scoring
+	// already caught it first.
+	repeated := h.Tracker.Seen(formID, ip)
+	if spam.IsSpam(data) || repeated {
 		respondSuccess(w, r, formID, redirectURL)
 		return
 	}
-
-	ip := ExtractIP(r)
 
 	rawData, err := json.Marshal(data)
 	if err != nil {

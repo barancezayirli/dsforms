@@ -20,6 +20,7 @@ import (
 	"github.com/youruser/dsforms/internal/handler"
 	"github.com/youruser/dsforms/internal/mail"
 	"github.com/youruser/dsforms/internal/ratelimit"
+	"github.com/youruser/dsforms/internal/spam"
 	"github.com/youruser/dsforms/internal/store"
 	"github.com/youruser/dsforms/internal/webhook"
 )
@@ -348,6 +349,7 @@ func main() {
 		Notifier: mailer,
 		Webhook:  webhookSender,
 		BaseURL:  cfg.BaseURL,
+		Tracker:  spam.NewTracker(10000),
 	}
 
 	limiter := ratelimit.NewLimiter(cfg.RateBurst, cfg.RatePerMinute, time.Now)
