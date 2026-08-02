@@ -109,6 +109,26 @@ func TestScore(t *testing.T) {
 			data: map[string]string{"Name": "http://spam.com", "message": "hi"},
 			want: 4,
 		},
+		{
+			name: "single gibberish field alone kept (pile-up only)",
+			data: map[string]string{"company": "Sobczyk Consulting"},
+			want: 3,
+		},
+		{
+			name: "two gibberish fields pile up to drop threshold",
+			data: map[string]string{"message": "AvAJQuWVbvzQPBGpngyOW", "name": "Gfngfxr Viqymx"},
+			want: 6,
+		},
+		{
+			name: "short tokens exempt from gibberish check",
+			data: map[string]string{"company": "IBM LLC"},
+			want: 0,
+		},
+		{
+			name: "vowel-light real brand name not flagged",
+			data: map[string]string{"company": "Dropbox"},
+			want: 0,
+		},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -163,6 +183,16 @@ func TestIsSpam(t *testing.T) {
 			data: map[string]string{"name": "Jane", "message": "Loved the talk, thanks!"},
 			want: false,
 		},
+		{
+			name: "single gibberish field alone kept",
+			data: map[string]string{"company": "Sobczyk Consulting"},
+			want: false,
+		},
+		{
+			name: "two gibberish fields at threshold dropped",
+			data: map[string]string{"message": "AvAJQuWVbvzQPBGpngyOW", "name": "Gfngfxr Viqymx"},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -187,18 +217,30 @@ func TestRealSpamSamples(t *testing.T) {
 		wantScore int
 	}{
 		{
-			name: "automisto24 html anchor plus repeated url",
-			data: map[string]string{"message": "Here to explore discussions, exchange ideas, and gain fresh perspectives throughout the journey. I like learning from different perspectives and contributing whenever I can. Here is my site-<a href=\"https://automisto24.com.ua/\">AutoMisto24</a> https://automisto24.com.ua/ sample"},
+			name:      "automisto24 html anchor plus repeated url",
+			data:      map[string]string{"message": "Here to explore discussions, exchange ideas, and gain fresh perspectives throughout the journey. I like learning from different perspectives and contributing whenever I can. Here is my site-<a href=\"https://automisto24.com.ua/\">AutoMisto24</a> https://automisto24.com.ua/ sample"},
 			wantScore: 8,
 		},
 		{
-			name: "jayrn marketersmentor three links plus unsubscribe",
-			data: map[string]string{"message": "Hi, it’s Jayrn. Watch it here: https://marketersmentor.com/referral-system.php?refer=openapps.pro To multiplying your leverage, Jayrn My Blog: https://www.jayrn.com Unsubscribe: https://marketersmentor.com/unsubscribe.php?d=openapps.pro gzlrmkmdswesheytngrwediuoipqzm"},
+			name:      "jayrn marketersmentor three links plus unsubscribe",
+			data:      map[string]string{"message": "Hi, it’s Jayrn. Watch it here: https://marketersmentor.com/referral-system.php?refer=openapps.pro To multiplying your leverage, Jayrn My Blog: https://www.jayrn.com Unsubscribe: https://marketersmentor.com/unsubscribe.php?d=openapps.pro gzlrmkmdswesheytngrwediuoipqzm"},
 			wantScore: 9,
 		},
 		{
-			name: "russian proctology single html anchor punycode",
-			data: map[string]string{"message": "Проктологическое заболевание — это повсеместная патология. <a href=\"https://xn----etbhrcdtbbfidklik5p.xn--p1ai/service/hemorrhoid/\">удаление геморроя цена в москве</a> Ранняя помощь даёт возможность."},
+			name:      "russian proctology single html anchor punycode",
+			data:      map[string]string{"message": "Проктологическое заболевание — это повсеместная патология. <a href=\"https://xn----etbhrcdtbbfidklik5p.xn--p1ai/service/hemorrhoid/\">удаление геморроя цена в москве</a> Ранняя помощь даёт возможность."},
+			wantScore: 6,
+		},
+		{
+			name: "gibberish-fill bot: random name/message, plausible-looking company/email",
+			data: map[string]string{
+				"company":      "Ecthogb LLC",
+				"email":        "t.u.kilo.v.i.n.2.46@gmail.com",
+				"inquiry_type": "Stack Audit",
+				"message":      "AvAJQuWVbvzQPBGpngyOW",
+				"name":         "Gfngfxr Viqymx",
+				"saas_spend":   "Under $1,000/mo",
+			},
 			wantScore: 6,
 		},
 	}

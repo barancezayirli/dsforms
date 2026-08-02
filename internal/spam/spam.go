@@ -22,6 +22,15 @@ const markupWeight = threshold
 // it only contributes to a pile-up alongside another signal.
 const keywordWeight = 5
 
+// gibberishWeight is the score for a field whose value contains a token that
+// looks synthetically generated rather than real text. Kept at half the
+// threshold — pile-up only, never an instant drop — because the underlying
+// vowel-ratio/case-transition heuristic is biased toward English/Romance-
+// language phonotactics and can flag real names from consonant-heavy
+// languages (e.g. "Sobczyk"). A single flagged field must never lose a real
+// submission; two independently-flagged fields reliably means a bot.
+const gibberishWeight = 3
+
 // spamKeywords are high-confidence content-spam tokens, lowercased. Kept short
 // on purpose — broad word lists are how filters eat legitimate messages.
 // Matching is substring-based (strings.Contains), not word-boundary — keep
@@ -87,6 +96,14 @@ func Score(data map[string]string) int {
 		// A URL inside a name-like field.
 		if nameFieldKeys[strings.ToLower(key)] && containsLink(lower) {
 			score += 4
+		}
+
+		// Gibberish/synthetic-looking field value. Deliberately checked against
+		// the original-case value, not lower — lowercasing would destroy the
+		// case-transition signal fieldHasGibberish relies on. Skip if field
+		// contains a URL (domains naturally have low vowel ratios).
+		if !containsLink(lower) && fieldHasGibberish(value) {
+			score += gibberishWeight
 		}
 	}
 
