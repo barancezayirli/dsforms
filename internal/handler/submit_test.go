@@ -508,6 +508,41 @@ func TestSubmitThirdSameIPDropped(t *testing.T) {
 	}
 }
 
+// TestSubmitContentSpamStillCountsTowardIPRepeat pins the invariant that
+// Tracker.Seen runs on every submission, including ones already rejected by
+// content scoring. If Seen were folded into the `||` short-circuit
+// (`spam.IsSpam(data) || h.Tracker.Seen(...)`), the two spam submissions below
+// would never be counted, and the 3rd — clean content from the same IP — would
+// be stored instead of dropped.
+func TestSubmitContentSpamStillCountsTowardIPRepeat(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+
+	submit := func(message string) *httptest.ResponseRecorder {
+		form := url.Values{"name": {"Alice"}, "message": {message}}
+		req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Forwarded-For", "203.0.113.44")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 1st and 2nd: markup-link spam — an instant drop on content score alone.
+	submit(`<a href="http://x.com">click</a>`)
+	submit(`<a href="http://y.com">click</a>`)
+	// 3rd: perfectly clean content, same IP — must still be dropped as a repeat.
+	w := submit("hello there, loved the talk")
+
+	if w.Code != http.StatusFound {
+		t.Errorf("3rd submission status = %d, want 302 (silent drop)", w.Code)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 0 {
+		t.Errorf("submissions = %d, want 0 (2 spam dropped, 3rd dropped as IP repeat)", len(subs))
+	}
+}
+
 func TestSubmitSecondSameIPStillStored(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)

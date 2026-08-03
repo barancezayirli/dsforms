@@ -100,9 +100,17 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// successful, store nothing. Tracker.Seen must run unconditionally — it also
 	// records the submission, so short-circuiting on IsSpam via || would skip
 	// the call and undercount this IP's repeat tally whenever content scoring
-	// already caught it first.
+	// already caught it first. Guarded by
+	// TestSubmitContentSpamStillCountsTowardIPRepeat, not by this comment alone.
 	repeated := h.Tracker.Seen(formID, ip)
-	if spam.IsSpam(data) || repeated {
+	contentSpam := spam.IsSpam(data)
+	if contentSpam || repeated {
+		// Log which signal fired so an operator can answer "a customer says they
+		// submitted and never heard back". Field values are deliberately never
+		// logged — the drop reason is diagnosable without copying submission
+		// content (or spam payloads) into the log.
+		log.Printf("submit: dropped submission for form %s from %s (content_spam=%v score=%d, ip_repeat=%v)",
+			formID, ip, contentSpam, spam.Score(data), repeated)
 		respondSuccess(w, r, formID, redirectURL)
 		return
 	}
