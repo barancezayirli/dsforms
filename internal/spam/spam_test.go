@@ -210,6 +210,81 @@ func TestIsSpam(t *testing.T) {
 	}
 }
 
+// TestRealFalsePositiveSubmissions pins the filter against realistic *legitimate*
+// submissions that the gibberish heuristic used to drop — the mirror image of
+// TestRealSpamSamples. Two independent bugs produced these drops: accented Latin
+// vowels counted as letters but not as vowels (so any accented word looked
+// vowel-starved), and correlated fields (name/company vs. their own email
+// address) double-counting one underlying string as two independent signals.
+// Every row must stay strictly below the drop threshold.
+func TestRealFalsePositiveSubmissions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		data      map[string]string
+		wantScore int
+	}{
+		{
+			name: "polish enquiry with accented vowels",
+			data: map[string]string{
+				"name":    "Wojciech Szczęsny",
+				"message": "Dzień dobry, proszę o wycenę.",
+			},
+			// "Szczęsny" is genuinely vowel-starved (1 vowel in 8 letters) and
+			// still flags the name field — but alone that stays a pile-up-only
+			// signal, which is exactly the design intent.
+			wantScore: gibberishWeight,
+		},
+		{
+			name: "turkish enquiry with dotless i and umlauts",
+			data: map[string]string{
+				"name":    "Şükrü Yılmaz",
+				"company": "Yılmaz Tekstil",
+				"message": "Merhaba, bir teklif almak istiyorum.",
+			},
+			wantScore: 0,
+		},
+		{
+			name: "vietnamese enquiry with stacked diacritics",
+			data: map[string]string{
+				"name":    "Nguyễn Thị Hương",
+				"message": "Xin chào, tôi muốn hỏi giá.",
+			},
+			wantScore: 0,
+		},
+		{
+			name: "surname-derived email must not double-count the surname",
+			data: map[string]string{
+				"name":    "Mateusz Sobczyk",
+				"email":   "m.sobczyk@sobczyk.pl",
+				"message": "Hi, I'd like a quote.",
+			},
+			wantScore: gibberishWeight,
+		},
+		{
+			name: "company-derived email must not double-count the company name",
+			data: map[string]string{
+				"name":    "Jan Novak",
+				"company": "Bkstrm",
+				"email":   "hr@bkstrm.co",
+			},
+			wantScore: gibberishWeight,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Score(tt.data); got != tt.wantScore {
+				t.Errorf("Score() = %d, want %d", got, tt.wantScore)
+			}
+			if IsSpam(tt.data) {
+				t.Errorf("IsSpam() = true, want false (real submission must be kept)")
+			}
+		})
+	}
+}
+
 // TestRealSpamSamples pins the filter against spam actually captured in
 // production. Each must be dropped; these are the regression guard for the
 // 2026-06-25 retune (see the design doc revision). The originals scored
