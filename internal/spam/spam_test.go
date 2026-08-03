@@ -109,6 +109,31 @@ func TestScore(t *testing.T) {
 			data: map[string]string{"Name": "http://spam.com", "message": "hi"},
 			want: 4,
 		},
+		{
+			name: "single gibberish field alone kept (pile-up only)",
+			data: map[string]string{"company": "Sobczyk Consulting"},
+			want: 3,
+		},
+		{
+			name: "two gibberish fields pile up to drop threshold",
+			data: map[string]string{"message": "AvAJQuWVbvzQPBGpngyOW", "name": "Gfngfxr Viqymx"},
+			want: 6,
+		},
+		{
+			name: "short tokens exempt from gibberish check",
+			data: map[string]string{"company": "IBM LLC"},
+			want: 0,
+		},
+		{
+			name: "vowel-light real brand name not flagged",
+			data: map[string]string{"company": "Dropbox"},
+			want: 0,
+		},
+		{
+			name: "url and gibberish in same field detected (token-scoped exemption)",
+			data: map[string]string{"message": "visit http://spam.com Gfngfxr"},
+			want: 3,
+		},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -163,6 +188,16 @@ func TestIsSpam(t *testing.T) {
 			data: map[string]string{"name": "Jane", "message": "Loved the talk, thanks!"},
 			want: false,
 		},
+		{
+			name: "single gibberish field alone kept",
+			data: map[string]string{"company": "Sobczyk Consulting"},
+			want: false,
+		},
+		{
+			name: "two gibberish fields at threshold dropped",
+			data: map[string]string{"message": "AvAJQuWVbvzQPBGpngyOW", "name": "Gfngfxr Viqymx"},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -170,6 +205,81 @@ func TestIsSpam(t *testing.T) {
 			t.Parallel()
 			if got := IsSpam(tt.data); got != tt.want {
 				t.Errorf("IsSpam() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRealFalsePositiveSubmissions pins the filter against realistic *legitimate*
+// submissions that the gibberish heuristic used to drop — the mirror image of
+// TestRealSpamSamples. Two independent bugs produced these drops: accented Latin
+// vowels counted as letters but not as vowels (so any accented word looked
+// vowel-starved), and correlated fields (name/company vs. their own email
+// address) double-counting one underlying string as two independent signals.
+// Every row must stay strictly below the drop threshold.
+func TestRealFalsePositiveSubmissions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		data      map[string]string
+		wantScore int
+	}{
+		{
+			name: "polish enquiry with accented vowels",
+			data: map[string]string{
+				"name":    "Wojciech Szczęsny",
+				"message": "Dzień dobry, proszę o wycenę.",
+			},
+			// "Szczęsny" is genuinely vowel-starved (1 vowel in 8 letters) and
+			// still flags the name field — but alone that stays a pile-up-only
+			// signal, which is exactly the design intent.
+			wantScore: gibberishWeight,
+		},
+		{
+			name: "turkish enquiry with dotless i and umlauts",
+			data: map[string]string{
+				"name":    "Şükrü Yılmaz",
+				"company": "Yılmaz Tekstil",
+				"message": "Merhaba, bir teklif almak istiyorum.",
+			},
+			wantScore: 0,
+		},
+		{
+			name: "vietnamese enquiry with stacked diacritics",
+			data: map[string]string{
+				"name":    "Nguyễn Thị Hương",
+				"message": "Xin chào, tôi muốn hỏi giá.",
+			},
+			wantScore: 0,
+		},
+		{
+			name: "surname-derived email must not double-count the surname",
+			data: map[string]string{
+				"name":    "Mateusz Sobczyk",
+				"email":   "m.sobczyk@sobczyk.pl",
+				"message": "Hi, I'd like a quote.",
+			},
+			wantScore: gibberishWeight,
+		},
+		{
+			name: "company-derived email must not double-count the company name",
+			data: map[string]string{
+				"name":    "Jan Novak",
+				"company": "Bkstrm",
+				"email":   "hr@bkstrm.co",
+			},
+			wantScore: gibberishWeight,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Score(tt.data); got != tt.wantScore {
+				t.Errorf("Score() = %d, want %d", got, tt.wantScore)
+			}
+			if IsSpam(tt.data) {
+				t.Errorf("IsSpam() = true, want false (real submission must be kept)")
 			}
 		})
 	}
@@ -187,18 +297,30 @@ func TestRealSpamSamples(t *testing.T) {
 		wantScore int
 	}{
 		{
-			name: "automisto24 html anchor plus repeated url",
-			data: map[string]string{"message": "Here to explore discussions, exchange ideas, and gain fresh perspectives throughout the journey. I like learning from different perspectives and contributing whenever I can. Here is my site-<a href=\"https://automisto24.com.ua/\">AutoMisto24</a> https://automisto24.com.ua/ sample"},
+			name:      "automisto24 html anchor plus repeated url",
+			data:      map[string]string{"message": "Here to explore discussions, exchange ideas, and gain fresh perspectives throughout the journey. I like learning from different perspectives and contributing whenever I can. Here is my site-<a href=\"https://automisto24.com.ua/\">AutoMisto24</a> https://automisto24.com.ua/ sample"},
 			wantScore: 8,
 		},
 		{
-			name: "jayrn marketersmentor three links plus unsubscribe",
-			data: map[string]string{"message": "Hi, it’s Jayrn. Watch it here: https://marketersmentor.com/referral-system.php?refer=openapps.pro To multiplying your leverage, Jayrn My Blog: https://www.jayrn.com Unsubscribe: https://marketersmentor.com/unsubscribe.php?d=openapps.pro gzlrmkmdswesheytngrwediuoipqzm"},
+			name:      "jayrn marketersmentor three links plus unsubscribe",
+			data:      map[string]string{"message": "Hi, it’s Jayrn. Watch it here: https://marketersmentor.com/referral-system.php?refer=openapps.pro To multiplying your leverage, Jayrn My Blog: https://www.jayrn.com Unsubscribe: https://marketersmentor.com/unsubscribe.php?d=openapps.pro gzlrmkmdswesheytngrwediuoipqzm"},
 			wantScore: 9,
 		},
 		{
-			name: "russian proctology single html anchor punycode",
-			data: map[string]string{"message": "Проктологическое заболевание — это повсеместная патология. <a href=\"https://xn----etbhrcdtbbfidklik5p.xn--p1ai/service/hemorrhoid/\">удаление геморроя цена в москве</a> Ранняя помощь даёт возможность."},
+			name:      "russian proctology single html anchor punycode",
+			data:      map[string]string{"message": "Проктологическое заболевание — это повсеместная патология. <a href=\"https://xn----etbhrcdtbbfidklik5p.xn--p1ai/service/hemorrhoid/\">удаление геморроя цена в москве</a> Ранняя помощь даёт возможность."},
+			wantScore: 6,
+		},
+		{
+			name: "gibberish-fill bot: random name/message, plausible-looking company/email",
+			data: map[string]string{
+				"company":      "Ecthogb LLC",
+				"email":        "t.u.kilo.v.i.n.2.46@gmail.com",
+				"inquiry_type": "Stack Audit",
+				"message":      "AvAJQuWVbvzQPBGpngyOW",
+				"name":         "Gfngfxr Viqymx",
+				"saas_spend":   "Under $1,000/mo",
+			},
 			wantScore: 6,
 		},
 	}

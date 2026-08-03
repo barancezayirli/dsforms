@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/youruser/dsforms/internal/mail"
+	"github.com/youruser/dsforms/internal/spam"
 	"github.com/youruser/dsforms/internal/store"
 )
 
@@ -55,7 +56,7 @@ func setupSubmit(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {
 		t.Fatalf("store.New error: %v", err)
 	}
 	m := mail.NewMockMailer()
-	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://example.com"}
+	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 	_ = s.CreateForm(store.Form{ID: "test-form", Name: "Test", EmailTo: "test@example.com", Redirect: "https://example.com/thanks"})
@@ -154,7 +155,7 @@ func TestSubmitDefaultRedirect(t *testing.T) {
 	t.Parallel()
 	s, m, _ := setupSubmit(t)
 	_ = s.CreateForm(store.Form{ID: "no-redir", Name: "NoRedir", EmailTo: "t@t.com"})
-	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://example.com"}
+	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 	form := url.Values{"name": {"Alice"}}
@@ -335,7 +336,7 @@ func TestSubmitWebhookFired(t *testing.T) {
 	})
 	m := mail.NewMockMailer()
 	wh := newMockWebhookSender()
-	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com"}
+	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 
@@ -362,7 +363,7 @@ func TestSubmitNoWebhook(t *testing.T) {
 	_ = s.CreateForm(store.Form{ID: "no-wh", Name: "NoWH", EmailTo: "test@test.com"})
 	m := mail.NewMockMailer()
 	wh := newMockWebhookSender()
-	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com"}
+	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 
@@ -461,7 +462,7 @@ func TestSubmitNoEmailNoWebhook(t *testing.T) {
 		t.Fatalf("store.New error: %v", err)
 	}
 	_ = s.CreateForm(store.Form{ID: "silent", Name: "Silent"})
-	h := &SubmitHandler{Store: s, Notifier: nil, Webhook: nil, BaseURL: "https://example.com"}
+	h := &SubmitHandler{Store: s, Notifier: nil, Webhook: nil, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 
@@ -477,5 +478,93 @@ func TestSubmitNoEmailNoWebhook(t *testing.T) {
 	subs, _ := s.ListSubmissions("silent")
 	if len(subs) != 1 {
 		t.Errorf("submissions = %d, want 1", len(subs))
+	}
+}
+
+func TestSubmitThirdSameIPDropped(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+
+	submit := func() *httptest.ResponseRecorder {
+		form := url.Values{"name": {"Alice"}, "message": {"hello there"}}
+		req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Forwarded-For", "203.0.113.9")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	submit()
+	submit()
+	w := submit()
+
+	if w.Code != http.StatusFound {
+		t.Errorf("3rd submission status = %d, want 302 (silent drop)", w.Code)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 2 {
+		t.Errorf("submissions = %d, want 2 (1st and 2nd stored, 3rd dropped)", len(subs))
+	}
+}
+
+// TestSubmitContentSpamStillCountsTowardIPRepeat pins the invariant that
+// Tracker.Seen runs on every submission, including ones already rejected by
+// content scoring. If Seen were folded into the `||` short-circuit
+// (`spam.IsSpam(data) || h.Tracker.Seen(...)`), the two spam submissions below
+// would never be counted, and the 3rd — clean content from the same IP — would
+// be stored instead of dropped.
+func TestSubmitContentSpamStillCountsTowardIPRepeat(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+
+	submit := func(message string) *httptest.ResponseRecorder {
+		form := url.Values{"name": {"Alice"}, "message": {message}}
+		req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Forwarded-For", "203.0.113.44")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 1st and 2nd: markup-link spam — an instant drop on content score alone.
+	submit(`<a href="http://x.com">click</a>`)
+	submit(`<a href="http://y.com">click</a>`)
+	// 3rd: perfectly clean content, same IP — must still be dropped as a repeat.
+	w := submit("hello there, loved the talk")
+
+	if w.Code != http.StatusFound {
+		t.Errorf("3rd submission status = %d, want 302 (silent drop)", w.Code)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 0 {
+		t.Errorf("submissions = %d, want 0 (2 spam dropped, 3rd dropped as IP repeat)", len(subs))
+	}
+}
+
+func TestSubmitSecondSameIPStillStored(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+
+	submit := func() *httptest.ResponseRecorder {
+		form := url.Values{"name": {"Alice"}, "message": {"hello there"}}
+		req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Forwarded-For", "203.0.113.10")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	submit()
+	w := submit()
+
+	if w.Code != http.StatusFound {
+		t.Errorf("2nd submission status = %d, want 302", w.Code)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 2 {
+		t.Errorf("submissions = %d, want 2 (repeat threshold is 3rd, not 2nd)", len(subs))
 	}
 }
