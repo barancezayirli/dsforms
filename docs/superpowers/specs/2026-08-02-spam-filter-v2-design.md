@@ -44,8 +44,9 @@ existing signal.
   submitting to the same form repeatedly — is a fact about a *sequence* of submissions,
   not visible in any single one. This is new: `internal/spam` gains its first stateful
   component, deliberately modeled on `internal/ratelimit.Limiter` (in-process,
-  mutex-guarded, `now func() time.Time` injected for deterministic tests) rather than a
-  new DB table, keeping the "no schema change" constraint from the original spec.
+  mutex-guarded) rather than a new DB table, keeping the "no schema change" constraint
+  from the original spec. Unlike `Limiter`, eviction is count-based (bounded LRU) rather
+  than time-based, so no `now` injection is needed — see Storage below.
 - **Dedup key is `formID + submitter IP`**, not form field values (e.g. `name`+`company`).
   dsforms hosts arbitrary third-party form schemas; IP is the one identity signal
   `submit.go` already extracts (`ExtractIP`) independent of any site's field names.
@@ -71,7 +72,7 @@ func IsSpam(data map[string]string) bool
 // handler struct, exactly like ratelimit.Limiter.
 type Tracker struct { /* mutex-guarded bounded map */ }
 
-func NewTracker(maxEntries int, now func() time.Time) *Tracker
+func NewTracker(maxEntries int) *Tracker
 
 // Seen records a submission from (formID, ip) and reports whether this occurrence
 // is the 3rd or later from that pair (i.e. should be treated as spam).
@@ -141,6 +142,21 @@ TTL-based. In-process only — resets on redeploy/restart. This is an accepted t
 after a restart days later. A durable version would need a DB table, which the original
 spec deliberately avoided and this revision preserves.
 
+**Shared-IP / NAT tradeoff (accepted, not solved):** the repeat count is permanent for the
+process lifetime — it never decays, and the 3rd+ rule is an instant drop rather than a
+pile-up signal. Behind a shared or NAT'd address (corporate office, university, co-working
+space, carrier-grade mobile NAT), every visitor presents the same IP, so the 3rd distinct
+*legitimate* person to ever contact a site from that address is silently dropped, as is
+everyone after them, until the process restarts. This is the one place in the filter where
+a false positive is not pile-up-gated, and it is accepted knowingly: the alternative
+signals (form field values) are unavailable given arbitrary third-party form schemas, and
+the realistic dsforms deployment — a low-traffic static site — sees far more bot repeats
+from one IP than three unrelated humans behind one NAT. Mitigations deliberately deferred:
+a decay/TTL window (would reintroduce the `now` injection and time-based eviction this
+revision removed), and a per-form allowlist for known office IPs (config surface the
+original spec ruled out). If real reports of missed submissions from shared IPs appear,
+adding decay is the first change to make.
+
 ## Testing (TDD)
 
 - `internal/spam/gibberish_test.go` written first: table-driven cases for the
@@ -150,10 +166,10 @@ spec deliberately avoided and this revision preserves.
 - `internal/spam/spam_test.go`: extend `TestScore`/`TestIsSpam` with the gibberish
   pile-up cases; add the 2026-08-02 real samples (gibberish rows) to
   `TestRealSpamSamples`, pinned the same way as the 2026-06-25 batch.
-- `internal/spam/tracker_test.go` written first: `NewTracker` with injected `now`;
-  table-driven — 1st/2nd calls for a pair return `false`, 3rd+ returns `true`; different
-  `(formID, ip)` pairs don't interfere; LRU eviction under `maxEntries` confirmed with a
-  direct entries-count assertion (no need to fabricate real time gaps — no `time.Sleep`).
+- `internal/spam/tracker_test.go` written first: table-driven — 1st/2nd calls for a pair
+  return `false`, 3rd+ returns `true`; different `(formID, ip)` pairs don't interfere; LRU
+  eviction confirmed by inserting `maxEntries+1` distinct pairs and asserting the oldest
+  is forgotten (no time dependency, so no `time.Sleep` needed either way).
 - `submit_test.go`: a case asserting the 3rd submission from the same IP to the same form
   is dropped (mirrors the existing spam-drop assertion pattern: success response, zero
   rows in `Store`), and that a 2nd submission is still stored.
