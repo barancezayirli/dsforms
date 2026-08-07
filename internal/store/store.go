@@ -629,6 +629,27 @@ func (s *Store) DeleteSubmission(id string) error {
 	return nil
 }
 
+// DeleteSubmissions deletes multiple submissions belonging to formID. IDs
+// belonging to a different form are silently ignored. A nil/empty ids
+// deletes nothing.
+func (s *Store) DeleteSubmissions(formID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, 0, len(ids)+1)
+	args = append(args, formID)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := "DELETE FROM submissions WHERE form_id = ? AND id IN (" + strings.Join(placeholders, ",") + ")"
+	if _, err := s.db.Exec(query, args...); err != nil {
+		return fmt.Errorf("delete submissions: %w", err)
+	}
+	return nil
+}
+
 // GetSubmission returns a single submission by ID.
 func (s *Store) GetSubmission(id string) (Submission, error) {
 	var sub Submission

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/mail"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -41,6 +42,21 @@ var internalFields = map[string]bool{
 	"_subject":  true,
 }
 
+// emailFieldValid reports whether a submitted field named "email"
+// (case-insensitive) is a well-formed address. A missing email field is
+// valid — not every form has one. This is a hard rejection distinct from
+// the spam filter: a malformed email is a form-usage error, not a signal to
+// silently drop.
+func emailFieldValid(data map[string]string) bool {
+	for key, value := range data {
+		if strings.EqualFold(key, "email") {
+			_, err := mail.ParseAddress(value)
+			return err == nil
+		}
+	}
+	return true
+}
+
 // Handle processes a form submission.
 // Flow:
 //  1. Look up form by ID → 404 if missing
@@ -48,12 +64,13 @@ var internalFields = map[string]bool{
 //  3. Honeypot: if _honeypot non-empty → silently succeed without saving
 //  4. Filter internal fields, build data map
 //  5. Validate: data map must have ≥1 key → else 400
-//  6. Determine redirect: _redirect > form.Redirect > /success; extract client IP
-//  7. Spam check: if IsSpam(data) or this is the 3rd+ submission from this IP to
+//  6. Validate: an "email" field, if present, must be a well-formed address → else 400
+//  7. Determine redirect: _redirect > form.Redirect > /success; extract client IP
+//  8. Spam check: if IsSpam(data) or this is the 3rd+ submission from this IP to
 //     this form → silently succeed without saving (mirrors honeypot)
-//  8. Save submission to DB
-//  9. Send email and webhook notifications async
-//  10. Respond (JSON or redirect)
+//  9. Save submission to DB
+//  10. Send email and webhook notifications async
+//  11. Respond (JSON or redirect)
 func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "formID")
 	form, err := h.Store.GetForm(formID)
@@ -90,6 +107,11 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	if len(data) == 0 {
 		http.Error(w, "no form data", http.StatusBadRequest)
+		return
+	}
+
+	if !emailFieldValid(data) {
+		http.Error(w, "invalid email", http.StatusBadRequest)
 		return
 	}
 

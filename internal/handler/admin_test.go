@@ -103,6 +103,7 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 		r.Post("/admin/forms/{id}/delete", ah.DeleteForm)
 		r.Get("/admin/forms/{id}", ah.FormDetail)
 		r.Post("/admin/forms/{id}/read-all", ah.MarkAllRead)
+		r.Post("/admin/forms/{id}/submissions/bulk-delete", ah.BulkDeleteSubmissions)
 		r.Get("/admin/forms/{id}/export", ah.ExportCSV)
 		r.Get("/admin/forms/{formID}/submissions/{subID}", ah.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", ah.MarkRead)
@@ -511,6 +512,55 @@ func TestDeleteSubmissionPost(t *testing.T) {
 	}
 }
 
+func TestBulkDeleteSubmissionsPost(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(store.Submission{ID: "s3", FormID: "f1", RawData: `{}`})
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/submissions/bulk-delete", "ids=s1&ids=s3")
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 1 || subs[0].ID != "s2" {
+		t.Errorf("subs = %+v, want only s2 remaining", subs)
+	}
+}
+
+func TestBulkDeleteSubmissionsScopedToForm(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateForm(store.Form{ID: "f2", Name: "D", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(store.Submission{ID: "s2", FormID: "f2", RawData: `{}`})
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/submissions/bulk-delete", "ids=s1&ids=s2")
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	subs, _ := s.ListSubmissions("f2")
+	if len(subs) != 1 {
+		t.Errorf("f2 submissions = %d, want 1 (cross-form bulk delete must not happen)", len(subs))
+	}
+}
+
+func TestBulkDeleteSubmissionsNoIDs(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/submissions/bulk-delete", "")
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 1 {
+		t.Errorf("submissions = %d, want 1 (no ids must delete nothing)", len(subs))
+	}
+}
+
 func TestDeleteSubmissionNotFound(t *testing.T) {
 	t.Parallel()
 	s, r := setupAdmin(t)
@@ -564,6 +614,20 @@ func TestExportCSVValues(t *testing.T) {
 	}
 	if !strings.Contains(body, "Bob") || !strings.Contains(body, "123") {
 		t.Error("CSV missing Bob's data")
+	}
+}
+
+func TestExportCSVSanitizesFormulas(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	// Malicious field value starting with '=' (formula trigger).
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"message":"=cmd|'/c calc'!A1"}`})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/export", "")
+	body := w.Body.String()
+	// The dangerous value must be neutralized with a leading apostrophe.
+	if !strings.Contains(body, "'=cmd") {
+		t.Errorf("formula not sanitized; CSV body = %q", body)
 	}
 }
 
