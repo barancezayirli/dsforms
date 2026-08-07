@@ -4,6 +4,7 @@
 <div class="page-header">
   <h1 class="page-title">{{.Form.Name}}</h1>
   <div style="display:flex;gap:8px">
+    <button type="submit" form="bulk-delete-form" id="bulk-delete-btn" class="btn btn-danger" disabled>Delete selected</button>
     <form method="POST" action="/admin/forms/{{.Form.ID}}/read-all" style="display:inline">
       <button type="submit" class="btn">Mark all read</button>
     </form>
@@ -11,6 +12,11 @@
     <a href="/admin/forms/{{.Form.ID}}/edit" class="btn">Edit form</a>
   </div>
 </div>
+
+<!-- Standalone form (no DOM nesting) that the header button and each row's
+     checkbox target via the form="" attribute, since checkboxes live inside
+     the submissions table alongside each row's own single-delete form. -->
+<form id="bulk-delete-form" method="POST" action="/admin/forms/{{.Form.ID}}/submissions/bulk-delete" onsubmit="return confirmBulkDelete()"></form>
 
 <div class="stats" style="grid-template-columns: repeat(2, 1fr);">
   <div class="stat stat-accent">
@@ -28,6 +34,7 @@
   <table class="table">
     <thead>
       <tr>
+        <th style="width:20px"><input type="checkbox" id="select-all-checkbox" onchange="toggleAllSubmissionCheckboxes(this)"></th>
         <th style="width:20px"></th>
         <th>From</th>
         <th>Preview</th>
@@ -38,6 +45,7 @@
     <tbody>
       {{range .Submissions}}
       <tr class="{{if not .Read}}row-unread{{end}}">
+        <td><input type="checkbox" name="ids" value="{{.ID}}" form="bulk-delete-form" class="submission-checkbox" onchange="updateBulkDeleteButton()"></td>
         <td>{{if not .Read}}<span class="unread-dot"></span>{{end}}</td>
         <td>
           <a href="/admin/forms/{{$.Form.ID}}/submissions/{{.ID}}" class="sub-name{{if not .Read}} sub-unread{{end}}">
@@ -65,6 +73,36 @@
   {{if .HasNext}}<a href="/admin/forms/{{.Form.ID}}?page={{.NextPage}}" class="btn">Older &rarr;</a>{{end}}
 </div>
 {{end}}
+
+<script>
+function submissionCheckboxes() {
+  return document.querySelectorAll('.submission-checkbox');
+}
+
+function updateBulkDeleteButton() {
+  var checked = document.querySelectorAll('.submission-checkbox:checked').length;
+  var btn = document.getElementById('bulk-delete-btn');
+  btn.disabled = checked === 0;
+  btn.textContent = checked === 0 ? 'Delete selected' : 'Delete selected (' + checked + ')';
+
+  var boxes = submissionCheckboxes();
+  var selectAll = document.getElementById('select-all-checkbox');
+  selectAll.checked = boxes.length > 0 && checked === boxes.length;
+}
+
+function toggleAllSubmissionCheckboxes(source) {
+  var boxes = submissionCheckboxes();
+  for (var i = 0; i < boxes.length; i++) {
+    boxes[i].checked = source.checked;
+  }
+  updateBulkDeleteButton();
+}
+
+function confirmBulkDelete() {
+  var checked = document.querySelectorAll('.submission-checkbox:checked').length;
+  return confirm('Delete ' + checked + ' selected submission' + (checked === 1 ? '' : 's') + '?');
+}
+</script>
 
 {{else}}
 <div class="empty-state">

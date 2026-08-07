@@ -358,6 +358,53 @@ func TestDeleteSubmission(t *testing.T) {
 	}
 }
 
+func TestDeleteSubmissions(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s2", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s3", FormID: "f1", RawData: `{}`})
+	if err := s.DeleteSubmissions("f1", []string{"s1", "s3"}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 1 || subs[0].ID != "s2" {
+		t.Errorf("subs = %+v, want only s2 remaining", subs)
+	}
+}
+
+func TestDeleteSubmissionsScopedToForm(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	_ = s.CreateForm(Form{ID: "f2", Name: "D", EmailTo: "m@e.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	_ = s.CreateSubmission(Submission{ID: "s2", FormID: "f2", RawData: `{}`})
+	// Requesting s2's ID under f1's scope must not delete it.
+	if err := s.DeleteSubmissions("f1", []string{"s1", "s2"}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	subs, _ := s.ListSubmissions("f2")
+	if len(subs) != 1 {
+		t.Errorf("f2 subs = %d, want 1 (cross-form delete must not happen)", len(subs))
+	}
+}
+
+func TestDeleteSubmissionsEmpty(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
+	if err := s.DeleteSubmissions("f1", nil); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 1 {
+		t.Errorf("subs = %d, want 1 (empty ids must delete nothing)", len(subs))
+	}
+}
+
 func TestUnreadCount(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)

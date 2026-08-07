@@ -564,6 +564,26 @@ func (h *AdminHandler) DeleteSubmission(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/admin/forms/"+sub.FormID, http.StatusFound)
 }
 
+// BulkDeleteSubmissions handles POST to delete multiple submissions for a
+// form at once. Missing/empty "ids" deletes nothing.
+func (h *AdminHandler) BulkDeleteSubmissions(w http.ResponseWriter, r *http.Request) {
+	formID := chi.URLParam(r, "id")
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ids := r.PostForm["ids"]
+
+	if err := h.Store.DeleteSubmissions(formID, ids); err != nil {
+		log.Printf("bulk delete submissions: form %s error: %v", formID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/admin/forms/"+formID, http.StatusFound)
+}
+
 // TestWebhook handles POST to test a form's webhook configuration.
 func (h *AdminHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

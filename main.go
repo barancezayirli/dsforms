@@ -430,6 +430,7 @@ func main() {
 		r.Post("/admin/forms/{id}/delete", adminHandler.DeleteForm)
 		r.Get("/admin/forms/{id}", adminHandler.FormDetail)
 		r.Post("/admin/forms/{id}/read-all", adminHandler.MarkAllRead)
+		r.Post("/admin/forms/{id}/submissions/bulk-delete", adminHandler.BulkDeleteSubmissions)
 		r.Post("/admin/forms/{id}/test-webhook", adminHandler.TestWebhook)
 		r.Get("/admin/forms/{id}/export", adminHandler.ExportCSV)
 		r.Get("/admin/forms/{formID}/submissions/{subID}", adminHandler.SubmissionDetail)
