@@ -3,6 +3,12 @@ name: Build and Push Docker Image
 on:
   push:
     tags: ["v*"]
+  # Lets an already-created tag be published manually — needed because tag
+  # pushes made by auto-tag.yml's default GITHUB_TOKEN don't cascade-trigger
+  # this workflow (GitHub blocks GITHUB_TOKEN-authored events from starting
+  # other workflow runs, to prevent infinite chains). See auto-tag.yml for
+  # the actual fix (a PAT); this is the manual recovery path.
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
