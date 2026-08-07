@@ -337,3 +337,39 @@ func TestRealSpamSamples(t *testing.T) {
 		})
 	}
 }
+
+// TestSQLInjectionProbesDropped pins the filter against real sqlmap-style
+// injection probes captured against a live form's public submission endpoint.
+// The app is not actually SQL-injectable (all queries are parameterized and
+// submitted data is stored as one JSON blob), but the probes are pure noise
+// that a human operator should never see in their inbox — each is a
+// near-zero false-positive bot signature, so it instant-drops like markup.
+func TestSQLInjectionProbesDropped(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		data map[string]string
+	}{
+		{
+			name: "extractvalue error-based blind probe",
+			data: map[string]string{"message": "' AND EXTRACTVALUE(2794,CONCAT(0x7e,((SELECT (ELT(2794=2794,1)))),0x7e))-- -"},
+		},
+		{
+			name: "order by column-count probe",
+			data: map[string]string{"email": "' ORDER BY 1-- -"},
+		},
+		{
+			name: "union select probe",
+			data: map[string]string{"message": "1' AND 1=1 UNION SELECT NULL-- -"},
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if !IsSpam(tt.data) {
+				t.Errorf("IsSpam() = false, want true (SQL injection probe must be dropped)")
+			}
+		})
+	}
+}

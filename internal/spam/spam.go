@@ -57,6 +57,22 @@ var spamKeywords = []string{
 // enough to drop a submission on its own.
 var markupLinkMarkers = []string{"[url=", "[url]", "[link]", "<a href"}
 
+// sqlInjectionMarkers indicate a SQL-injection probe (sqlmap-style automated
+// scanning), which has zero legitimate use in a plain static-site form field.
+// Each match scores markupWeight, enough to drop a submission on its own —
+// same tier as markup, because these strings do not occur in real prose.
+// "-- -" is sqlmap's default comment-out suffix and alone covers most probes;
+// the rest are common blind/error/union injection constructs.
+var sqlInjectionMarkers = []string{
+	"union select",
+	"extractvalue(",
+	"' or '1'='1",
+	"' or 1=1",
+	"xp_cmdshell",
+	"waitfor delay",
+	"-- -",
+}
+
 // nameFieldKeys are field names treated as "name-like"; a URL inside one is
 // suspicious because names are not URLs.
 var nameFieldKeys = map[string]bool{
@@ -83,6 +99,11 @@ func Score(data map[string]string) int {
 
 		// HTML/BBCode link markup — each match alone is enough to drop.
 		for _, marker := range markupLinkMarkers {
+			score += markupWeight * strings.Count(lower, marker)
+		}
+
+		// SQL injection probe — each match alone is enough to drop.
+		for _, marker := range sqlInjectionMarkers {
 			score += markupWeight * strings.Count(lower, marker)
 		}
 
