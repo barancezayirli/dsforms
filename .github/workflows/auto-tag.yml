@@ -16,6 +16,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # A tag pushed with the default GITHUB_TOKEN does not trigger other
+          # workflows (GitHub blocks GITHUB_TOKEN-authored events from
+          # cascading, to prevent infinite chains) — so docker-publish.yml's
+          # `push: tags: ["v*"]` never fired for any tag this workflow made.
+          # RELEASE_PAT (a fine-grained PAT with Contents: read/write on this
+          # repo, added as a repo secret) lets the tag push trigger it
+          # normally. Falls back to GITHUB_TOKEN — today's broken-but-working
+          # behavior — if the secret isn't set yet.
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Determine version bump
         id: bump
