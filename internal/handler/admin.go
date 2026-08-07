@@ -682,7 +682,7 @@ func (h *AdminHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 		row := []string{s.ID, s.CreatedAt.Format("2006-01-02T15:04:05Z"), s.IP, readVal}
 		for _, k := range keys {
-			row = append(row, s.Data[k])
+			row = append(row, csvSafe(s.Data[k]))
 		}
 		if err := cw.Write(row); err != nil {
 			log.Printf("export csv: write row error: %v", err)

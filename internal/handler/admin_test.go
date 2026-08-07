@@ -567,6 +567,20 @@ func TestExportCSVValues(t *testing.T) {
 	}
 }
 
+func TestExportCSVSanitizesFormulas(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
+	// Malicious field value starting with '=' (formula trigger).
+	_ = s.CreateSubmission(store.Submission{ID: "s1", FormID: "f1", RawData: `{"message":"=cmd|'/c calc'!A1"}`})
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/export", "")
+	body := w.Body.String()
+	// The dangerous value must be neutralized with a leading apostrophe.
+	if !strings.Contains(body, "'=cmd") {
+		t.Errorf("formula not sanitized; CSV body = %q", body)
+	}
+}
+
 func TestExportCSVEmpty(t *testing.T) {
 	t.Parallel()
 	s, r := setupAdmin(t)
