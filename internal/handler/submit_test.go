@@ -202,6 +202,53 @@ func TestSubmitEmptyFieldsReturns400(t *testing.T) {
 	}
 }
 
+func TestSubmitInvalidEmailReturns400(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+	form := url.Values{"email": {"' ORDER BY 1-- -"}, "message": {"hi"}}
+	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 0 {
+		t.Errorf("submissions = %d, want 0 (invalid email must not be stored)", len(subs))
+	}
+}
+
+func TestSubmitInvalidEmailCaseInsensitiveField(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupSubmit(t)
+	form := url.Values{"Email": {"not-an-email"}}
+	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestSubmitNoEmailFieldUnaffected(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+	form := url.Values{"name": {"Alice"}, "message": {"hi"}}
+	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302 (no email field must not be validated)", w.Code)
+	}
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 1 {
+		t.Errorf("submissions = %d, want 1", len(subs))
+	}
+}
+
 func TestSubmitXForwardedFor(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
