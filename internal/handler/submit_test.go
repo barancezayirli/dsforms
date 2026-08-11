@@ -122,6 +122,39 @@ func TestSubmitTriggersEmail(t *testing.T) {
 	}
 }
 
+// TestSubmitNotificationCarriesCreatedAt guards the notification timestamp. The
+// submission handed to the Notifier is the in-memory struct, not a re-read row,
+// so leaving CreatedAt to the DB default shipped a zero time.Time to the mailer
+// and put "Date: Mon, 01 Jan 0001 00:00:00 +0000" on every notification email
+// while the admin UI showed the correct time.
+func TestSubmitNotificationCarriesCreatedAt(t *testing.T) {
+	t.Parallel()
+	s, m, r := setupSubmit(t)
+	form := url.Values{"name": {"Alice"}}
+	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if !m.Wait(2 * time.Second) {
+		t.Fatal("email not sent within timeout")
+	}
+	notified := m.Calls[0].Sub
+	if notified.CreatedAt.IsZero() {
+		t.Fatal("notified submission has zero CreatedAt; email Date header would read 01 Jan 0001")
+	}
+	subs, err := s.ListSubmissions("test-form")
+	if err != nil {
+		t.Fatalf("ListSubmissions error = %v", err)
+	}
+	if len(subs) != 1 {
+		t.Fatalf("submissions = %d, want 1", len(subs))
+	}
+	if !notified.CreatedAt.Equal(subs[0].CreatedAt) {
+		t.Errorf("notified CreatedAt = %v, stored CreatedAt = %v; email and admin UI must agree",
+			notified.CreatedAt, subs[0].CreatedAt)
+	}
+}
+
 func TestSubmitRedirectOverride(t *testing.T) {
 	t.Parallel()
 	_, _, r := setupSubmit(t)

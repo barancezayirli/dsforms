@@ -93,19 +93,28 @@ func (m *Mailer) SendMail(to, subject, body string) error {
 		from = m.From
 	}
 
+	msg := m.buildMail(to, subject, body, time.Now())
+
+	if err := smtp.SendMail(addr, auth, from, []string{to}, []byte(msg)); err != nil {
+		return fmt.Errorf("send mail: %w", err)
+	}
+	return nil
+}
+
+// buildMail assembles a plain-text message. Callers pass to/subject unsanitized;
+// stripHeaderChars runs here so no call path can skip it. sent stamps the Date
+// header — a message without one is scored as more spam-like by some receivers.
+func (m *Mailer) buildMail(to, subject, body string, sent time.Time) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("From: %s\r\n", stripHeaderChars(m.From)))
-	b.WriteString(fmt.Sprintf("To: %s\r\n", to))
-	b.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	b.WriteString(fmt.Sprintf("To: %s\r\n", stripHeaderChars(to)))
+	b.WriteString(fmt.Sprintf("Subject: %s\r\n", stripHeaderChars(subject)))
+	b.WriteString(fmt.Sprintf("Date: %s\r\n", sent.Format(time.RFC1123Z)))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("\r\n")
 	b.WriteString(body)
-
-	if err := smtp.SendMail(addr, auth, from, []string{to}, []byte(b.String())); err != nil {
-		return fmt.Errorf("send mail: %w", err)
-	}
-	return nil
+	return b.String()
 }
 
 // MockCall records a single call to SendNotification.

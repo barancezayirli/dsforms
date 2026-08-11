@@ -1,6 +1,7 @@
 package mail
 
 import (
+	netmail "net/mail"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,50 @@ func TestStripHeaderChars(t *testing.T) {
 		if got := stripHeaderChars(in); got != want {
 			t.Errorf("stripHeaderChars(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestBuildMailHasParseableDate pins a Date header on confirmation and broadcast
+// mail. Without one the relay stamps its own, and receivers that see none at all
+// treat the message as more spam-like.
+func TestBuildMailHasParseableDate(t *testing.T) {
+	t.Parallel()
+	m := &Mailer{From: "DSForms <noreply@example.com>"}
+	sent := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	msg := m.buildMail("to@example.com", "Confirm your signup", "Click here", sent)
+
+	hdr, err := netmail.ReadMessage(strings.NewReader(strings.ReplaceAll(msg, "\r\n", "\n")))
+	if err != nil {
+		t.Fatalf("message does not parse: %v\nmessage:\n%s", err, msg)
+	}
+	got, err := hdr.Header.Date()
+	if err != nil {
+		t.Fatalf("Date header does not parse: %v (raw %q)", err, hdr.Header.Get("Date"))
+	}
+	if !got.Equal(sent) {
+		t.Errorf("Date = %v, want %v", got, sent)
+	}
+}
+
+// TestBuildMailDateNotInjectable keeps the Date header out of reach of caller
+// input, alongside the To/Subject stripping.
+func TestBuildMailDateNotInjectable(t *testing.T) {
+	t.Parallel()
+	m := &Mailer{From: "DSForms <noreply@example.com>"}
+	msg := m.buildMail("to@example.com", "Hi\r\nDate: bogus", "body", time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC))
+	// Count header lines, not substrings: the injected text survives flattened
+	// into the Subject line, which is exactly the point — it is no longer a header.
+	var dateHeaders int
+	for _, line := range strings.Split(msg, "\r\n") {
+		if strings.HasPrefix(line, "Date:") {
+			dateHeaders++
+		}
+	}
+	if dateHeaders != 1 {
+		t.Errorf("want exactly one Date header line, got %d\nmessage:\n%s", dateHeaders, msg)
+	}
+	if !strings.Contains(msg, "Subject: HiDate: bogus\r\n") {
+		t.Errorf("injected CRLF should be stripped into the Subject line\nmessage:\n%s", msg)
 	}
 }
 
