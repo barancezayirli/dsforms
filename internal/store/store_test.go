@@ -313,6 +313,45 @@ func TestCreateSubmissionListSubmissions(t *testing.T) {
 	}
 }
 
+// TestCreateSubmissionPersistsCreatedAt pins that a caller-supplied CreatedAt is
+// the value written to the row, so the timestamp the notification email reports
+// is the same one the admin UI shows.
+func TestCreateSubmissionPersistsCreatedAt(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	want := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
+	if err := s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`, CreatedAt: want}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	sub, err := s.GetSubmission("s1")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if !sub.CreatedAt.Equal(want) {
+		t.Errorf("CreatedAt = %v, want %v", sub.CreatedAt, want)
+	}
+}
+
+// TestCreateSubmissionZeroCreatedAtDefaultsToNow keeps callers that leave
+// CreatedAt unset (tests, future call sites) from writing year 0001 rows.
+func TestCreateSubmissionZeroCreatedAtDefaultsToNow(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "m@e.com"})
+	before := time.Now().UTC().Add(-2 * time.Second)
+	if err := s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	sub, err := s.GetSubmission("s1")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if sub.CreatedAt.Before(before) {
+		t.Errorf("CreatedAt = %v, want a time at or after %v", sub.CreatedAt, before)
+	}
+}
+
 func TestMarkRead(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)

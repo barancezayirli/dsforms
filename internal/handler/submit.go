@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/mail"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -144,12 +145,18 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Stamp CreatedAt here rather than leaving it to the column default: this
+	// struct is what the notification goroutine hands to the mailer and webhook,
+	// and a zero time.Time renders as "01 Jan 0001" in the email Date header.
+	// Truncated to the second because that is the resolution the row stores, so
+	// the email and the admin UI report the identical timestamp.
 	sub := store.Submission{
-		ID:      uuid.New().String(),
-		FormID:  formID,
-		RawData: string(rawData),
-		Data:    data,
-		IP:      ip,
+		ID:        uuid.New().String(),
+		FormID:    formID,
+		RawData:   string(rawData),
+		Data:      data,
+		IP:        ip,
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
 	}
 	if err := h.Store.CreateSubmission(sub); err != nil {
 		log.Printf("submit: failed to save submission: %v", err)

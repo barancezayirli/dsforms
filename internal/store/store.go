@@ -547,11 +547,25 @@ func (s *Store) DeleteForm(id string) error {
 	return nil
 }
 
-// CreateSubmission creates a new submission.
+// sqliteTime is the text layout SQLite's own datetime('now') produces. Times
+// written from Go must use it: created_at columns are TEXT, so ORDER BY compares
+// them as strings and a different layout (RFC3339's "T" separator, say) would
+// sort inconsistently against rows written by the column default.
+const sqliteTime = "2006-01-02 15:04:05"
+
+// CreateSubmission creates a new submission. created_at is written explicitly so
+// the caller's Submission carries the same timestamp as the stored row — the
+// notification email formats its Date header from the in-memory struct, which
+// left to the column default would be a zero time.Time. A zero CreatedAt falls
+// back to now rather than writing a year 0001 row.
 func (s *Store) CreateSubmission(sub Submission) error {
+	createdAt := sub.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
 	_, err := s.db.Exec(
-		"INSERT INTO submissions (id, form_id, data, ip) VALUES (?, ?, ?, ?)",
-		sub.ID, sub.FormID, sub.RawData, sub.IP,
+		"INSERT INTO submissions (id, form_id, data, ip, created_at) VALUES (?, ?, ?, ?, ?)",
+		sub.ID, sub.FormID, sub.RawData, sub.IP, createdAt.UTC().Format(sqliteTime),
 	)
 	if err != nil {
 		return fmt.Errorf("create submission: %w", err)
