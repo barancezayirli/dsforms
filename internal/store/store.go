@@ -39,6 +39,10 @@ type Form struct {
 	WebhookURL    string
 	WebhookFormat string
 	CreatedAt     time.Time
+
+	// SpamThreshold overrides the instance-wide threshold for this form.
+	// 0 means inherit — not "hold everything", which is why it is not nullable.
+	SpamThreshold int
 }
 
 // FormSummary is a Form with its unread submission count.
@@ -551,8 +555,8 @@ func (s *Store) CheckPassword(username, password string) (User, error) {
 // CreateForm creates a new form.
 func (s *Store) CreateForm(f Form) error {
 	_, err := s.db.Exec(
-		"INSERT INTO forms (id, name, email_to, redirect, webhook_url, webhook_format) VALUES (?, ?, ?, ?, ?, ?)",
-		f.ID, f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat,
+		"INSERT INTO forms (id, name, email_to, redirect, webhook_url, webhook_format, spam_threshold) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		f.ID, f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.SpamThreshold,
 	)
 	if err != nil {
 		return fmt.Errorf("create form: %w", err)
@@ -564,9 +568,9 @@ func (s *Store) CreateForm(f Form) error {
 func (s *Store) GetForm(id string) (Form, error) {
 	var f Form
 	err := s.db.QueryRow(
-		"SELECT id, name, email_to, redirect, webhook_url, webhook_format, created_at FROM forms WHERE id = ?",
+		"SELECT id, name, email_to, redirect, webhook_url, webhook_format, created_at, spam_threshold FROM forms WHERE id = ?",
 		id,
-	).Scan(&f.ID, &f.Name, &f.EmailTo, &f.Redirect, &f.WebhookURL, &f.WebhookFormat, &f.CreatedAt)
+	).Scan(&f.ID, &f.Name, &f.EmailTo, &f.Redirect, &f.WebhookURL, &f.WebhookFormat, &f.CreatedAt, &f.SpamThreshold)
 	if err != nil {
 		return Form{}, fmt.Errorf("get form: %w", err)
 	}
@@ -576,7 +580,7 @@ func (s *Store) GetForm(id string) (Form, error) {
 // ListForms returns all forms with unread counts.
 func (s *Store) ListForms() ([]FormSummary, error) {
 	rows, err := s.db.Query(`
-		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at,
+		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at, f.spam_threshold,
 		       COUNT(CASE WHEN s.read = 0 AND s.is_held = 0 THEN 1 END) as unread_count
 		FROM forms f
 		LEFT JOIN submissions s ON s.form_id = f.id
@@ -591,7 +595,7 @@ func (s *Store) ListForms() ([]FormSummary, error) {
 	var forms []FormSummary
 	for rows.Next() {
 		var fs FormSummary
-		if err := rows.Scan(&fs.ID, &fs.Name, &fs.EmailTo, &fs.Redirect, &fs.WebhookURL, &fs.WebhookFormat, &fs.CreatedAt, &fs.UnreadCount); err != nil {
+		if err := rows.Scan(&fs.ID, &fs.Name, &fs.EmailTo, &fs.Redirect, &fs.WebhookURL, &fs.WebhookFormat, &fs.CreatedAt, &fs.SpamThreshold, &fs.UnreadCount); err != nil {
 			return nil, fmt.Errorf("list forms: %w", err)
 		}
 		forms = append(forms, fs)
@@ -605,8 +609,8 @@ func (s *Store) ListForms() ([]FormSummary, error) {
 // UpdateForm updates a form's fields.
 func (s *Store) UpdateForm(f Form) error {
 	_, err := s.db.Exec(
-		"UPDATE forms SET name = ?, email_to = ?, redirect = ?, webhook_url = ?, webhook_format = ? WHERE id = ?",
-		f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.ID,
+		"UPDATE forms SET name = ?, email_to = ?, redirect = ?, webhook_url = ?, webhook_format = ?, spam_threshold = ? WHERE id = ?",
+		f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.SpamThreshold, f.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update form: %w", err)

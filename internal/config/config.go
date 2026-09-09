@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/youruser/dsforms/internal/spam"
 )
 
 // Config holds all application configuration loaded from environment variables.
@@ -22,6 +24,11 @@ type Config struct {
 	RateBurst     int
 	RatePerMinute int
 
+	// SpamThreshold is the instance-wide score at or above which a submission
+	// is held for review. A form may override it; spam.DefaultThreshold is the
+	// fallback when neither is set.
+	SpamThreshold int
+
 	BroadcastThrottleMs  int
 	BroadcastMaxAttempts int
 
@@ -32,21 +39,48 @@ type Config struct {
 // It panics on missing required values so the app fails fast at startup.
 func Load() Config {
 	return Config{
-		ListenAddr:     envOr("LISTEN_ADDR", ":8080"),
-		BaseURL:        os.Getenv("BASE_URL"),
-		DBPath:         envOr("DB_PATH", "/data/dsforms.db"),
-		SecretKey:      requireEnv("SECRET_KEY"),
-		SMTPHost:       os.Getenv("SMTP_HOST"),
-		SMTPPort:       envOrInt("SMTP_PORT", 587),
-		SMTPUser:       os.Getenv("SMTP_USER"),
-		SMTPPass:       os.Getenv("SMTP_PASS"),
-		SMTPFrom:       os.Getenv("SMTP_FROM"),
+		ListenAddr:           envOr("LISTEN_ADDR", ":8080"),
+		BaseURL:              os.Getenv("BASE_URL"),
+		DBPath:               envOr("DB_PATH", "/data/dsforms.db"),
+		SecretKey:            requireEnv("SECRET_KEY"),
+		SMTPHost:             os.Getenv("SMTP_HOST"),
+		SMTPPort:             envOrInt("SMTP_PORT", 587),
+		SMTPUser:             os.Getenv("SMTP_USER"),
+		SMTPPass:             os.Getenv("SMTP_PASS"),
+		SMTPFrom:             os.Getenv("SMTP_FROM"),
 		RateBurst:            envOrInt("RATE_BURST", 5),
 		RatePerMinute:        envOrInt("RATE_PER_MINUTE", 6),
 		BroadcastThrottleMs:  envOrInt("BROADCAST_THROTTLE_MS", 200),
 		BroadcastMaxAttempts: envOrInt("BROADCAST_MAX_ATTEMPTS", 3),
 		BackupLocalDir:       os.Getenv("BACKUP_LOCAL_DIR"),
+
+		// 0 means "unset" rather than a real threshold of zero, which would
+		// hold every submission ever received. Clamped because the other end
+		// is just as bad: a very high value silently disables the filter.
+		SpamThreshold: spamThreshold(),
 	}
+}
+
+// spamThreshold resolves SPAM_THRESHOLD. envOrInt only treats an empty string
+// as unset, but an explicit 0 must mean "use the default" too — a literal
+// threshold of zero would hold every submission ever received.
+func spamThreshold() int {
+	n := envOrInt("SPAM_THRESHOLD", spam.DefaultThreshold)
+	if n == 0 {
+		return spam.DefaultThreshold
+	}
+	return clampInt(n, 1, 20)
+}
+
+// clampInt bounds v to [lo, hi].
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func requireEnv(key string) string {

@@ -463,7 +463,7 @@ func TestSubmitNoWebhook(t *testing.T) {
 	}
 }
 
-func TestSubmitSpamDropped(t *testing.T) {
+func TestSubmitSpamHeld(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
 	form := url.Values{
@@ -475,17 +475,27 @@ func TestSubmitSpamDropped(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	// Mirrors the honeypot: looks successful (redirect), stores nothing.
+	// The response still looks like success — a bot must not learn it was
+	// caught — but the submission is now held for review rather than binned.
 	if w.Code != http.StatusFound {
-		t.Errorf("status = %d, want 302 (silent drop)", w.Code)
+		t.Errorf("status = %d, want 302 (indistinguishable from success)", w.Code)
 	}
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 0 {
-		t.Errorf("submissions = %d, want 0 (spam dropped)", len(subs))
+		t.Errorf("submissions = %d, want 0 (spam kept out of the inbox)", len(subs))
+	}
+	// Asserting the inbox is empty is not enough on its own: that would also
+	// hold if quarantine were reverted to a silent drop.
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("held = %d, want 1 — spam must be recoverable, not discarded", len(held))
 	}
 }
 
-func TestSubmitSpamDroppedJSON(t *testing.T) {
+func TestSubmitSpamHeldJSON(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
 	form := url.Values{
@@ -499,7 +509,7 @@ func TestSubmitSpamDroppedJSON(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 (JSON silent drop)", w.Code)
+		t.Errorf("status = %d, want 200 (JSON response indistinguishable from success)", w.Code)
 	}
 	var body map[string]bool
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
@@ -510,7 +520,7 @@ func TestSubmitSpamDroppedJSON(t *testing.T) {
 	}
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 0 {
-		t.Errorf("submissions = %d, want 0 (spam dropped)", len(subs))
+		t.Errorf("submissions = %d, want 0 (spam kept out of the inbox)", len(subs))
 	}
 }
 
@@ -561,7 +571,7 @@ func TestSubmitNoEmailNoWebhook(t *testing.T) {
 	}
 }
 
-func TestSubmitThirdSameIPDropped(t *testing.T) {
+func TestSubmitThirdSameIPHeld(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
 
@@ -580,20 +590,26 @@ func TestSubmitThirdSameIPDropped(t *testing.T) {
 	w := submit()
 
 	if w.Code != http.StatusFound {
-		t.Errorf("3rd submission status = %d, want 302 (silent drop)", w.Code)
+		t.Errorf("3rd submission status = %d, want 302 (indistinguishable from success)", w.Code)
 	}
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 2 {
-		t.Errorf("submissions = %d, want 2 (1st and 2nd stored, 3rd dropped)", len(subs))
+		t.Errorf("submissions = %d, want 2 (1st and 2nd accepted, 3rd held)", len(subs))
+	}
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("held = %d, want 1 — the 3rd is quarantined, not discarded", len(held))
 	}
 }
 
 // TestSubmitContentSpamStillCountsTowardIPRepeat pins the invariant that
-// Tracker.Seen runs on every submission, including ones already rejected by
-// content scoring. If Seen were folded into the `||` short-circuit
-// (`spam.IsSpam(data) || h.Tracker.Seen(...)`), the two spam submissions below
-// would never be counted, and the 3rd — clean content from the same IP — would
-// be stored instead of dropped.
+// Tracker.Seen runs on every submission, including ones already caught by
+// content scoring. If Seen were moved inside the scoring branch, the two spam
+// submissions below would never be counted, and the 3rd — clean content from
+// the same IP — would be accepted instead of held.
 func TestSubmitContentSpamStillCountsTowardIPRepeat(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
@@ -611,15 +627,15 @@ func TestSubmitContentSpamStillCountsTowardIPRepeat(t *testing.T) {
 	// 1st and 2nd: markup-link spam — an instant drop on content score alone.
 	submit(`<a href="http://x.com">click</a>`)
 	submit(`<a href="http://y.com">click</a>`)
-	// 3rd: perfectly clean content, same IP — must still be dropped as a repeat.
+	// 3rd: perfectly clean content, same IP — must still be held as a repeat.
 	w := submit("hello there, loved the talk")
 
 	if w.Code != http.StatusFound {
-		t.Errorf("3rd submission status = %d, want 302 (silent drop)", w.Code)
+		t.Errorf("3rd submission status = %d, want 302 (indistinguishable from success)", w.Code)
 	}
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 0 {
-		t.Errorf("submissions = %d, want 0 (2 spam dropped, 3rd dropped as IP repeat)", len(subs))
+		t.Errorf("submissions = %d, want 0 (2 spam held, 3rd held as IP repeat)", len(subs))
 	}
 }
 

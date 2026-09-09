@@ -48,6 +48,11 @@ var templateFS embed.FS
 //go:embed static/*
 var staticFS embed.FS
 
+// quarantineRetention is how long a held submission stays reviewable before it
+// is deleted. The quarantine UI states this figure; changing one means changing
+// both.
+const quarantineRetention = 30 * 24 * time.Hour
+
 // version is stamped at build time with -ldflags "-X main.version=…" and shown
 // in the sidebar. It stays "dev" for a plain `go build`.
 var version = "dev"
@@ -397,6 +402,28 @@ func main() {
 		}
 	}()
 
+	// Quarantine retention. Held submissions are reviewable for 30 days and then
+	// deleted — the promise the UI makes, and the reason holding spam does not
+	// grow the database without bound. Sweeps once at startup so an instance
+	// that is restarted more often than daily still expires things.
+	go func() {
+		purge := func() {
+			n, err := s.PurgeHeldOlderThan(time.Now().UTC().Add(-quarantineRetention))
+			if err != nil {
+				log.Printf("quarantine purge error: %v", err)
+				return
+			}
+			if n > 0 {
+				log.Printf("quarantine: purged %d submission(s) held longer than %s", n, quarantineRetention)
+			}
+		}
+		purge()
+		ticker := time.NewTicker(24 * time.Hour)
+		for range ticker.C {
+			purge()
+		}
+	}()
+
 	templates, err := parseTemplates()
 	if err != nil {
 		log.Fatalf("failed to parse templates: %v", err)
@@ -436,11 +463,12 @@ func main() {
 	}
 
 	submitHandler := &handler.SubmitHandler{
-		Store:    s,
-		Notifier: mailer,
-		Webhook:  webhookSender,
-		BaseURL:  cfg.BaseURL,
-		Tracker:  spam.NewTracker(10000),
+		Store:            s,
+		Notifier:         mailer,
+		Webhook:          webhookSender,
+		BaseURL:          cfg.BaseURL,
+		Tracker:          spam.NewTracker(10000),
+		DefaultThreshold: cfg.SpamThreshold,
 	}
 
 	limiter := ratelimit.NewLimiter(cfg.RateBurst, cfg.RatePerMinute, time.Now)

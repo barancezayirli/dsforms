@@ -9,7 +9,7 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Vendored assets (Inter, Phosphor), Nocturne tokens, `base.html` shell | **done** |
-| 1 | `spam.Detail`/`Signal`/`DefaultThreshold`, `config.SpamThreshold`, schema, store methods | spam + schema + store done; config next |
+| 1 | `spam.Detail`/`Signal`/`DefaultThreshold`, `config.SpamThreshold`, schema, store methods | **done** |
 | 2 | Submit-handler rewiring (allow → block → honeypot → score → hold) | not started |
 | 3 | Forms, form detail, reader drawer | not started |
 | 4 | Quarantine + breakdown, Filter rules | not started |
@@ -24,6 +24,8 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 |---|---|---|
 | Module path `github.com/youruser/dsforms` → `github.com/barancezayirli/dsforms` | `go.mod` and every import use `youruser`; `CLAUDE.md` documents `barancezayirli`. A rename touches every file and would bury the redesign diff. | Its own PR after this branch merges |
 | Screenshots in `docs/screenshots/` for the landing page's Admin UI section | The handoff ships a hand-built mock; real screenshots can only be taken once the admin is running. | Phase 8, after Phase 6 |
+| `SPAM_THRESHOLD` in `README.md` config table and `.env.example` | The config value landed in Phase 1; docs are batched into the Phase 8 documentation pass. | Phase 8 |
+| `ratelimit.Limiter.Snapshot()` for the Home rate-limit panel | Only consumed by the Home screen. | Phase 5 |
 
 ## Open questions
 

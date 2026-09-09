@@ -262,3 +262,55 @@ func TestIsSpamUsesDefaultThreshold(t *testing.T) {
 		t.Error("a lone keyword scores below DefaultThreshold and must not be spam")
 	}
 }
+
+// TestDetailWithCustomKeywords covers the operator-supplied keyword list from
+// internal/filter. Custom keywords score exactly like built-in ones — the point
+// of feeding them through the scorer rather than short-circuiting is that a
+// single keyword still never holds a submission on its own.
+func TestDetailWithCustomKeywords(t *testing.T) {
+	t.Parallel()
+
+	data := map[string]string{"message": "join our telegram pump group today"}
+
+	if score, signals := Detail(data); score != 0 || signals != nil {
+		t.Fatalf("baseline: Detail() = %d, %+v; want a clean submission", score, signals)
+	}
+
+	score, signals := DetailWith(data, []string{"telegram pump"})
+	if score != keywordWeight {
+		t.Errorf("score = %d, want %d", score, keywordWeight)
+	}
+	want := []Signal{{Rule: "keyword", Field: "message", Match: "telegram pump", Weight: keywordWeight}}
+	if !reflect.DeepEqual(signals, want) {
+		t.Errorf("signals = %+v, want %+v", signals, want)
+	}
+
+	// Below the default threshold, so a custom keyword alone must not hold.
+	if score >= DefaultThreshold {
+		t.Errorf("a lone custom keyword scores %d, which is at or above the threshold %d — "+
+			"custom keywords must pile up, not drop on their own", score, DefaultThreshold)
+	}
+}
+
+// A custom keyword duplicating a built-in one must not score twice.
+func TestDetailWithCustomKeywordsDeduplicates(t *testing.T) {
+	t.Parallel()
+	score, signals := DetailWith(map[string]string{"message": "buy backlinks"}, []string{"backlinks", "backlinks"})
+	if score != keywordWeight {
+		t.Errorf("score = %d, want %d (one hit, not three)", score, keywordWeight)
+	}
+	if len(signals) != 1 {
+		t.Errorf("got %d signals, want 1: %+v", len(signals), signals)
+	}
+}
+
+func TestDetailWithNilKeywordsMatchesDetail(t *testing.T) {
+	t.Parallel()
+	data := map[string]string{"name": "http://x.example", "message": "casino [url=http://y]z[/url]"}
+	wantScore, wantSignals := Detail(data)
+	gotScore, gotSignals := DetailWith(data, nil)
+	if gotScore != wantScore || !reflect.DeepEqual(gotSignals, wantSignals) {
+		t.Errorf("DetailWith(data, nil) disagrees with Detail(data):\n  %d %+v\n  %d %+v",
+			gotScore, gotSignals, wantScore, wantSignals)
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/youruser/dsforms/internal/filter"
 	"github.com/youruser/dsforms/internal/spam"
 	"github.com/youruser/dsforms/internal/store"
 )
@@ -34,6 +35,24 @@ type SubmitHandler struct {
 	Webhook  WebhookSender
 	BaseURL  string
 	Tracker  *spam.Tracker
+
+	// DefaultThreshold is the instance-wide spam threshold from config. A form
+	// may override it; zero falls back to spam.DefaultThreshold.
+	DefaultThreshold int
+}
+
+// effectiveThreshold resolves the score at which this form holds a submission:
+// the form's own setting, else the instance default, else the package default.
+// Zero means "unset" at every level — a literal threshold of zero would hold
+// every submission ever received.
+func (h *SubmitHandler) effectiveThreshold(form store.Form) int {
+	if form.SpamThreshold > 0 {
+		return form.SpamThreshold
+	}
+	if h.DefaultThreshold > 0 {
+		return h.DefaultThreshold
+	}
+	return spam.DefaultThreshold
 }
 
 // internalFields lists form field names that are never stored in submission data.
@@ -67,11 +86,24 @@ func emailFieldValid(data map[string]string) bool {
 //  5. Validate: data map must have ≥1 key → else 400
 //  6. Validate: an "email" field, if present, must be a well-formed address → else 400
 //  7. Determine redirect: _redirect > form.Redirect > /success; extract client IP
-//  8. Spam check: if IsSpam(data) or this is the 3rd+ submission from this IP to
-//     this form → silently succeed without saving (mirrors honeypot)
-//  9. Save submission to DB
-//  10. Send email and webhook notifications async
-//  11. Respond (JSON or redirect)
+//  8. Filter rules: allow → accept and skip scoring; block → hold on arrival
+//  9. Otherwise score, plus repeat-IP; at or above the effective threshold → hold
+//  10. Held submissions are stored with their breakdown and notify nobody
+//  11. Otherwise save, send email and webhook notifications async
+//  12. Respond (JSON or redirect) — identical whether held or accepted
+//
+// The honeypot is checked before the filter rules, not after as the design
+// handoff specified: allow rules match on the submitted email field, which is
+// attacker-controlled, so consulting them first would let a bot bypass the
+// honeypot by naming an allowlisted address.
+// countRuleHit records that a filter rule matched, for the "N blocked" column
+// in the rules screen. A failure here must not affect the submission.
+func (h *SubmitHandler) countRuleHit(id string) {
+	if err := h.Store.IncrementRuleHits(id); err != nil {
+		log.Printf("submit: incrementing hits for rule %s: %v", id, err)
+	}
+}
+
 func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "formID")
 	form, err := h.Store.GetForm(formID)
@@ -119,21 +151,83 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	redirectURL := determineRedirect(r.FormValue("_redirect"), form.Redirect)
 	ip := ExtractIP(r)
 
-	// Content spam or repeat-IP abuse — silently drop like the honeypot: look
-	// successful, store nothing. Tracker.Seen must run unconditionally — it also
-	// records the submission, so short-circuiting on IsSpam via || would skip
-	// the call and undercount this IP's repeat tally whenever content scoring
-	// already caught it first. Guarded by
-	// TestSubmitContentSpamStillCountsTowardIPRepeat, not by this comment alone.
+	// Tracker.Seen must run unconditionally — it also *records* the submission,
+	// so short-circuiting it behind a content check would undercount this IP's
+	// repeat tally whenever content scoring caught the submission first.
+	// Guarded by TestSubmitContentSpamStillCountsTowardIPRepeat.
 	repeated := h.Tracker.Seen(formID, ip)
-	contentSpam := spam.IsSpam(data)
-	if contentSpam || repeated {
-		// Log which signal fired so an operator can answer "a customer says they
-		// submitted and never heard back". Field values are deliberately never
-		// logged — the drop reason is diagnosable without copying submission
-		// content (or spam payloads) into the log.
-		log.Printf("submit: dropped submission for form %s from %s (content_spam=%v score=%d, ip_repeat=%v)",
-			formID, ip, contentSpam, spam.Score(data), repeated)
+
+	// Operator overrides beat the scorer in both directions. A failure to read
+	// them is not fatal: fall through to scoring rather than refusing the
+	// submission, since losing real mail is the worse error.
+	rules, err := h.Store.ListFilterRules()
+	if err != nil {
+		log.Printf("submit: form %s: reading filter rules: %v", formID, err)
+	}
+	matched, ruleHit := filter.Match(rules, data, ip)
+
+	threshold := h.effectiveThreshold(form)
+	var (
+		score   int
+		signals []spam.Signal
+		held    bool
+	)
+
+	switch {
+	case ruleHit && matched.Kind == filter.KindAllow:
+		// Accepted outright, scoring skipped — including the repeat-IP check,
+		// which is the point of an allowlist entry for a busy office NAT.
+		h.countRuleHit(matched.ID)
+
+	case ruleHit && matched.Kind == filter.KindBlock:
+		// Held whatever the content scores. The score is stamped at the
+		// threshold so the quarantine meter reads as a full bar rather than
+		// implying the content itself was damning.
+		held = true
+		score = threshold
+		signals = []spam.Signal{{Rule: "rule", Field: matched.Type, Match: matched.Value, Weight: threshold}}
+		h.countRuleHit(matched.ID)
+
+	default:
+		score, signals = spam.DetailWith(data, filter.Keywords(rules))
+		if repeated {
+			// Repeat-IP is stateful and lives outside the scorer, so it is
+			// stamped here. Weighted at the threshold so it holds on its own —
+			// matching the old behaviour, where a repeat IP was an outright
+			// drop — while keeping the breakdown's weights summing to the score.
+			signals = append(signals, spam.Signal{Rule: "repeat_ip", Match: ip, Weight: threshold})
+			score += threshold
+		}
+		held = score >= threshold
+	}
+
+	if held {
+		// Held, not dropped. The response below is indistinguishable from
+		// success so a bot learns nothing, but the submission is now
+		// recoverable: internal/spam used to bin it with no record at all, and
+		// a false positive was unrecoverable.
+		//
+		// Field values are never logged — the reason is diagnosable without
+		// copying submission content, or a spam payload, into the log.
+		log.Printf("submit: held submission for form %s from %s (score=%d threshold=%d signals=%d)",
+			formID, ip, score, threshold, len(signals))
+
+		sub := store.Submission{
+			ID:        uuid.New().String(),
+			FormID:    formID,
+			Data:      data,
+			IP:        ip,
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		}
+		storeSignals := make([]store.SpamSignal, 0, len(signals))
+		for _, sig := range signals {
+			storeSignals = append(storeSignals, store.SpamSignal{
+				Rule: sig.Rule, Field: sig.Field, Match: sig.Match, Weight: sig.Weight,
+			})
+		}
+		if err := h.Store.CreateHeldSubmission(sub, score, threshold, storeSignals); err != nil {
+			log.Printf("submit: failed to hold submission for form %s: %v", formID, err)
+		}
 		respondSuccess(w, r, formID, redirectURL)
 		return
 	}

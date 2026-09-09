@@ -59,6 +59,37 @@ type Signal struct {
 // The weights always sum to the score. The breakdown panel shows both, and a
 // breakdown that does not add up to the number beside it is worse than none.
 func Detail(data map[string]string) (int, []Signal) {
+	return DetailWith(data, nil)
+}
+
+// DetailWith is Detail plus operator-supplied keywords from internal/filter.
+//
+// Custom keywords score at the same keywordWeight as the built-in list rather
+// than short-circuiting to a hold. That is deliberate and is the whole reason
+// they run through the scorer: it preserves the rule that a single keyword hit
+// never holds a submission on its own, so an operator who adds an overly broad
+// word does not silently start losing real mail. An operator who genuinely
+// wants an instant hold has block rules for that.
+func DetailWith(data map[string]string, extraKeywords []string) (int, []Signal) {
+	keywords := spamKeywords
+	if len(extraKeywords) > 0 {
+		// Deduplicate against the built-in list and against itself, or a
+		// keyword supplied twice would score twice for one hit.
+		seen := make(map[string]bool, len(spamKeywords)+len(extraKeywords))
+		for _, kw := range spamKeywords {
+			seen[kw] = true
+		}
+		keywords = append([]string(nil), spamKeywords...)
+		for _, kw := range extraKeywords {
+			kw = strings.ToLower(strings.TrimSpace(kw))
+			if kw == "" || seen[kw] {
+				continue
+			}
+			seen[kw] = true
+			keywords = append(keywords, kw)
+		}
+	}
+
 	keys := make([]string, 0, len(data))
 	for key := range data {
 		keys = append(keys, key)
@@ -101,7 +132,7 @@ func Detail(data map[string]string) (int, []Signal) {
 		}
 
 		// High-confidence keyword hits, once per keyword however often it recurs.
-		for _, kw := range spamKeywords {
+		for _, kw := range keywords {
 			if strings.Contains(lower, kw) {
 				score += keywordWeight
 				signals = append(signals, Signal{Rule: "keyword", Field: key, Match: kw, Weight: keywordWeight})
