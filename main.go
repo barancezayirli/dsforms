@@ -35,7 +35,8 @@ import (
 // point of use and with a worse message; pinning it here also documents which
 // interfaces each type is expected to serve.
 //
-// A new consumer interface belongs in this block.
+// A new consumer interface belongs here, unless its consumer pins it itself —
+// broadcaster.Store is asserted in broadcaster.go, next to the interface.
 var (
 	_ handler.Notifier           = (*mail.Mailer)(nil)
 	_ handler.ConfirmationMailer = (*mail.Mailer)(nil)

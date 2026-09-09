@@ -194,8 +194,8 @@ const (
 // rather than producing a blank icon and an empty label.
 // Keyed by spam.Rule so the value set has one definition, but Go does not
 // exhaustiveness-check a map literal: adding a rule without a label here
-// compiles cleanly and go vet says nothing. TestRuleIconAndLabel is the guard,
-// and it ranges spam.AllRules so it cannot fall behind the constants either.
+// compiles cleanly and go vet says nothing. TestRuleIconAndLabelFallBack is the
+// guard, and it ranges spam.AllRules so it cannot fall behind the constants.
 var ruleIcons = map[spam.Rule]string{
 	spam.RuleMarkup:     "link",
 	spam.RuleKeyword:    "text-aa",

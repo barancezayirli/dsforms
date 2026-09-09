@@ -75,26 +75,32 @@ are no cycles.
 
 ```
 main.go        config, store, handler construction, routes, CLI — no logic
-  │            also constructs broadcaster and webhook and wires them into
-  │            handler through the interfaces handler declares
+  │            also constructs mail, webhook and broadcaster, and wires them
+  │            into handler through the interfaces handler declares
   └── handler  HTTP: request → store/domain calls → template
-        ├── auth · backup · mail        (imported directly)
+        ├── auth · backup               (imported directly)
         ├── store                       every SQL statement in the project
-        └── filter · spam · ratelimit · flash · safe   (leaves, imported directly)
+        └── filter · spam · ratelimit · flash · safe   (leaves)
 ```
 
 `store` imports `filter` and `spam`; `config` imports `spam` for
-`spam.DefaultThreshold`; `broadcaster` imports `store` and `safe`.
+`spam.DefaultThreshold`; `broadcaster` imports `store`, `filter`, `spam`, `safe`.
 
-Note what `handler` does *not* import: `broadcaster` and `webhook`. It reaches
-both only through interfaces it declares itself, which is the rule below made
-concrete.
+Note what `handler` does *not* import: **`mail`, `webhook` and `broadcaster`**.
+It reaches all three only through interfaces it declares itself, which is the
+rule below made concrete. `go list -deps ./internal/handler` is the check — the
+diagram claimed `mail` for two rounds because nobody ran it.
 
 **Rules that follow:**
 
-- **Leaves stay leaves.** `spam`, `filter`, `ratelimit` and `flash` import
-  nothing from `internal/`. That is what makes them testable without a database.
-  `store` imports `filter` and `spam` — downward, and fine.
+- **Leaves stay leaves.** `spam`, `filter`, `flash` and `safe` import nothing
+  from `internal/` at all; `ratelimit` imports only `safe`. That is what makes
+  them testable without a database. `store` imports `filter` and `spam` —
+  downward, and fine.
+
+  `safe` is the one permitted exception, because it has no dependencies of its
+  own and every layer needs it: a goroutine anywhere that is not guarded can take
+  the process down. Anything else in a leaf is a design error.
 - **All SQL lives in `internal/store`.** Handlers never touch `db.Query`. A
   handler that needs data needs a store method.
 - **Interfaces are declared by the consumer**, never by the implementer.
@@ -110,8 +116,13 @@ concrete.
 
 Check first whether the logic belongs in an existing leaf. A package earns its
 place when it has its own vocabulary and is testable alone — `internal/filter`
-qualified (validation and matching with no database); one helper function would
-not.
+qualified (validation and matching with no database); one helper function
+usually would not.
+
+`internal/safe` is the deliberate exception and worth stating so nobody deletes
+it on that rule: it is a single function, but it is needed from `main`,
+`handler`, `broadcaster` and `ratelimit`, and every other home would invert the
+dependency direction.
 
 ### Modularity: check before you write
 
@@ -162,15 +173,23 @@ the operator to search the wrong screen. An inaccurate message is worse than a
 generic one.
 
 **Panics.** Only at startup, and only for something a running process cannot
-fix: `config.Load()` on a missing required env var, and the leaf constructors
+fix: in `config` for a missing required env var **and for a malformed integer
+one** (`envOrInt` — a bad `BROADCAST_MAX_ATTEMPTS` or `SPAM_THRESHOLD` is a
+refusal to start, not a fallback), and in the leaf constructors
 (`ratelimit.NewLimiter`, `ratelimit.NewLoginGuard`, `spam.NewTracker`) on a
 programmer-error argument. Never during a request.
 
-**Goroutines.** Anything outliving a request runs through `safe.Do`, which
-recovers and logs — because a `recover()` only catches panics in its *own*
-goroutine, so an unguarded worker takes the whole process down with it. Wrap a
-background *loop* per iteration rather than per goroutine, so one bad tick costs
-one tick.
+**Goroutines.** Run anything outliving a request through `safe.Do`, which
+recovers and logs — a `recover()` only catches panics in its *own* goroutine, so
+an unguarded worker takes the whole process down with it. Wrap a background
+*loop* per iteration rather than per goroutine, so one bad tick costs one tick.
+
+Two caveats learned the hard way. Recovering is not enough on its own: the
+broadcaster's loop read the recovered iteration's zero values as "the queue is
+empty" and retried the same poisoned row forever, so a guarded loop must still
+surface the panic to its own control flow. And "every goroutine is guarded" is a
+claim to check, not to assert — `grep 'go func'` found two loops in `ratelimit`
+that this rule had already been claiming for a round.
 
 **Time.** Inject the clock where behaviour depends on it — `func() time.Time` as
 `ratelimit.NewLimiter` takes, a `now` parameter as `ageSince` takes, or a
@@ -193,6 +212,22 @@ was supposed to prevent. What closes it is `spam.AllRules` next to the constants
 ranged by the coverage test, plus a test that derives the constant list from the
 package's own AST so the slice cannot fall behind either. A guarantee like this
 has to be built; naming the type is only the first half.
+
+**In a switch over a closed value set, the safe outcome is never `default`.**
+Name every case and let the default deny, log, or skip. Written from three
+instances on one branch: a validator whose `default` was the *accepting* branch,
+a rules screen that filed an unrecognised kind under "Blocked" while the matcher
+ignored it, and a matcher that fell through to "no match" — which for a block
+rule is fail-open. The enumerated cases get handled; the remainder silently takes
+whichever path was written last.
+
+**Close the mechanism, not the reported instance.** A review names an example; fix
+the general form. This branch had the same filter bypass found open in three
+consecutive rounds because each fix addressed the layer that was reported — scan
+every field, then the field *name*, then the field *value* — and each regression
+test enumerated that layer's variants. Before committing a fix, ask what layer
+sits beneath the one you just closed, and write the test as a property rather
+than as the list of cases you happened to think of.
 
 **Never hand-count in a comment.** "these five handlers", "thirteen structs",
 "sixteen call sites" — every such count in this repo has been wrong on arrival,
@@ -222,10 +257,13 @@ batch, or be rewritten as a set-based statement. "Empty quarantine" enumerated
 every id and therefore failed on exactly the queue large enough to need
 emptying — see `DeleteAllHeld`.
 
-**Timestamps.** Always `.UTC().Format(sqliteTime)`. Handing a `time.Time` to the
-driver stringifies it as `"… +0000 UTC"`, which `date()` cannot parse; and since
-`created_at` is TEXT, a range comparison against a differently-formatted value is
-silently meaningless.
+**Timestamps.** Always `sqliteTimestamp(t)`. Handing a `time.Time` to the driver
+stringifies it with an offset (`"2026-09-09T17:22:49-07:00"`, or `"… +0000 UTC"`
+depending on the value), which `date()` cannot parse; and since these columns are
+TEXT, a range comparison against a differently-formatted value is a string
+comparison that is silently meaningless. The helper folds in the `.UTC()`
+unconditionally, because four call sites were correct only by tracing the value
+back to a `time.Now().UTC()` a few lines up.
 
 **Ordering.** `ORDER BY created_at` alone is not stable — submissions arriving in
 the same second tie, and tied rows can come back in a different order per query,

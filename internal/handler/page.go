@@ -56,13 +56,16 @@ type PageData struct {
 	//
 	// Each individual log-and-continue is defensible — one dead panel should not
 	// 500 a whole screen — but together they render a fully-formed dashboard
-	// reading zero everywhere, pixel-identical to a fresh install. Any handler
-	// that degrades a value sets this; do not shadow it with a field of the same
-	// name on an embedding struct, because Go promotes the shallower field and
-	// html/template resolves the same way, which silently disconnects the banner.
+	// reading zero everywhere, pixel-identical to a fresh install.
 	//
-	// It is set when the shell's own queries failed, so a page can say so
-	// rather than render zeroed badges that look like an empty instance.
+	// Every handler that degrades a value sets this, and Shell sets it when its
+	// own NavCounts query fails. TestNoStructShadowsAnEmbeddedField is what keeps
+	// it connected: declaring a field of this name on a struct that embeds
+	// PageData silently disconnects the banner, because Go promotes the shallower
+	// field and html/template resolves the same way.
+	//
+	// Fragment responses do not go through base.html, so they render the
+	// "degraded-notice" define directly.
 	Degraded bool
 }
 

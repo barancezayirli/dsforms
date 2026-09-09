@@ -16,10 +16,10 @@ const maxMatchRunes = 200
 //
 // A defined type rather than a bare string because the documented value set had
 // already gone stale on arrival: it omitted repeat_ip, which the submit handler
-// stamps rather than the scorer. The values are spread across three packages —
-// this one emits most of them, the submit handler stamps the rest, and the admin
-// owns the display mapping — so one authoritative list is the only thing that
-// keeps them in step. That list is AllRules; this comment deliberately does not
+// stamps rather than the scorer. The values are split between this package,
+// which emits most of them, and internal/handler, which stamps the rest and owns
+// the display mapping — so one authoritative list is the only thing that keeps
+// them in step. That list is AllRules; this comment deliberately does not
 // restate it or count it. It scans to and from SQL exactly like a string.
 type Rule string
 

@@ -76,7 +76,7 @@ func heldColumnsFor(alias string) string {
 // rowScanner is *sql.Row or *sql.Rows.
 type rowScanner interface{ Scan(...any) error }
 
-// scanHeld reads one row of heldColumns.
+// scanHeld reads one row of heldColumns. sc is *sql.Row or *sql.Rows.
 func scanHeld(sc rowScanner) (Submission, error) {
 	return scanHeldExtra(sc)
 }

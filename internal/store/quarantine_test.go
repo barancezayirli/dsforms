@@ -725,7 +725,8 @@ func TestPurgeHeldOlderThanIgnoresAcceptedSubmissions(t *testing.T) {
 // column, so a Submission means the same thing regardless of which function
 // returned it.
 //
-// Four paths selected six of the ten columns, which had two consequences. The
+// Four read paths hand-wrote a subset of the columns, which had two
+// consequences. The
 // schema defaults notified to 1, so an accepted row came back claiming it had
 // never been notified — and a guard written as `if !sub.Notified { send it }`
 // would have fired on every listed submission. And a *restored* submission

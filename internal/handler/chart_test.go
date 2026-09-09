@@ -227,9 +227,10 @@ func TestRuleIconAndLabelFallBack(t *testing.T) {
 	// nameless row with a blank icon.
 	//
 	// Ranged over spam.AllRules rather than a list written out here. Restating
-	// the eight constants made this test a second copy of the value set kept in
-	// step by memory — the same defect the spam.Rule type was introduced to end,
-	// relocated from a doc comment into a test.
+	// the constants made this test a second copy of the value set kept in step by
+	// memory — the same defect the spam.Rule type was introduced to end,
+	// relocated from a doc comment into a test. (The count that used to sit in
+	// this sentence was itself the thing the rule forbids.)
 	for _, rule := range spam.AllRules {
 		if _, ok := ruleIcons[rule]; !ok {
 			t.Errorf("rule %q has no icon", rule)
