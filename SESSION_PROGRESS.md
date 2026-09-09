@@ -25,10 +25,17 @@ Handoff: `reference/design_handoff_dsforms_admin/`
   made `go get github.com/barancezayirli/dsforms` fail outright. It is one isolated
   commit on this branch, so it still reviews and reverts independently.
 
+## Accepted risks
+
+| Risk | Why accepted |
+|---|---|
+| IP and CIDR **allow** rules trust `X-Forwarded-For` | `ExtractIP` has trusted the header unconditionally since before this work, and dsforms is designed to sit behind a reverse proxy that sets it. Allow rules make that a scoring bypass rather than only an attribution problem, so it is worth knowing: an IP allowlist is only safe behind a proxy you control. Email and domain allow rules are not affected — they match the sender field, which the submit handler validates. Re-architecting XFF trust needs a proxy-configuration decision and is out of scope here. |
+
 ## Deferred items
 
 | Item | Why deferred | Target |
 |---|---|---|
+| A "resend notification" action for restored submissions | `notified = 0` on a restored row records a notification that was never sent, but nothing reads the column — no sweep, no retry, no admin action — so a failed send is not retried. Needs UI design. The misleading comment claiming otherwise has been removed. | A follow-up PR |
 | Screenshots in `docs/screenshots/` for the landing page's Admin UI section | The admin section currently describes the four screens in cards rather than showing them. Real screenshots need a populated instance and a decision about what data to show publicly. | A follow-up PR |
 
 ## Open questions

@@ -25,6 +25,8 @@
       </div>
       <p class="card-body" style="flex:none">
         Anything matching a rule here is held on arrival, whatever it scores.
+        Email and domain rules are checked against every field; IP and CIDR
+        rules use the client address.
       </p>
 
       <form method="POST" action="/admin/rules" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
@@ -138,6 +140,13 @@
       <p class="card-body" style="flex:none">
         Never held, whatever the score, and scoring is skipped entirely. Use it
         after a false positive.
+      </p>
+      <!-- Allow rules deliberately match only the sender's own email field.
+           Matching any field would let anyone bypass the filter by mentioning an
+           allowlisted address in a junk field. -->
+      <p class="dim" style="font-size:11px;margin-top:-2px">
+        Matched against the submission's <code>email</code> field only — not any
+        field that happens to contain the address.
       </p>
 
       <form method="POST" action="/admin/rules" style="display:flex;gap:8px">
