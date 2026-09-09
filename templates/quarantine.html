@@ -209,7 +209,8 @@
               </td>
               <td>
                 <div style="display:flex;flex-wrap:wrap;gap:4px">
-                  {{range .Rules}}<span class="tag tag-neutral tag-sm nowrap">{{.}}</span>{{end}}
+                  {{if .SignalsFailed}}<span class="dim" style="font-size:11px">reason unavailable</span>
+                  {{else}}{{range .Rules}}<span class="tag tag-neutral tag-sm nowrap">{{.}}</span>{{end}}{{end}}
                 </div>
               </td>
               <td>

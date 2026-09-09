@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 
@@ -75,7 +76,14 @@ func spamThreshold() int {
 	if n == 0 {
 		return spam.DefaultThreshold
 	}
-	return clampInt(n, 1, 20)
+	clamped := clampInt(n, 1, 20)
+	if clamped != n {
+		// Say so. An operator who sets 100 meaning "effectively off" gets 20,
+		// which quarantines everything scoring 20 or more — the opposite of
+		// their intent, and nothing in the log would have contradicted them.
+		log.Printf("config: SPAM_THRESHOLD %d is out of range, using %d", n, clamped)
+	}
+	return clamped
 }
 
 // clampInt bounds v to [lo, hi].

@@ -45,6 +45,10 @@ type heldRow struct {
 	Signals  []store.SpamSignal
 	From     string
 	Age      string
+
+	// SignalsFailed distinguishes "this submission has no recorded signals"
+	// from "the breakdown could not be read", which look identical otherwise.
+	SignalsFailed bool
 }
 
 // Rules returns the rule names that fired, for the Signals column.
@@ -100,15 +104,25 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 	rows := make([]heldRow, 0, len(held))
 	for _, sub := range held {
 		signals, err := h.Store.SubmissionSignals(sub.ID)
+		signalsFailed := err != nil
 		if err != nil {
+			// Rendering a hold with no stated reason reads as "the filter is
+			// arbitrary" — the exact impression this queue exists to prevent —
+			// so an unreadable breakdown says so instead of showing nothing.
 			log.Printf("quarantine: signals for %s: %v", sub.ID, err)
 		}
+		name := names[sub.FormID]
+		if name == "" {
+			// An opaque id beats a blank cell.
+			name = sub.FormID
+		}
 		rows = append(rows, heldRow{
-			Submission: sub,
-			FormName:   names[sub.FormID],
-			Signals:    signals,
-			From:       senderLabel(sub.Data),
-			Age:        Age(sub.CreatedAt),
+			Submission:    sub,
+			FormName:      name,
+			Signals:       signals,
+			From:          senderLabel(sub.Data),
+			Age:           Age(sub.CreatedAt),
+			SignalsFailed: signalsFailed,
 		})
 	}
 
@@ -314,6 +328,9 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 func (h *QuarantineHandler) formNames() map[string]string {
 	forms, err := h.Store.ListForms()
 	if err != nil {
+		// Callers fall back to the form id. Returning nil blanked the form
+		// column for every row while the page otherwise looked entirely normal,
+		// leaving the operator unable to tell which form each hold came from.
 		log.Printf("quarantine: list forms: %v", err)
 		return nil
 	}

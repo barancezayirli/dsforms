@@ -384,6 +384,7 @@ type formDetailData struct {
 	TotalCount  int
 	UnreadCount int
 	HeldCount   int
+	HeldUnknown bool
 	Pager       Pagination
 }
 
@@ -444,8 +445,18 @@ func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	unread, _ := h.Store.UnreadCount(formID)
-	held, _ := h.Store.HeldCountForForm(formID)
+	unread, err := h.Store.UnreadCount(formID)
+	if err != nil {
+		log.Printf("admin: unread count for %s: %v", formID, err)
+	}
+	// The Held stat is the only per-form sign that this form's submissions are
+	// being quarantined, so a swallowed error here tells an operator debugging
+	// "why did my client's enquiry never arrive" that nothing is held — which
+	// may be false. HeldUnknown makes the template render "—" instead of "0".
+	held, heldErr := h.Store.HeldCountForForm(formID)
+	if heldErr != nil {
+		log.Printf("admin: held count for %s: %v", formID, heldErr)
+	}
 
 	data := formDetailData{
 		PageData:    h.Shell(w, r, form.Name, "forms"),
@@ -454,6 +465,7 @@ func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
 		TotalCount:  total,
 		UnreadCount: unread,
 		HeldCount:   held,
+		HeldUnknown: heldErr != nil,
 		Pager:       pager,
 	}
 	h.Render(w, "form_detail.html", data)

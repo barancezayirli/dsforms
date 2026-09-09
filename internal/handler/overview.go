@@ -82,6 +82,13 @@ type overviewData struct {
 
 	TotalHeld     int
 	RetentionDays int
+
+	// Degraded is set when any panel's query failed. Each individual
+	// log-and-continue is defensible — one dead panel should not 500 the home
+	// page — but together they render a fully-formed dashboard reading zero
+	// everywhere, which is pixel-identical to a fresh install. The overview is
+	// the one screen where a broken instance must be obvious.
+	Degraded bool
 }
 
 // ranges are the periods the header switcher offers.
@@ -109,6 +116,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 	series, err := h.Store.SubmissionsPerDay(days)
 	if err != nil {
 		log.Printf("overview: submissions per day: %v", err)
+		data.Degraded = true
 	}
 
 	accepted := make([]int, 0, len(series))
@@ -135,6 +143,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 	prev, err := h.Store.SubmissionsPerDay(days * 2)
 	if err != nil {
 		log.Printf("overview: previous window: %v", err)
+		data.Degraded = true
 	}
 	prevAccepted := 0
 	if len(prev) >= days {
@@ -146,6 +155,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 	heldRecent, trafficRecent, err := h.Store.HeldSince(days)
 	if err != nil {
 		log.Printf("overview: held since: %v", err)
+		data.Degraded = true
 	}
 
 	data.KPIs = []kpi{
@@ -179,6 +189,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 
 	if tallies, err := h.Store.TopSpamSignals(days); err != nil {
 		log.Printf("overview: top signals: %v", err)
+		data.Degraded = true
 	} else {
 		maxHits := 0
 		for _, t := range tallies {
@@ -197,6 +208,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 
 	if stats, err := h.Store.PerFormStats(); err != nil {
 		log.Printf("overview: per-form stats: %v", err)
+		data.Degraded = true
 	} else {
 		for _, st := range stats {
 			data.Forms = append(data.Forms, formRow{
@@ -209,6 +221,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 
 	if recent, err := h.Store.RecentSubmissions(5); err != nil {
 		log.Printf("overview: recent: %v", err)
+		data.Degraded = true
 	} else {
 		for _, rs := range recent {
 			name := senderLabel(rs.Data)
@@ -232,6 +245,10 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 	if nav.Held > 0 {
 		data.Summary += " · " + plural(nav.Held, "submission") + " held in quarantine"
 	}
+
+	// The shell sets its own Degraded when the nav counts fail; keep whichever
+	// is true so one banner covers both.
+	data.PageData.Degraded = data.PageData.Degraded || data.Degraded
 
 	h.Render(w, "home.html", data)
 }

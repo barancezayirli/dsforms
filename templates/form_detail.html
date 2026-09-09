@@ -34,9 +34,13 @@
     <div class="stat-sub">{{if .UnreadCount}}waiting for you{{else}}inbox zero{{end}}</div>
   </div>
   <div class="card elev-sm stat">
-    <div class="stat-value">{{.HeldCount}}</div>
+    <div class="stat-value">{{if .HeldUnknown}}—{{else}}{{.HeldCount}}{{end}}</div>
     <div class="stat-label">Held</div>
-    <div class="stat-sub">{{if .HeldCount}}<a class="link" href="/admin/quarantine">review them</a>{{else}}nothing quarantined{{end}}</div>
+    <div class="stat-sub">
+      {{if .HeldUnknown}}count unavailable
+      {{else if .HeldCount}}<a class="link" href="/admin/quarantine">review them</a>
+      {{else}}nothing quarantined{{end}}
+    </div>
   </div>
 </div>
 

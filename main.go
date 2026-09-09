@@ -573,6 +573,10 @@ func main() {
 		}
 		digest.Start(24 * time.Hour)
 		log.Printf("quarantine digest enabled (daily to %s)", cfg.DigestTo)
+	} else if cfg.DigestTo != "" {
+		// Otherwise an operator who sets DIGEST_TO waits days for a mail that
+		// was never going to arrive, with nothing in the log to explain it.
+		log.Printf("quarantine digest disabled: DIGEST_TO is set but SMTP is not configured")
 	}
 
 	r := newRouter()

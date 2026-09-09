@@ -129,6 +129,17 @@
       </div>
       {{end}}
 
+      {{if .Degraded}}
+      <!-- Some of this page's data could not be read. Without this, a broken
+           database renders as a fully-formed page reading zero everywhere,
+           which is indistinguishable from a fresh install. -->
+      <div class="notice banner">
+        <svg class="i"><use href="#ph-warning"/></svg>
+        <span>Some data could not be loaded, so counts on this page may be
+              wrong or missing. Check the server log.</span>
+      </div>
+      {{end}}
+
       {{if .Flash}}
       <div class="notice flash flash-{{.Flash.Type}}">
         <svg class="i"><use href="#ph-{{if eq .Flash.Type "error"}}warning{{else}}check-circle{{end}}"/></svg>

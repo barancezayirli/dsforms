@@ -58,6 +58,10 @@ type PageData struct {
 	Flash       *FlashData
 	Nav         NavCounts
 	DB          DBStatus
+
+	// Degraded is set when the shell's own queries failed, so a page can say so
+	// rather than render zeroed badges that look like an empty instance.
+	Degraded bool
 }
 
 // navGroups maps a sidebar item to the group heading above it. The header
@@ -106,7 +110,10 @@ func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active strin
 	if b.Store != nil {
 		counts, err := b.Store.NavCounts()
 		if err != nil {
+			// A zeroed badge is indistinguishable from an empty queue, so the
+			// failure is recorded rather than only logged.
 			log.Printf("page: nav counts: %v", err)
+			data.Degraded = true
 		} else {
 			data.Nav = NavCounts{Unread: counts.Unread, Held: counts.Held, Waitlist: counts.Waitlist}
 		}

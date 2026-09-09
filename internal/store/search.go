@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"unicode"
 )
@@ -62,6 +63,11 @@ func syncSearchIndex(db execQuerier) error {
 
 	var indexed int
 	if err := db.QueryRow("SELECT COUNT(*) FROM submissions_fts_docsize").Scan(&indexed); err != nil {
+		// Log before rebuilding. The rebuild rewrites the very shadow tables the
+		// failed read came from, so a genuine signal — a malformed image, an I/O
+		// error — would otherwise be erased by the recovery and leave no trace
+		// that anything was ever wrong.
+		log.Printf("search index: docsize unreadable (%v); rebuilding", err)
 		// The shadow table is an FTS5 implementation detail. If a future
 		// version renames it, rebuild unconditionally rather than quietly
 		// serving an empty index — a slower startup beats a search that
