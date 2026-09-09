@@ -155,7 +155,8 @@ func populatedPageData() map[string]any {
 		"submission_detail.html": submissionDetailData{PageData: shell, Form: form, Submission: sub,
 			Fields:  []Field{{Key: "email", Value: "jane@example.com"}},
 			Message: "Hello", Signals: signals,
-			NewerID: "s0", OlderID: "s2", Position: 2, Total: 612},
+			NewerID: "s0", OlderID: "s2", Position: 2, Total: 612,
+			PositionKnown: true},
 		"users.html": usersListData{PageData: shell, Error: "bad",
 			Users: []UserWithYou{{User: store.User{ID: "u1", Username: "admin"}, IsYou: true}}},
 		"users_new.html": usersNewData{PageData: shell, Error: "bad", FormUsername: "new"},
@@ -169,7 +170,8 @@ func populatedPageData() map[string]any {
 			Entries: []store.WaitlistEntry{{ID: "e1", Email: "a@example.com", Position: 1, CreatedAt: time.Now()}},
 			Page:    1, HasPrev: true, HasNext: true, PrevPage: 1, NextPage: 2},
 		"broadcast_new.html": broadcastNewData{PageData: shell, Waitlist: wl, EntryCount: 42,
-			Subject: "Hi", Body: "Body", Error: "bad",
+			RecipientCountKnown: true,
+			Subject:             "Hi", Body: "Body", Error: "bad",
 			Broadcasts: []store.BroadcastSummary{{Broadcast: store.Broadcast{ID: "b1", Subject: "Hi",
 				Status: store.BroadcastStatusSending, CreatedAt: time.Now()}, Total: 42, Sent: 40}}},
 		"broadcast_detail.html": broadcastDetailData{PageData: shell, Waitlist: wl,
@@ -200,18 +202,68 @@ func populatedPageData() map[string]any {
 
 // pageMarkers are strings that appear only when a page's populated branch runs.
 // Without them a fixture can drift back to zero values and the execution test
-// still passes on a page that rendered nothing but its empty state.
+// passes on a page that rendered nothing but its empty state — which is exactly
+// what happened to search.html, whose whole results branch went unexecuted
+// because the shared fixture never set Query.
 //
-// Only pages with a meaningful populated/empty split need an entry.
+// Every base page needs an entry, enforced by TestPageMarkersCoverEveryBasePage.
+// A page with no meaningful populated/empty split gets an explicit empty slice
+// and a reason, so opting out is a decision someone made rather than a page
+// nobody thought about.
 var pageMarkers = map[string][]string{
-	"search.html":      {"/admin/forms/f1/submissions/s1"},
-	"quarantine.html":  {"/admin/quarantine/s1/restore"},
-	"dashboard.html":   {"/admin/forms/f1"},
-	"form_detail.html": {"/admin/forms/f1/submissions/s1"},
-	"home.html":        {"203.0.113.5"},
-	"rules.html":       {"spam.example"},
-	"backups.html":     {"dsforms.db"},
-	"waitlists.html":   {"/admin/waitlists/w1"},
+	// Pages whose populated branch is the thing worth pinning.
+	"search.html":            {"/admin/forms/f1/submissions/s1", "jane"},
+	"quarantine.html":        {"/admin/quarantine/s1/restore", "Link markup"},
+	"dashboard.html":         {"/admin/forms/f1"},
+	"form_detail.html":       {"/admin/forms/f1/submissions/s1"},
+	"home.html":              {"203.0.113.5", "Contact", "Jane"},
+	"rules.html":             {"spam.example"},
+	"waitlists.html":         {"/admin/waitlists/w1"},
+	"submission_detail.html": {"Link markup", "backlinks", "2 of 612"},
+	"waitlist_detail.html":   {"a@example.com"},
+	"broadcast_detail.html":  {"Hi"},
+	"broadcast_new.html":     {"42 recipient"},
+	"users.html":             {"admin"},
+
+	// No populated/empty split: these render the same shape whatever the data,
+	// so a marker would pin nothing. Stated rather than omitted, so the next
+	// person adding a page has to make the same decision explicitly.
+	"backups.html":       {}, // one conditional, on DB.Size, which the shell sets
+	"form_new.html":      {}, // a form; no collections
+	"form_edit.html":     {}, // a form; no collections
+	"account.html":       {}, // a form
+	"users_new.html":     {}, // a form
+	"waitlist_new.html":  {}, // a form
+	"waitlist_edit.html": {}, // a form
+}
+
+// TestPageMarkersCoverEveryBasePage makes opting out explicit.
+//
+// The marker table was hand-maintained with eight entries while nineteen pages
+// existed, so five pages with real populated/empty splits — including
+// submission_detail.html, the richest on the branch — silently had no guard at
+// all. That is the same defect the markers were introduced to fix, one level up:
+// a list maintained by memory.
+func TestPageMarkersCoverEveryBasePage(t *testing.T) {
+	t.Parallel()
+	for _, name := range basePageNames {
+		if _, ok := pageMarkers[name]; !ok {
+			t.Errorf("%s has no pageMarkers entry — add the string that only its populated "+
+				"branch renders, or an explicit empty entry with the reason", name)
+		}
+	}
+	for name := range pageMarkers {
+		found := false
+		for _, n := range basePageNames {
+			if n == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("pageMarkers has an entry for %q, which is not a base page", name)
+		}
+	}
 }
 
 // The quarantine panel is executed on its own for the fragment response, so it
