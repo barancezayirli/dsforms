@@ -216,3 +216,88 @@ func TestKeywords(t *testing.T) {
 		t.Errorf("Keywords() = %v, want just the blocking keyword", got)
 	}
 }
+
+// TestMatchAllowRulesOnlyConsiderTheSenderField is the regression test for a
+// full spam bypass. Match scans every submitted field for an email-shaped
+// value, and the submit handler accepts arbitrary field names — so appending a
+// junk field holding an allowlisted address made Match return an allow rule,
+// skipping the block list and all content scoring.
+//
+// The allowlisted address is typically the operator's own or a known customer's,
+// so it is guessable rather than secret.
+//
+// The asymmetry is deliberate: scanning every field is right for a *block* rule
+// (a spammer will not helpfully put their address in a field called "email"),
+// and catastrophic for an *allow* rule (any mention becomes a skeleton key).
+func TestMatchAllowRulesOnlyConsiderTheSenderField(t *testing.T) {
+	t.Parallel()
+
+	allow := []Rule{rule(KindAllow, TypeEmail, "vip@customer.com")}
+	allowDomain := []Rule{rule(KindAllow, TypeDomain, "customer.com")}
+
+	tests := []struct {
+		name    string
+		rules   []Rule
+		data    map[string]string
+		wantHit bool
+	}{
+		{
+			name:    "allow matches the canonical sender field",
+			rules:   allow,
+			data:    map[string]string{"email": "vip@customer.com", "message": "hello"},
+			wantHit: true,
+		},
+		{
+			name:    "allow matches the sender field whatever its case",
+			rules:   allow,
+			data:    map[string]string{"Email": "VIP@Customer.com"},
+			wantHit: true,
+		},
+		{
+			name:  "an allowlisted address in an unrelated field does NOT match",
+			rules: allow,
+			data: map[string]string{
+				"email":   "mallory@spam.example",
+				"message": "[url=http://x]casino[/url]",
+				"zz":      "vip@customer.com",
+			},
+			wantHit: false,
+		},
+		{
+			name:    "the same trick with a domain rule does not work either",
+			rules:   allowDomain,
+			data:    map[string]string{"email": "mallory@spam.example", "note": "vip@customer.com"},
+			wantHit: false,
+		},
+		{
+			name:    "an allowlisted address in the message body alone does not match",
+			rules:   allow,
+			data:    map[string]string{"message": "please cc vip@customer.com"},
+			wantHit: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := Match(tt.rules, tt.data, "")
+			if ok != tt.wantHit {
+				t.Errorf("Match() hit = %v, want %v (matched %+v)", ok, tt.wantHit, got)
+			}
+		})
+	}
+}
+
+// Block rules keep scanning every field — that is the half of the asymmetry
+// that must not regress while fixing the other half.
+func TestMatchBlockRulesStillScanEveryField(t *testing.T) {
+	t.Parallel()
+
+	rules := []Rule{rule(KindBlock, TypeDomain, "spam.example")}
+	data := map[string]string{"contact_address": "bot@spam.example", "message": "hi"}
+
+	got, ok := Match(rules, data, "")
+	if !ok || got.Kind != KindBlock {
+		t.Errorf("a block rule must match an address in any field; got ok=%v rule=%+v", ok, got)
+	}
+}

@@ -133,12 +133,21 @@ func isHostname(s string) bool {
 // keyword weight instead, preserving the rule that a single keyword hit never
 // holds a submission on its own.
 func Match(rules []Rule, data map[string]string, ip string) (Rule, bool) {
+	// Which addresses a rule may consider depends on its kind: an allow rule sees
+	// only the sender field, a block rule sees every field. See senderAddresses.
+	senderOnly := senderAddresses(data)
+	anyField := allAddresses(data)
+
 	for _, kind := range []string{KindAllow, KindBlock} {
+		addrs := anyField
+		if kind == KindAllow {
+			addrs = senderOnly
+		}
 		for _, r := range rules {
 			if r.Kind != kind || r.Type == TypeKeyword {
 				continue
 			}
-			if matches(r, data, ip) {
+			if matches(r, addrs, ip) {
 				return r, true
 			}
 		}
@@ -146,16 +155,16 @@ func Match(rules []Rule, data map[string]string, ip string) (Rule, bool) {
 	return Rule{}, false
 }
 
-func matches(r Rule, data map[string]string, ip string) bool {
+func matches(r Rule, addrs []string, ip string) bool {
 	switch r.Type {
 	case TypeEmail:
-		for _, addr := range addresses(data) {
+		for _, addr := range addrs {
 			if addr == r.Value {
 				return true
 			}
 		}
 	case TypeDomain:
-		for _, addr := range addresses(data) {
+		for _, addr := range addrs {
 			at := strings.LastIndex(addr, "@")
 			if at < 0 {
 				continue
@@ -187,21 +196,52 @@ func matches(r Rule, data map[string]string, ip string) bool {
 	return false
 }
 
-// addresses collects every email-shaped value in a submission, lowercased.
+// allAddresses collects every email-shaped value anywhere in a submission.
 //
-// It looks at all fields rather than only one named "email": forms in the wild
-// call it contact_address, reply_to, your-email and worse, and a block rule
-// that only works when the field happens to be spelled "email" would look
-// broken rather than strict.
-func addresses(data map[string]string) []string {
+// Used for *block* rules only. Looking at all fields rather than one named
+// "email" is right there: forms in the wild call it contact_address, reply_to,
+// your-email and worse, and a spammer will not helpfully put their address in
+// the field we happen to check.
+func allAddresses(data map[string]string) []string {
 	var out []string
 	for _, v := range data {
-		v = strings.ToLower(strings.TrimSpace(v))
-		if strings.Count(v, "@") == 1 && !strings.ContainsAny(v, " \t\n") && strings.Contains(v, ".") {
-			out = append(out, v)
+		if addr, ok := emailShaped(v); ok {
+			out = append(out, addr)
 		}
 	}
 	return out
+}
+
+// senderAddresses collects only the canonical sender field.
+//
+// Used for *allow* rules, and the asymmetry with allAddresses is the whole
+// point. Submitters choose their own field names, so scanning every field for an
+// allow rule turns any mention of an allowlisted address into a skeleton key:
+// appending one junk field bypasses the block list and all content scoring at
+// once. The allowlisted address is usually the operator's own or a known
+// customer's — guessable, not secret.
+//
+// "email" matched case-insensitively is the same field emailFieldValid in the
+// submit handler treats as the sender, so the two agree on what a sender is.
+func senderAddresses(data map[string]string) []string {
+	var out []string
+	for k, v := range data {
+		if !strings.EqualFold(k, "email") {
+			continue
+		}
+		if addr, ok := emailShaped(v); ok {
+			out = append(out, addr)
+		}
+	}
+	return out
+}
+
+// emailShaped reports whether a value looks like an address, returning it
+// lowercased for comparison against a normalised rule value.
+func emailShaped(v string) (string, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	ok := strings.Count(v, "@") == 1 && !strings.ContainsAny(v, " \t\n") && strings.Contains(v, ".")
+	return v, ok
 }
 
 // Keywords returns the custom blocking keywords, for the scorer to add to its

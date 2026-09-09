@@ -225,22 +225,18 @@ func (h *QuarantineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // Empty deletes the entire queue.
+//
+// One set-based statement rather than a fetch-then-delete-by-id: enumerating ids
+// capped the button at SQLite's 32766-parameter limit and silently truncated at
+// whatever page size was fetched, so on a queue large enough to need emptying it
+// either failed outright or reported a count it had not actually deleted.
 func (h *QuarantineHandler) Empty(w http.ResponseWriter, r *http.Request) {
-	held, err := h.Store.HeldSubmissions(100000, 0)
+	n, err := h.Store.DeleteAllHeld()
 	if err != nil {
-		log.Printf("quarantine: empty: list: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	ids := make([]string, 0, len(held))
-	for _, sub := range held {
-		ids = append(ids, sub.ID)
-	}
-	if err := h.Store.DeleteHeld(ids); err != nil {
 		log.Printf("quarantine: empty: %v", err)
 		flash.Set(w, h.SecretKey, "error", "The quarantine could not be emptied.")
 	} else {
-		flash.Set(w, h.SecretKey, "success", plural(len(ids), "submission")+" deleted.")
+		flash.Set(w, h.SecretKey, "success", plural(n, "submission")+" deleted.")
 	}
 	http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
 }

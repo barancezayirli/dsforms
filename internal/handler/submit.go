@@ -96,14 +96,6 @@ func emailFieldValid(data map[string]string) bool {
 // handoff specified: allow rules match on the submitted email field, which is
 // attacker-controlled, so consulting them first would let a bot bypass the
 // honeypot by naming an allowlisted address.
-// countRuleHit records that a filter rule matched, for the "N blocked" column
-// in the rules screen. A failure here must not affect the submission.
-func (h *SubmitHandler) countRuleHit(id string) {
-	if err := h.Store.IncrementRuleHits(id); err != nil {
-		log.Printf("submit: incrementing hits for rule %s: %v", id, err)
-	}
-}
-
 func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "formID")
 	form, err := h.Store.GetForm(formID)
@@ -123,8 +115,17 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Honeypot check — silently succeed without storing anything.
+	// Honeypot — drop without storing, but leave a trace.
+	//
+	// This is the one drop left in this handler; everything else is now held for
+	// review. It stays a drop because the honeypot catches the highest-volume
+	// bot traffic and quarantining it would bury the queue it exists to keep
+	// reviewable. The log line is the compromise: password managers and autofill
+	// extensions are a known benign trigger, so when someone reports that they
+	// submitted and never heard back, there is something to correlate against.
+	// Field values are never logged, here or anywhere else in this file.
 	if r.FormValue("_honeypot") != "" {
+		log.Printf("submit: dropped submission for form %s from %s (honeypot)", formID, ExtractIP(r))
 		respondSuccess(w, r, formID, determineRedirect(r.FormValue("_redirect"), form.Redirect))
 		return
 	}
@@ -226,7 +227,17 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err := h.Store.CreateHeldSubmission(sub, score, threshold, storeSignals); err != nil {
-			log.Printf("submit: failed to hold submission for form %s: %v", formID, err)
+			// Never report success for a submission we failed to store. Logging
+			// and returning 302 would destroy it — reintroducing precisely the
+			// silent loss this quarantine exists to end, one branch away from
+			// the code that ends it.
+			//
+			// A 500 leaks nothing to a bot: the accepted path below returns the
+			// same status under the same database conditions, so the response
+			// cannot be used to tell "held" from "accepted".
+			log.Printf("submit: form %s: holding submission %s failed: %v", formID, sub.ID, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
 		respondSuccess(w, r, formID, redirectURL)
 		return
@@ -277,6 +288,14 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	respondSuccess(w, r, formID, redirectURL)
+}
+
+// countRuleHit records that a filter rule matched, for the "N blocked" column
+// in the rules screen. A failure here must not affect the submission.
+func (h *SubmitHandler) countRuleHit(id string) {
+	if err := h.Store.IncrementRuleHits(id); err != nil {
+		log.Printf("submit: incrementing hits for rule %s: %v", id, err)
+	}
 }
 
 // respondSuccess writes a successful submission response — JSON if the client

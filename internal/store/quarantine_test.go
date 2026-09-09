@@ -576,3 +576,124 @@ func TestGetSubmissionPopulatesQuarantineFields(t *testing.T) {
 		t.Errorf("the reader would show score %d beside a breakdown summing to %d", sub.SpamScore, sum)
 	}
 }
+
+// TestDeleteHeldExceedsSQLiteVariableLimit covers the bound-parameter ceiling.
+// SQLite caps variables at 32766, and "Empty quarantine" used to hand every held
+// id to a single IN (?,?,…) — so on a queue large enough to actually need
+// emptying, the button failed outright and the operator had no other way to
+// clear it. 30-day retention plus one spam run gets you there.
+//
+// The ids do not need to exist: the statement binds every one of them before
+// SQLite looks at a single row, so a list of mostly-absent ids reproduces the
+// failure exactly while keeping the fixture to three inserts.
+func TestDeleteHeldExceedsSQLiteVariableLimit(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+
+	now := time.Now().UTC()
+	real := []string{"a", "b", "c"}
+	for _, id := range real {
+		if err := s.CreateHeldSubmission(heldFixture(id, "f1", 6, now), 6, 6, nil); err != nil {
+			t.Fatalf("CreateHeldSubmission(%s): %v", id, err)
+		}
+	}
+
+	ids := append([]string{}, real...)
+	for i := 0; i < 40000; i++ {
+		ids = append(ids, fmt.Sprintf("absent%06d", i))
+	}
+
+	if err := s.DeleteHeld(ids); err != nil {
+		t.Fatalf("DeleteHeld with %d ids: %v", len(ids), err)
+	}
+	left, err := s.HeldCount()
+	if err != nil {
+		t.Fatalf("HeldCount: %v", err)
+	}
+	if left != 0 {
+		t.Errorf("%d held rows remain; the batches did not cover every id", left)
+	}
+}
+
+// DeleteAllHeld is what "Empty quarantine" should use: one statement, no id
+// list, and a truthful count of what it removed.
+func TestDeleteAllHeld(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+
+	now := time.Now().UTC()
+	if err := s.CreateSubmission(Submission{
+		ID: "clean", FormID: "f1", Data: map[string]string{"n": "x"},
+		RawData: `{"n":"x"}`, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	for _, id := range []string{"a", "b", "c"} {
+		if err := s.CreateHeldSubmission(heldFixture(id, "f1", 6, now), 6, 6,
+			[]SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
+			t.Fatalf("CreateHeldSubmission(%s): %v", id, err)
+		}
+	}
+
+	n, err := s.DeleteAllHeld()
+	if err != nil {
+		t.Fatalf("DeleteAllHeld: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("reported %d deleted, want 3 — the flash message shows this number", n)
+	}
+
+	held, _ := s.HeldSubmissions(10, 0)
+	if len(held) != 0 {
+		t.Errorf("%d held rows survived", len(held))
+	}
+	// Accepted submissions must be untouched, and the signals must cascade.
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 1 || subs[0].ID != "clean" {
+		t.Errorf("accepted submissions were affected: %v", subs)
+	}
+	sig, _ := s.SubmissionSignals("a")
+	if len(sig) != 0 {
+		t.Errorf("signals survived the delete: %v", sig)
+	}
+}
+
+// TestPurgeHeldOlderThanIgnoresAcceptedSubmissions is the guard test the
+// equivalent DeleteHeld case already had and Purge did not.
+//
+// This sweep runs unattended at every startup and every 24 hours. Without the
+// is_held = 1 guard it would delete every *accepted* submission older than the
+// retention window — permanent data loss whose only trace is a log line reading
+// "purged N submission(s)".
+func TestPurgeHeldOlderThanIgnoresAcceptedSubmissions(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+
+	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	old := now.AddDate(0, 0, -40)
+
+	if err := s.CreateSubmission(Submission{
+		ID: "old-accepted", FormID: "f1", Data: map[string]string{"n": "x"},
+		RawData: `{"n":"x"}`, CreatedAt: old,
+	}); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if err := s.CreateHeldSubmission(heldFixture("old-held", "f1", 6, old), 6, 6, nil); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	n, err := s.PurgeHeldOlderThan(now.AddDate(0, 0, -30))
+	if err != nil {
+		t.Fatalf("PurgeHeldOlderThan: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("purged %d, want exactly the held one", n)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 1 || subs[0].ID != "old-accepted" {
+		t.Fatalf("the sweep deleted an accepted submission: %v", subs)
+	}
+}

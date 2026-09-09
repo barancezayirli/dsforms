@@ -226,20 +226,53 @@ func (s *Store) MarkNotified(id string) error {
 // this path is either a bug or someone probing, and either way it must not take
 // a real submission with it. spam_signals follow via ON DELETE CASCADE.
 func (s *Store) DeleteHeld(ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	placeholders := make([]string, len(ids))
-	args := make([]any, 0, len(ids))
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	query := "DELETE FROM submissions WHERE is_held = 1 AND id IN (" + strings.Join(placeholders, ",") + ")"
-	if _, err := s.db.Exec(query, args...); err != nil {
-		return fmt.Errorf("delete held: %w", err)
+	// Batched because SQLite caps bound parameters at 32766 (SQLITE_MAX_VARIABLE_NUMBER).
+	// One IN (?,?,…) over an unbounded list fails outright with "too many SQL
+	// variables" — which is how "Empty quarantine" used to break on exactly the
+	// large queue that needed emptying. Callers here are bounded by a page of
+	// checkboxes, but the limit is a property of the statement, not the caller.
+	// To clear the whole queue use DeleteAllHeld, which binds nothing.
+	const batch = 500
+
+	for len(ids) > 0 {
+		n := batch
+		if len(ids) < n {
+			n = len(ids)
+		}
+		chunk := ids[:n]
+		ids = ids[n:]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk))
+		for i, id := range chunk {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		query := "DELETE FROM submissions WHERE is_held = 1 AND id IN (" + strings.Join(placeholders, ",") + ")"
+		if _, err := s.db.Exec(query, args...); err != nil {
+			return fmt.Errorf("delete held: %w", err)
+		}
 	}
 	return nil
+}
+
+// DeleteAllHeld empties the quarantine in one statement and reports how many
+// rows went.
+//
+// Enumerating ids to delete them all is both slower and bounded by SQLite's
+// parameter limit; a set-based DELETE has neither problem. The returned count is
+// what the operator is shown, so it must be the real RowsAffected rather than
+// the length of a list we happened to fetch first.
+func (s *Store) DeleteAllHeld() (int, error) {
+	res, err := s.db.Exec("DELETE FROM submissions WHERE is_held = 1")
+	if err != nil {
+		return 0, fmt.Errorf("delete all held: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete all held: %w", err)
+	}
+	return int(n), nil
 }
 
 // PurgeHeldOlderThan deletes held submissions created before cutoff and returns
