@@ -29,6 +29,34 @@ type WebhookSender interface {
 	Send(form store.Form, sub store.Submission) error
 }
 
+// deliver sends whatever a form is configured for and reports whether the email
+// went. Both sends are attempted independently: they are separate promises to
+// the operator, and a dead SMTP server must not also cost them the webhook.
+//
+// It is shared by the accept path and the restore path so those two cannot
+// drift — they already had, when a stray return in the restore copy made a
+// failed email skip the withheld webhook. The return value exists for the
+// restore path, which records delivery in the notified column and must only do
+// so when the email actually arrived.
+//
+// Callers run this in a goroutine (via safe.Do): nothing here may block the
+// response.
+func deliver(ctx string, n Notifier, wh WebhookSender, form store.Form, sub store.Submission) (emailed bool) {
+	if form.EmailTo != "" && n != nil {
+		if err := n.SendNotification(form, sub); err != nil {
+			log.Printf("%s: email failed for submission %s: %v", ctx, sub.ID, err)
+		} else {
+			emailed = true
+		}
+	}
+	if form.WebhookURL != "" && wh != nil {
+		if err := wh.Send(form, sub); err != nil {
+			log.Printf("%s: webhook failed for submission %s: %v", ctx, sub.ID, err)
+		}
+	}
+	return emailed
+}
+
 // SubmitHandler handles form submissions via POST /f/{formID}.
 type SubmitHandler struct {
 	Store    *store.Store
@@ -290,18 +318,8 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go safe.Do("submit: notify for form "+formID+" submission "+sub.ID, func() {
-		if form.EmailTo != "" && h.Notifier != nil {
-			if err := h.Notifier.SendNotification(form, sub); err != nil {
-				log.Printf("submit: email failed for form %s submission %s: %v", formID, sub.ID, err)
-			}
-		}
-		if form.WebhookURL != "" && h.Webhook != nil {
-			if err := h.Webhook.Send(form, sub); err != nil {
-				log.Printf("submit: webhook failed for form %s submission %s: %v", formID, sub.ID, err)
-			}
-		}
-	})
+	ctx := "submit: form " + formID
+	go safe.Do(ctx, func() { deliver(ctx, h.Notifier, h.Webhook, form, sub) })
 
 	respondSuccess(w, r, formID, redirectURL)
 }

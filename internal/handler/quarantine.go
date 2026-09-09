@@ -250,22 +250,15 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// Nothing currently re-drives a notified = 0 row: there is no sweep and
 		// no admin action that reads the column, so in practice a failed send
 		// here is not retried. Tracked as a follow-up rather than papered over.
-		go safe.Do("quarantine: notify for restored "+sub.ID, func() {
-			// The two deliveries are independent. A failed email must not skip
-			// the webhook: the hold withheld both, so the restore owes both, and
-			// a dead SMTP server would otherwise silently cost the operator the
-			// CRM delivery as well. Only MarkNotified is gated on the send, since
-			// that flag records delivery rather than intent.
-			if form.EmailTo != "" && h.Notifier != nil {
-				if err := h.Notifier.SendNotification(form, sub); err != nil {
-					log.Printf("quarantine: withheld notification for %s failed: %v", sub.ID, err)
-				} else if err := h.Store.MarkNotified(sub.ID); err != nil {
+		// The hold withheld both deliveries, so the restore owes both. deliver
+		// attempts them independently — shared with the submit path precisely so
+		// the two cannot drift again.
+		go safe.Do("quarantine: restore", func() {
+			// notified records delivery, not intent, so it is set only when the
+			// email actually went.
+			if deliver("quarantine: restore", h.Notifier, h.Webhook, form, sub) {
+				if err := h.Store.MarkNotified(sub.ID); err != nil {
 					log.Printf("quarantine: mark notified %s: %v", sub.ID, err)
-				}
-			}
-			if form.WebhookURL != "" && h.Webhook != nil {
-				if err := h.Webhook.Send(form, sub); err != nil {
-					log.Printf("quarantine: withheld webhook for %s failed: %v", sub.ID, err)
 				}
 			}
 		})
