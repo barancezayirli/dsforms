@@ -82,13 +82,6 @@ type overviewData struct {
 
 	TotalHeld     int
 	RetentionDays int
-
-	// Degraded is set when any panel's query failed. Each individual
-	// log-and-continue is defensible — one dead panel should not 500 the home
-	// page — but together they render a fully-formed dashboard reading zero
-	// everywhere, which is pixel-identical to a fresh install. The overview is
-	// the one screen where a broken instance must be obvious.
-	Degraded bool
 }
 
 // ranges are the periods the header switcher offers.
@@ -245,10 +238,6 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 	if nav.Held > 0 {
 		data.Summary += " · " + plural(nav.Held, "submission") + " held in quarantine"
 	}
-
-	// The shell sets its own Degraded when the nav counts fail; keep whichever
-	// is true so one banner covers both.
-	data.PageData.Degraded = data.PageData.Degraded || data.Degraded
 
 	h.Render(w, "home.html", data)
 }

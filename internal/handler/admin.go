@@ -93,6 +93,7 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	// per form: an instance with fifty forms would otherwise issue a hundred
 	// queries to draw one page.
 	stats, err := h.Store.PerFormStats()
+	degraded := err != nil
 	if err != nil {
 		log.Printf("dashboard: per-form stats: %v", err)
 	}
@@ -103,6 +104,7 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	series, err := h.Store.SubmissionsPerFormPerDay(sparkDays)
 	if err != nil {
 		log.Printf("dashboard: per-form series: %v", err)
+		degraded = true
 	}
 
 	totalUnread := 0
@@ -126,6 +128,10 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		TotalUnread: totalUnread,
 		TotalAll:    totalAll,
 	}
+	// Without this the cards read Total 0 / Held 0 while the header above them
+	// reports a real submission count from a query that succeeded — a page
+	// contradicting itself and flagging nothing.
+	data.Degraded = data.Degraded || degraded
 	h.Render(w, "dashboard.html", data)
 }
 
@@ -379,13 +385,14 @@ func (h *AdminHandler) Success(w http.ResponseWriter, r *http.Request) {
 // formDetailData holds the data passed to form_detail.html.
 type formDetailData struct {
 	PageData
-	Form        store.Form
-	Submissions []store.Submission
-	TotalCount  int
-	UnreadCount int
-	HeldCount   int
-	HeldUnknown bool
-	Pager       Pagination
+	Form          store.Form
+	Submissions   []store.Submission
+	TotalCount    int
+	UnreadCount   int
+	UnreadUnknown bool
+	HeldCount     int
+	HeldUnknown   bool
+	Pager         Pagination
 }
 
 // submissionDetailData holds the data passed to submission_detail.html.
@@ -445,9 +452,12 @@ func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	unread, err := h.Store.UnreadCount(formID)
-	if err != nil {
-		log.Printf("admin: unread count for %s: %v", formID, err)
+	// "inbox zero" is a positive assertion, so a swallowed error here is worse
+	// than the bare 0 it renders: it tells the operator there is nothing waiting.
+	// Same treatment as the Held stat below.
+	unread, unreadErr := h.Store.UnreadCount(formID)
+	if unreadErr != nil {
+		log.Printf("admin: unread count for %s: %v", formID, unreadErr)
 	}
 	// The Held stat is the only per-form sign that this form's submissions are
 	// being quarantined, so a swallowed error here tells an operator debugging
@@ -459,15 +469,17 @@ func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := formDetailData{
-		PageData:    h.Shell(w, r, form.Name, "forms"),
-		Form:        form,
-		Submissions: subs,
-		TotalCount:  total,
-		UnreadCount: unread,
-		HeldCount:   held,
-		HeldUnknown: heldErr != nil,
-		Pager:       pager,
+		PageData:      h.Shell(w, r, form.Name, "forms"),
+		Form:          form,
+		Submissions:   subs,
+		TotalCount:    total,
+		UnreadCount:   unread,
+		UnreadUnknown: unreadErr != nil,
+		HeldCount:     held,
+		HeldUnknown:   heldErr != nil,
+		Pager:         pager,
 	}
+	data.Degraded = data.Degraded || unreadErr != nil || heldErr != nil
 	h.Render(w, "form_detail.html", data)
 }
 

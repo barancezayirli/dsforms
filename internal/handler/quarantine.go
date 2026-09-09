@@ -141,9 +141,11 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 		selected = &rows[0]
 	}
 
-	heldRecent, trafficRecent, err := h.Store.HeldSince(30)
-	if err != nil {
-		log.Printf("quarantine: held since: %v", err)
+	// On the screen dedicated to spam volume, a failed query rendering "0 held ·
+	// 0% of traffic" reads as "the filter caught nothing in 30 days".
+	heldRecent, trafficRecent, sinceErr := h.Store.HeldSince(30)
+	if sinceErr != nil {
+		log.Printf("quarantine: held since: %v", sinceErr)
 	}
 
 	data := quarantineData{
@@ -158,6 +160,7 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 		Threshold:     h.DefaultThreshold,
 		Pager:         pager,
 	}
+	data.Degraded = data.Degraded || sinceErr != nil
 	if selected != nil {
 		data.Threshold = selected.HeldThreshold
 		if data.Threshold == 0 {

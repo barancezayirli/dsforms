@@ -51,7 +51,17 @@ type PageData struct {
 	Nav         store.NavCounts
 	DB          DBStatus
 
-	// Degraded is set when the shell's own queries failed, so a page can say so
+	// Degraded means some of the data on this page could not be loaded, so the
+	// page can say so instead of presenting the gaps as facts.
+	//
+	// Each individual log-and-continue is defensible — one dead panel should not
+	// 500 a whole screen — but together they render a fully-formed dashboard
+	// reading zero everywhere, pixel-identical to a fresh install. Any handler
+	// that degrades a value sets this; do not shadow it with a field of the same
+	// name on an embedding struct, because Go promotes the shallower field and
+	// html/template resolves the same way, which silently disconnects the banner.
+	//
+	// It is set when the shell's own queries failed, so a page can say so
 	// rather than render zeroed badges that look like an empty instance.
 	Degraded bool
 }

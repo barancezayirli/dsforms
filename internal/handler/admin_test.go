@@ -129,7 +129,14 @@ func loginCookie(t *testing.T, s *store.Store) *http.Cookie {
 
 func doAdminRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	cookie := loginCookie(t, s)
+	return doAdminRequestAs(t, loginCookie(t, s), r, method, path, body)
+}
+
+// doAdminRequestAs takes the session cookie rather than minting one, for tests
+// that must authenticate *before* they break the database — a login attempt
+// against a broken store never reaches the handler under test.
+func doAdminRequestAs(t *testing.T, cookie *http.Cookie, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
 
 	var req *http.Request
 	if body != "" {

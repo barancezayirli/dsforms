@@ -29,9 +29,16 @@
     <div class="stat-sub">all time</div>
   </div>
   <div class="card elev-sm stat">
-    <div class="stat-value {{if .UnreadCount}}stat-accent{{end}}">{{.UnreadCount}}</div>
+    <!-- "inbox zero" is a claim, not an absent value: rendering it because the
+         count query failed tells the operator nothing is waiting when something
+         may be. UnreadUnknown renders "—" the way the Held stat does. -->
+    <div class="stat-value {{if and .UnreadCount (not .UnreadUnknown)}}stat-accent{{end}}">{{if .UnreadUnknown}}—{{else}}{{.UnreadCount}}{{end}}</div>
     <div class="stat-label">Unread</div>
-    <div class="stat-sub">{{if .UnreadCount}}waiting for you{{else}}inbox zero{{end}}</div>
+    <div class="stat-sub">
+      {{if .UnreadUnknown}}count unavailable
+      {{else if .UnreadCount}}waiting for you
+      {{else}}inbox zero{{end}}
+    </div>
   </div>
   <div class="card elev-sm stat">
     <div class="stat-value">{{if .HeldUnknown}}—{{else}}{{.HeldCount}}{{end}}</div>
