@@ -36,8 +36,23 @@ type NavCounts struct {
 // so the column order can never drift between the list and single-row scans.
 const heldColumns = `id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, notified`
 
+// heldColumnsFor is heldColumns qualified with a table alias, for the queries
+// that join forms and would otherwise have an ambiguous "id".
+func heldColumnsFor(alias string) string {
+	cols := strings.Split(heldColumns, ", ")
+	for i, c := range cols {
+		cols[i] = alias + "." + c
+	}
+	return strings.Join(cols, ", ")
+}
+
 // scanHeld reads one row of heldColumns. rows may be *sql.Row or *sql.Rows.
-func scanHeld(sc interface{ Scan(...any) error }) (Submission, error) {
+//
+// extra takes scan destinations for any columns a caller appended *after*
+// heldColumns — the joined form name, in practice. Keeping the shared list
+// first is what lets every read path use this rather than hand-writing a subset
+// and silently returning zeroed quarantine fields.
+func scanHeld(sc interface{ Scan(...any) error }, extra ...any) (Submission, error) {
 	var (
 		sub      Submission
 		rawData  string
@@ -45,8 +60,9 @@ func scanHeld(sc interface{ Scan(...any) error }) (Submission, error) {
 		heldInt  int
 		notified int
 	)
-	if err := sc.Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt,
-		&heldInt, &sub.SpamScore, &sub.HeldThreshold, &notified); err != nil {
+	dest := []any{&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt,
+		&heldInt, &sub.SpamScore, &sub.HeldThreshold, &notified}
+	if err := sc.Scan(append(dest, extra...)...); err != nil {
 		return Submission{}, err
 	}
 	sub.RawData = rawData

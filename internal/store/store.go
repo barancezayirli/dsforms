@@ -68,9 +68,23 @@ type Submission struct {
 	Read      bool
 	CreatedAt time.Time
 
-	// Quarantine state. Zero on an accepted submission; populated only by the
-	// held-submission queries in quarantine.go, which is why the ordinary
-	// ListSubmissions path leaves these at their zero values.
+	// Quarantine state. Always populated: every read path selects heldColumns
+	// and scans through scanHeld, so these mean the same thing whichever
+	// function returned the value.
+	//
+	// That is deliberate, and it is the alternative to splitting this into
+	// separate held and accepted types. The two are one row and one lifecycle —
+	// RestoreSubmission turns one into the other with a single UPDATE — so a
+	// split would need a conversion, and a conversion is where fields get
+	// dropped. Populating every column removes the invalid state instead of
+	// renaming it.
+	//
+	// These are non-zero on a *restored* submission, which is the case that
+	// makes the invariant load-bearing: the score and threshold are kept as
+	// evidence of a false positive, so a partial read reports score 0 for a row
+	// the database says scored 11. That exact mismatch shipped once already.
+	// Notified likewise defaults to 1 in the schema, so a partial read claims an
+	// accepted submission was never notified.
 	IsHeld        bool
 	SpamScore     int
 	HeldThreshold int // the threshold actually applied when it was held
@@ -703,7 +717,7 @@ func (s *Store) CreateSubmission(sub Submission) error {
 // ListSubmissions returns all submissions for a form.
 func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
 	rows, err := s.db.Query(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id",
+		"SELECT "+heldColumns+" FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id",
 		formID,
 	)
 	if err != nil {
@@ -713,15 +727,10 @@ func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
 
 	var subs []Submission
 	for rows.Next() {
-		var sub Submission
-		var rawData string
-		var readInt int
-		if err := rows.Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt); err != nil {
+		sub, err := scanHeld(rows)
+		if err != nil {
 			return nil, fmt.Errorf("list submissions: %w", err)
 		}
-		sub.RawData = rawData
-		sub.Read = readInt == 1
-		sub.Data = decodeSubmissionData(sub.ID, rawData)
 		subs = append(subs, sub)
 	}
 	if err := rows.Err(); err != nil {
@@ -810,7 +819,7 @@ func (s *Store) GetSubmission(id string) (Submission, error) {
 // ListSubmissionsPaged returns a page of submissions for a form.
 func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submission, error) {
 	rows, err := s.db.Query(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+		"SELECT "+heldColumns+" FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
 		formID, limit, offset,
 	)
 	if err != nil {
@@ -820,15 +829,10 @@ func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submis
 
 	var subs []Submission
 	for rows.Next() {
-		var sub Submission
-		var rawData string
-		var readInt int
-		if err := rows.Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt); err != nil {
+		sub, err := scanHeld(rows)
+		if err != nil {
 			return nil, fmt.Errorf("list submissions paged: %w", err)
 		}
-		sub.RawData = rawData
-		sub.Read = readInt == 1
-		sub.Data = decodeSubmissionData(sub.ID, rawData)
 		subs = append(subs, sub)
 	}
 	if err := rows.Err(); err != nil {

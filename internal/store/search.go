@@ -98,7 +98,7 @@ func (s *Store) SearchSubmissions(query string, limit int) ([]SearchResult, erro
 	}
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.form_id, s.data, s.ip, s.read, s.created_at, f.name
+		SELECT `+heldColumnsFor("s")+`, f.name
 		FROM submissions_fts x
 		JOIN submissions s ON s.rowid = x.rowid
 		JOIN forms f ON f.id = s.form_id
@@ -112,17 +112,12 @@ func (s *Store) SearchSubmissions(query string, limit int) ([]SearchResult, erro
 
 	var out []SearchResult
 	for rows.Next() {
-		var (
-			res     SearchResult
-			rawData string
-			readInt int
-		)
-		if err := rows.Scan(&res.ID, &res.FormID, &rawData, &res.IP, &readInt, &res.CreatedAt, &res.FormName); err != nil {
+		var res SearchResult
+		sub, err := scanHeld(rows, &res.FormName)
+		if err != nil {
 			return nil, fmt.Errorf("search submissions: %w", err)
 		}
-		res.RawData = rawData
-		res.Read = readInt == 1
-		res.Data = decodeSubmissionData(res.ID, rawData)
+		res.Submission = sub
 		out = append(out, res)
 	}
 	if err := rows.Err(); err != nil {

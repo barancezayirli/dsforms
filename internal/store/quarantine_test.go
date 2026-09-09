@@ -718,3 +718,123 @@ func TestPurgeHeldOlderThanIgnoresAcceptedSubmissions(t *testing.T) {
 		t.Fatalf("the sweep deleted an accepted submission: %v", subs)
 	}
 }
+
+// TestAcceptedReadsCarryEveryColumn pins the invariant chosen over splitting
+// Submission into held and accepted types: every read path populates every
+// column, so a Submission means the same thing regardless of which function
+// returned it.
+//
+// Four paths selected six of the ten columns, which had two consequences. The
+// schema defaults notified to 1, so an accepted row came back claiming it had
+// never been notified — and a guard written as `if !sub.Notified { send it }`
+// would have fired on every listed submission. And a *restored* submission
+// keeps its spam_score on purpose (it is the evidence of a false positive), so
+// those paths reported score 0 for a row the database says scored 11.
+//
+// Nothing rendered these fields from a partial path yet, which is exactly why
+// this is worth pinning: the same class of bug already shipped once, as a
+// quarantine panel reading "score 0" above a breakdown summing to 11.
+func TestAcceptedReadsCarryEveryColumn(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+
+	// Hold it, then restore it: that is the state where the quarantine columns
+	// on an accepted row are non-zero and therefore observable.
+	now := time.Now().UTC()
+	if err := s.CreateHeldSubmission(heldFixture("r1", "f1", 11, now), 11, 6,
+		[]SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 11}}); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+	if _, err := s.RestoreSubmission("r1"); err != nil {
+		t.Fatalf("RestoreSubmission: %v", err)
+	}
+	if err := s.MarkNotified("r1"); err != nil {
+		t.Fatalf("MarkNotified: %v", err)
+	}
+
+	find := func(subs []Submission) (Submission, bool) {
+		for _, sub := range subs {
+			if sub.ID == "r1" {
+				return sub, true
+			}
+		}
+		return Submission{}, false
+	}
+
+	check := func(t *testing.T, path string, sub Submission) {
+		t.Helper()
+		if sub.SpamScore != 11 {
+			t.Errorf("%s: SpamScore = %d, want 11 (a restored row keeps its score)", path, sub.SpamScore)
+		}
+		if sub.HeldThreshold != 6 {
+			t.Errorf("%s: HeldThreshold = %d, want 6", path, sub.HeldThreshold)
+		}
+		if !sub.Notified {
+			t.Errorf("%s: Notified = false, want true", path)
+		}
+		if sub.IsHeld {
+			t.Errorf("%s: IsHeld = true for a restored submission", path)
+		}
+	}
+
+	t.Run("ListSubmissions", func(t *testing.T) {
+		subs, err := s.ListSubmissions("f1")
+		if err != nil {
+			t.Fatalf("ListSubmissions: %v", err)
+		}
+		sub, ok := find(subs)
+		if !ok {
+			t.Fatal("restored submission missing from ListSubmissions")
+		}
+		check(t, "ListSubmissions", sub)
+	})
+
+	t.Run("ListSubmissionsPaged", func(t *testing.T) {
+		subs, err := s.ListSubmissionsPaged("f1", 25, 0)
+		if err != nil {
+			t.Fatalf("ListSubmissionsPaged: %v", err)
+		}
+		sub, ok := find(subs)
+		if !ok {
+			t.Fatal("restored submission missing from ListSubmissionsPaged")
+		}
+		check(t, "ListSubmissionsPaged", sub)
+	})
+
+	t.Run("RecentSubmissions", func(t *testing.T) {
+		recent, err := s.RecentSubmissions(10)
+		if err != nil {
+			t.Fatalf("RecentSubmissions: %v", err)
+		}
+		for _, rec := range recent {
+			if rec.ID == "r1" {
+				check(t, "RecentSubmissions", rec.Submission)
+				if rec.FormName != "Contact" {
+					t.Errorf("RecentSubmissions: FormName = %q, want Contact", rec.FormName)
+				}
+				return
+			}
+		}
+		t.Fatal("restored submission missing from RecentSubmissions")
+	})
+
+	t.Run("SearchSubmissions", func(t *testing.T) {
+		hits, err := s.SearchSubmissions("Bot", 25)
+		if err != nil {
+			t.Fatalf("SearchSubmissions: %v", err)
+		}
+		for _, hit := range hits {
+			if hit.ID == "r1" {
+				check(t, "SearchSubmissions", hit.Submission)
+				if hit.FormName != "Contact" {
+					t.Errorf("SearchSubmissions: FormName = %q, want Contact", hit.FormName)
+				}
+				return
+			}
+		}
+		t.Fatal("restored submission missing from SearchSubmissions")
+	})
+}
