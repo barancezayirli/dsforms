@@ -70,7 +70,7 @@ var basePages = []string{
 	"submission_detail.html", "users.html", "users_new.html", "account.html",
 	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
 	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
-	"quarantine.html", "rules.html", "home.html",
+	"quarantine.html", "rules.html", "home.html", "search.html",
 }
 
 var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
@@ -539,6 +539,7 @@ func main() {
 		RatePerMinute: cfg.RatePerMinute,
 		RetentionDays: int(quarantineRetention / (24 * time.Hour)),
 	}
+	searchHandler := &handler.SearchHandler{Base: base}
 	quarantineHandler := &handler.QuarantineHandler{
 		Base:             base,
 		Notifier:         mailer,
@@ -558,6 +559,20 @@ func main() {
 	}
 
 	waitlistHandler := &handler.WaitlistHandler{Base: base, Broadcaster: worker}
+
+	// Daily quarantine digest. Opt-in via DIGEST_TO, and silently inert without
+	// SMTP — the only background timer this redesign adds.
+	if sendMailer != nil && cfg.DigestTo != "" {
+		digest := &handler.Digest{
+			Store:     s,
+			Mailer:    sendMailer,
+			To:        cfg.DigestTo,
+			BaseURL:   cfg.BaseURL,
+			Retention: int(quarantineRetention / (24 * time.Hour)),
+		}
+		digest.Start(24 * time.Hour)
+		log.Printf("quarantine digest enabled (daily to %s)", cfg.DigestTo)
+	}
 
 	r := newRouter()
 	errorPages(r, templates)
@@ -593,6 +608,7 @@ func main() {
 		r.Get("/admin/forms/{formID}/submissions/{subID}", adminHandler.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", adminHandler.MarkRead)
 		r.Post("/admin/submissions/{id}/delete", adminHandler.DeleteSubmission)
+		r.Get("/admin/search", searchHandler.Page)
 		r.Get("/admin/quarantine", quarantineHandler.Page)
 		r.Post("/admin/quarantine/{id}/restore", quarantineHandler.Restore)
 		r.Post("/admin/quarantine/{id}/report", quarantineHandler.Report)

@@ -21,6 +21,12 @@ type Store struct {
 	db *sql.DB
 }
 
+// execQuerier is the subset of *sql.DB the migration helpers need.
+type execQuerier interface {
+	Exec(string, ...any) (sql.Result, error)
+	QueryRow(string, ...any) *sql.Row
+}
+
 // User represents a user account.
 type User struct {
 	ID                string
@@ -322,6 +328,17 @@ func runAlterMigrations(db *sql.DB) error {
 	return nil
 }
 
+// runSearchMigrations creates the FTS5 index and its triggers, then brings the
+// index into step with the table. Separate from runMigrations because the
+// triggers reference submissions columns that runAlterMigrations may have only
+// just added.
+func runSearchMigrations(db execQuerier) error {
+	if _, err := db.Exec(searchSchema); err != nil {
+		return fmt.Errorf("search migrations: %w", err)
+	}
+	return syncSearchIndex(db)
+}
+
 // New opens a SQLite database and runs migrations.
 func New(path string) (*Store, error) {
 	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
@@ -349,6 +366,9 @@ func New(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := runAlterMigrations(db); err != nil {
+		return nil, err
+	}
+	if err := runSearchMigrations(db); err != nil {
 		return nil, err
 	}
 
@@ -408,6 +428,13 @@ func (s *Store) Reopen(path string) error {
 		return fmt.Errorf("reopen: %w", err)
 	}
 	if err := runAlterMigrations(newDB); err != nil {
+		newDB.Close()
+		return fmt.Errorf("reopen: %w", err)
+	}
+	// A restored backup arrives carrying whatever search index that file had —
+	// possibly none, if it predates this feature — so the index is resynced on
+	// reopen as well as on a normal open.
+	if err := runSearchMigrations(newDB); err != nil {
 		newDB.Close()
 		return fmt.Errorf("reopen: %w", err)
 	}

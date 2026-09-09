@@ -29,6 +29,11 @@ type Config struct {
 	// fallback when neither is set.
 	SpamThreshold int
 
+	// DigestTo receives the daily quarantine digest. Empty disables it — the
+	// digest is opt-in because most instances hold little enough that the
+	// sidebar badge is sufficient.
+	DigestTo string
+
 	BroadcastThrottleMs  int
 	BroadcastMaxAttempts int
 
@@ -58,6 +63,7 @@ func Load() Config {
 		// hold every submission ever received. Clamped because the other end
 		// is just as bad: a very high value silently disables the filter.
 		SpamThreshold: spamThreshold(),
+		DigestTo:      os.Getenv("DIGEST_TO"),
 	}
 }
 
