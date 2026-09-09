@@ -35,8 +35,24 @@ github.com/google/uuid
 **Templates:**
 - Embedded via `//go:embed templates/*` in `main.go`
 - Parsed once at startup using per-page clone strategy (avoids `{{define "content"}}` conflicts)
-- No hardcoded hex colors — use CSS variables from `base.html`
-- No JS frameworks — vanilla JS only for copy-to-clipboard and mobile burger menu
+- Icons come from the `{{template "icons"}}` sprite — never a new inline `<svg>` path.
+  Regenerate it with `scripts/build-icons.sh` after adding a name to its list.
+- No hardcoded hex colors — use the CSS variables in `static/app.css`
+
+**CSS and JS:**
+- Both are embedded under `//go:embed static/*` and served from `/static/` with a
+  content hash in the URL. Nothing is fetched from a CDN: the CSP is
+  `default-src 'self'`, so a remote stylesheet or font is blocked by our own header.
+- All CSS lives in `static/app.css`, linked by `base.html` *and* `login.html`. Do not
+  reintroduce a `<style>` block in a template — the tokens existing in two places is
+  exactly how login.html drifted away from the admin before the redesign.
+- No JS frameworks and no build step. `static/app.js` is plain delegated vanilla JS
+  and covers: sidebar collapse and the mobile drawer, the reader drawer with
+  prev/next, bulk-select bars, the quarantine detail panel, ⌘K, copy-to-clipboard,
+  the password-strength meter and the restore drop zone.
+- Everything there is an *enhancement*: each feature is a real link or form post that
+  works server-rendered, and JS only upgrades it. The reader drawer is the test case —
+  the same URL returns a fragment with `X-Fragment` and a full page without it.
 
 **HTTP:**
 - All admin-mutating actions: POST only, never GET
@@ -107,7 +123,15 @@ dsforms/
 
 **Backup import:** Checkpoint WAL → close old DB → remove WAL/SHM files → `os.Rename` new file → `Store.Reopen` (opens new connection first, then closes old).
 
-**Rate limiting:** In-process token bucket with `sync.Mutex`. Time injection via `func() time.Time` for deterministic tests. Cleanup goroutine removes stale entries.
+**Rate limiting:** In-process token bucket with `sync.Mutex`. Time injection via `func() time.Time` for deterministic tests. Cleanup goroutine removes stale entries. `Snapshot` gives the admin overview a read-only view — it must never route through `Allow`, which refills and decrements on every call.
+
+**Spam quarantine:** `spam.Detail` returns the score *and* every signal that produced it; `Score`/`IsSpam` are wrappers. A submission at or above the effective threshold (`form.SpamThreshold` → `SPAM_THRESHOLD` → `spam.DefaultThreshold`) is stored with `is_held = 1`, `notified = 0` and its breakdown in `spam_signals`, then deleted after 30 days. The weights are absolute constants: moving the threshold changes which single signals suffice, and the UI says so. Stored signals are history — never re-score an old submission to display it.
+
+**Search:** FTS5 external-content index over `submissions.data`, synced by triggers. `COUNT(*)` on that table counts the *content* table, not the index — use `submissions_fts_docsize` to test staleness. All user input goes through `ftsQuery` before reaching `MATCH`.
+
+**Timestamps:** Always store times with `.UTC().Format(sqliteTime)`. Handing a `time.Time` to the driver stringifies it as `"… +0000 UTC"`, which SQLite's `date()` cannot parse and which sorts wrongly against every other row.
+
+**In-memory tests:** `store.New(":memory:")` caps the pool at one connection. Every additional connection to an in-memory database gets its own empty one.
 
 ---
 

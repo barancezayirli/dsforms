@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -386,5 +387,57 @@ func TestErrorPagesRenderStyled404(t *testing.T) {
 	}
 	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+// TestLandingPageIsSelfContained guards docs/index.html, which GitHub Pages
+// serves with no Go server behind it — nothing else in the test suite touches
+// it, and a missing icon or a stray external request would only be noticed by a
+// visitor.
+func TestLandingPageIsSelfContained(t *testing.T) {
+	t.Parallel()
+
+	page, err := os.ReadFile("docs/index.html")
+	if err != nil {
+		t.Fatalf("read landing page: %v", err)
+	}
+	html := string(page)
+
+	// Every referenced icon must be defined in the inlined sprite. A missing
+	// one renders as nothing at all: no error, no broken-image glyph.
+	defined := map[string]bool{}
+	for _, m := range regexp.MustCompile(`<symbol id="(ph-[a-z0-9-]+)"`).FindAllStringSubmatch(html, -1) {
+		defined[m[1]] = true
+	}
+	for _, m := range regexp.MustCompile(`href="#(ph-[a-z0-9-]+)"`).FindAllStringSubmatch(html, -1) {
+		if !defined[m[1]] {
+			t.Errorf("landing page references %q, which its sprite does not define", m[1])
+		}
+	}
+
+	// The font is the only third-party request the page is allowed to make: no
+	// analytics, no tracker, no CDN-hosted icon font or script.
+	for _, m := range regexp.MustCompile(`(?:src|href)="(https?://[^"]+)"`).FindAllStringSubmatch(html, -1) {
+		u := m[1]
+		if strings.HasPrefix(u, "https://fonts.googleapis.com") ||
+			strings.HasPrefix(u, "https://fonts.gstatic.com") ||
+			strings.HasPrefix(u, "https://github.com/") {
+			continue
+		}
+		t.Errorf("landing page makes an unexpected external request: %s", u)
+	}
+
+	// Every in-page anchor must resolve, or a nav link scrolls nowhere.
+	ids := map[string]bool{}
+	for _, m := range regexp.MustCompile(`id="([a-z0-9-]+)"`).FindAllStringSubmatch(html, -1) {
+		ids[m[1]] = true
+	}
+	for _, m := range regexp.MustCompile(`href="#([a-z0-9-]+)"`).FindAllStringSubmatch(html, -1) {
+		if strings.HasPrefix(m[1], "ph-") {
+			continue // icon reference, checked above
+		}
+		if !ids[m[1]] {
+			t.Errorf("landing page links to #%s, which does not exist on the page", m[1])
+		}
 	}
 }

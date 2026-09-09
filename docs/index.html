@@ -1,520 +1,714 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>dsforms — Form submissions for static sites</title>
-  <meta name="description" content="Self-hosted form endpoint for static websites. One binary. SQLite. Your data stays with you.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <style>
-    /* Full CSS inline — no external stylesheet */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>dsforms — form submissions for static sites</title>
+<meta name="description" content="Self-hosted form endpoint for static websites. One binary. SQLite. Your data stays with you.">
+<!-- One file, all CSS inline, no build step — this is served by GitHub Pages
+     and has no Go server behind it. The tokens are the same Nocturne set the
+     admin uses (static/app.css); keep them in step by hand.
 
-    :root {
-      --bg: #0d1117;
-      --surface: #161b22;
-      --text: #e6edf3;
-      --muted: #8b949e;
-      --green: #3fb950;
-      --border: #30363d;
-      --font-mono: 'DM Mono', monospace;
-      --font-body: 'Inter', sans-serif;
-    }
+     The only third-party request on this page is the font. There is no
+     analytics, no tracker, and the Phosphor icons are inlined below as a
+     <symbol> sprite rather than pulled from a CDN. -->
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#161826; --surface:#232532; --text:#e9e9ed; --accent:#9184d9;
+  --divider:rgba(233,233,237,.16);
+  --n-300:#cfd3e5; --n-400:#b2b6ca; --n-500:#9397ab; --n-600:#75798c;
+  --n-700:#595d6c; --n-800:#3f424d; --n-900:#292b31;
+  --a-300:#d2cefd; --a-400:#b5abfc; --a-500:#968ae0; --a-600:#796cbf;
+  --a-700:#5d5294; --a-800:#423a6a; --a-900:#2b2741;
+  --section:#262a60; --section-glow:#353b80; --section-ghost:#4c5397;
+  --mono:ui-monospace,Menlo,Consolas,monospace;
+  --shadow-sm:0 0 0 1px #3f424d;
+  --shadow-md:0 0 0 1px #595d6c,0 6px 18px rgba(0,0,0,.55);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font:400 16px/1.6 'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+svg.i{width:1em;height:1em;fill:currentColor;display:block;flex:none;font-size:16px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+h1,h2,h3{font-weight:500;line-height:1.12;letter-spacing:-.02em}
 
-    body {
-      font-family: var(--font-body);
-      background: var(--bg);
-      color: var(--text);
-      font-size: 16px;
-      line-height: 1.6;
-    }
+.wrap{max-width:1240px;margin:0 auto;padding:0 28px}
+.row{display:flex;flex-wrap:wrap;gap:28px}
 
-    a { color: var(--green); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+/* Buttons are outlined, never solid-filled — including the closing CTA. */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;font-weight:500;font-size:14px;
+  white-space:nowrap;padding:9px 14px;border:1px solid transparent;border-radius:8px;cursor:pointer;background:transparent;color:var(--text)}
+.btn-primary{color:var(--accent);border-color:var(--accent)}
+.btn-primary:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.btn-secondary{border-color:var(--divider)}
+.btn-secondary:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}
+.btn-ghost{color:var(--accent);padding:4px 8px;font-size:12px}
+.btn-ghost:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.btn-lg{height:42px;padding:0 18px}
 
-    .container { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+.tag{display:inline-flex;align-items:center;font-size:11px;padding:3px 10px;border-radius:6px;background:var(--n-800);color:#f3f5fe;white-space:nowrap}
 
-    /* Nav */
-    nav {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      padding: 16px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      backdrop-filter: blur(8px);
-      background: rgba(13,17,23,0.85);
-    }
-    .nav-brand {
-      font-family: var(--font-mono);
-      font-size: 18px;
-      font-weight: 500;
-      color: var(--green);
-    }
-    .nav-links { display: flex; gap: 20px; }
-    .nav-links a { color: var(--muted); font-size: 14px; }
-    .nav-links a:hover { color: var(--text); text-decoration: none; }
+/* The section kicker is the page's structural motif: a solid accent bar, an
+   uppercase label, then the heading. It replaces divider lines entirely. */
+.kick{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.kick span:first-child{width:18px;height:2px;background:var(--accent);flex:none}
+.kick span:last-child{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--accent)}
+section{padding:74px 0}
+section h2{font-size:clamp(27px,3.2vw,34px)}
+.lede{color:var(--n-400);font-size:16px;max-width:62ch;margin-top:12px}
 
-    /* Hero */
-    .hero { padding: 100px 0 60px; text-align: center; }
-    .hero h1 {
-      font-family: var(--font-mono);
-      font-size: 56px;
-      font-weight: 500;
-      line-height: 1.15;
-      margin-bottom: 20px;
-      animation: fadeUp 0.5s ease both;
-    }
-    .hero-sub {
-      font-size: 18px;
-      color: var(--muted);
-      margin-bottom: 32px;
-    }
-    .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-    .btn-primary {
-      display: inline-block;
-      padding: 12px 24px;
-      background: var(--green);
-      color: #0d1117;
-      font-weight: 600;
-      font-size: 15px;
-      border-radius: 6px;
-      border: none;
-      cursor: pointer;
-    }
-    .btn-primary:hover { opacity: 0.9; text-decoration: none; }
-    .btn-secondary {
-      display: inline-block;
-      padding: 12px 24px;
-      background: transparent;
-      color: var(--green);
-      font-weight: 500;
-      font-size: 15px;
-      border-radius: 6px;
-      border: 1px solid var(--green);
-    }
-    .btn-secondary:hover { background: rgba(63,185,80,0.1); text-decoration: none; }
+.card{background:var(--surface);border-radius:10px;box-shadow:var(--shadow-sm);padding:20px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))}
 
-    .divider {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 48px 0;
-    }
+/* Code cards: a header strip with a filename and a Copy button, separated from
+   the body by the fading-rule idiom, then a scrollable <pre>. Sample lines are
+   kept under ~60 characters so they never clip inside a narrow column. */
+.codecard{border-radius:10px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow-md);flex:1 1 360px;max-width:520px;min-width:0}
+.codecard header{display:flex;align-items:center;gap:9px;padding:10px 13px;
+  background-image:linear-gradient(to right,transparent,var(--divider) 48px,var(--divider) calc(100% - 48px),transparent);
+  background-repeat:no-repeat;background-position:bottom;background-size:100% 1px}
+.codecard header .name{font-family:var(--mono);font-size:12px;color:var(--n-500);min-width:0;overflow:hidden;text-overflow:ellipsis}
+.codecard header .btn{margin-left:auto}
+.codecard pre{padding:16px 15px;font-family:var(--mono);font-size:12.5px;line-height:1.85;overflow-x:auto;color:var(--n-300)}
+/* Syntax colours are tinted from the accent ramp, not a rainbow theme. */
+.t{color:var(--a-400)} .an{color:var(--n-500)} .av{color:var(--a-300)}
+.kw{color:var(--a-500)} .cm{color:var(--n-600)} .pr{color:var(--accent)}
 
-    /* Section titles */
-    .section-title {
-      font-family: var(--font-mono);
-      font-size: 14px;
-      color: var(--green);
-      margin-bottom: 28px;
-      letter-spacing: 0.02em;
-    }
+.glow{position:absolute;border-radius:50%;pointer-events:none;background:radial-gradient(closest-side,var(--a-900),transparent)}
+.mono{font-family:var(--mono)}
+.muted{color:var(--n-500)}
+.dim{color:var(--n-600)}
+.hr{height:1px;border:0;background:linear-gradient(to right,transparent,var(--divider) 48px,var(--divider) calc(100% - 48px),transparent)}
 
-    /* How it works */
-    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 48px; }
-    .step {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 24px;
-    }
-    .step-num {
-      font-family: var(--font-mono);
-      font-size: 32px;
-      color: var(--green);
-      opacity: 0.4;
-      margin-bottom: 12px;
-    }
-    .step-title { font-weight: 600; margin-bottom: 6px; font-size: 15px; }
-    .step-desc { font-size: 14px; color: var(--muted); line-height: 1.5; }
+nav.top{position:sticky;top:0;z-index:20;background:rgba(22,24,38,.88);backdrop-filter:blur(10px);
+  background-image:linear-gradient(to right,transparent,var(--divider) 48px,var(--divider) calc(100% - 48px),transparent);
+  background-repeat:no-repeat;background-position:bottom;background-size:100% 1px}
+nav.top .wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:13px;padding-bottom:13px}
+nav.top a.link{font-size:13.5px;color:var(--n-400)}
+nav.top a.link:hover{color:var(--text)}
+.brand{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:500;letter-spacing:-.02em}
+.brand em{color:var(--accent);font-style:normal}
+.mark{width:26px;height:26px;flex:none;display:grid;place-items:center;border-radius:7px;
+  background:var(--a-900);box-shadow:inset 0 0 0 1px var(--a-700);color:var(--a-400)}
 
-    /* Code snippet */
-    .code-block {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      overflow: hidden;
-      margin-bottom: 28px;
-    }
-    .code-bar {
-      background: var(--bg);
-      padding: 10px 14px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      border-bottom: 1px solid var(--border);
-    }
-    .dots { display: flex; gap: 6px; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; }
-    .dot-r { background: #FF5F57; }
-    .dot-y { background: #FFBD2E; }
-    .dot-g { background: #28C840; }
-    .code-filename {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .code-copy {
-      margin-left: auto;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--green);
-      background: none;
-      border: none;
-      cursor: pointer;
-      padding: 2px 8px;
-      border-radius: 4px;
-    }
-    .code-copy:hover { background: var(--border); }
-    .code-body {
-      padding: 16px;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.8;
-      overflow-x: auto;
-      white-space: pre;
-      color: var(--text);
-    }
-    .t-tag { color: #79c0ff; }
-    .t-attr { color: #d2a8ff; }
-    .t-val { color: #3fb950; }
-    .t-kw { color: #ffa657; }
+.step{position:relative;padding-top:20px}
+.step .num{font-family:var(--mono);font-size:12px;color:var(--n-600)}
+.step .tile,.feat .tile{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;
+  background:var(--a-900);box-shadow:inset 0 0 0 1px var(--a-700);color:var(--a-400);margin-left:auto}
+.feat .tile{width:30px;height:30px}
+.meter{height:8px;border-radius:4px;background:var(--n-900);overflow:hidden}
+.meter i{display:block;height:100%;border-radius:4px;background:linear-gradient(to right,var(--a-700),var(--a-500))}
+.rulebox{border-radius:8px;box-shadow:inset 0 0 0 1px var(--n-800);padding:9px 11px}
+.chip{font-family:var(--mono);font-size:11px;color:var(--n-300);background:var(--bg);border-radius:5px;padding:6px 8px;overflow-x:auto;white-space:pre}
 
-    /* Fields table */
-    .fields-table { width: 100%; border-collapse: collapse; margin-bottom: 48px; font-size: 14px; }
-    .fields-table th {
-      text-align: left;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      color: var(--muted);
-      font-family: var(--font-mono);
-      font-size: 13px;
-    }
-    .fields-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
-    .fields-table code {
-      font-family: var(--font-mono);
-      color: var(--green);
-      font-size: 13px;
-    }
+footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent,var(--divider) 48px,var(--divider) calc(100% - 48px),transparent);
+  background-repeat:no-repeat;background-position:top;background-size:100% 1px}
 
-    /* Features */
-    .features { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 40px; margin-bottom: 48px; }
-    .feature { font-size: 15px; padding: 6px 0; }
-    .feature::before { content: '✓ '; color: var(--green); font-weight: 600; }
-
-    /* Terminal commands */
-    .cmd-block {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 14px 16px;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.8;
-      margin-bottom: 16px;
-      overflow-x: auto;
-      white-space: pre;
-      color: var(--text);
-    }
-    .cmd-block .prompt { color: var(--green); user-select: none; }
-    .cmd-block .comment { color: var(--muted); }
-    .cmd-note { font-size: 13px; color: var(--muted); margin-top: 20px; }
-
-    /* Footer */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 32px 0;
-      text-align: center;
-      font-size: 14px;
-      color: var(--muted);
-      margin-top: 60px;
-    }
-    footer a { color: var(--muted); }
-    footer a:hover { color: var(--text); }
-    .footer-brand { font-family: var(--font-mono); color: var(--green); }
-    .footer-links { margin-top: 12px; display: flex; gap: 16px; justify-content: center; }
-
-    /* Webhook format badges */
-    .webhook-section { margin-bottom: 48px; }
-    .webhook-formats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin: 24px 0;
-    }
-    .webhook-format {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 18px;
-    }
-    .webhook-format-name {
-      font-family: var(--font-mono);
-      font-size: 13px;
-      color: var(--green);
-      font-weight: 500;
-      margin-bottom: 6px;
-    }
-    .webhook-format-desc {
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-
-    /* Animation */
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(16px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Responsive */
-    @media (max-width: 768px) {
-      .hero h1 { font-size: 36px; }
-      .hero { padding: 60px 0 40px; }
-      .steps { grid-template-columns: 1fr; }
-      .features { grid-template-columns: 1fr; }
-      .webhook-formats { grid-template-columns: 1fr; }
-      .nav-links { gap: 12px; }
-    }
-  </style>
+@media (max-width:640px){
+  .wrap{padding:0 18px}
+  section{padding:52px 0}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+</style>
 </head>
-<body>
+<body id="top">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<symbol id="ph-tray-arrow-down" viewBox="0 0 256 256"><path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,16V152h-28.7A15.86,15.86,0,0,0,168,156.69L148.69,176H107.31L88,156.69A15.86,15.86,0,0,0,76.69,152H48V48Zm0,160H48V168H76.69L96,187.31A15.86,15.86,0,0,0,107.31,192h41.38A15.86,15.86,0,0,0,160,187.31L179.31,168H208v40ZM90.34,125.66a8,8,0,0,1,11.32-11.32L120,132.69V72a8,8,0,0,1,16,0v60.69l18.34-18.35a8,8,0,0,1,11.32,11.32l-32,32a8,8,0,0,1-11.32,0Z"/></symbol>
+<symbol id="ph-github-logo" viewBox="0 0 256 256"><path d="M208.31,75.68A59.78,59.78,0,0,0,202.93,28,8,8,0,0,0,196,24a59.75,59.75,0,0,0-48,24H124A59.75,59.75,0,0,0,76,24a8,8,0,0,0-6.93,4,59.78,59.78,0,0,0-5.38,47.68A58.14,58.14,0,0,0,56,104v8a56.06,56.06,0,0,0,48.44,55.47A39.8,39.8,0,0,0,96,192v8H72a24,24,0,0,1-24-24A40,40,0,0,0,8,136a8,8,0,0,0,0,16,24,24,0,0,1,24,24,40,40,0,0,0,40,40H96v16a8,8,0,0,0,16,0V192a24,24,0,0,1,48,0v40a8,8,0,0,0,16,0V192a39.8,39.8,0,0,0-8.44-24.53A56.06,56.06,0,0,0,216,112v-8A58.14,58.14,0,0,0,208.31,75.68ZM200,112a40,40,0,0,1-40,40H112a40,40,0,0,1-40-40v-8a41.74,41.74,0,0,1,6.9-22.48A8,8,0,0,0,80,73.83a43.81,43.81,0,0,1,.79-33.58,43.88,43.88,0,0,1,32.32,20.06A8,8,0,0,0,119.82,64h32.35a8,8,0,0,0,6.74-3.69,43.87,43.87,0,0,1,32.32-20.06A43.81,43.81,0,0,1,192,73.83a8.09,8.09,0,0,0,1,7.65A41.72,41.72,0,0,1,200,104Z"/></symbol>
+<symbol id="ph-star" viewBox="0 0 256 256"><path d="M239.18,97.26A16.38,16.38,0,0,0,224.92,86l-59-4.76L143.14,26.15a16.36,16.36,0,0,0-30.27,0L90.11,81.23,31.08,86a16.46,16.46,0,0,0-9.37,28.86l45,38.83L53,211.75a16.38,16.38,0,0,0,24.5,17.82L128,198.49l50.53,31.08A16.4,16.4,0,0,0,203,211.75l-13.76-58.07,45-38.83A16.43,16.43,0,0,0,239.18,97.26Zm-15.34,5.47-48.7,42a8,8,0,0,0-2.56,7.91l14.88,62.8a.37.37,0,0,1-.17.48c-.18.14-.23.11-.38,0l-54.72-33.65a8,8,0,0,0-8.38,0L69.09,215.94c-.15.09-.19.12-.38,0a.37.37,0,0,1-.17-.48l14.88-62.8a8,8,0,0,0-2.56-7.91l-48.7-42c-.12-.1-.23-.19-.13-.5s.18-.27.33-.29l63.92-5.16A8,8,0,0,0,103,91.86l24.62-59.61c.08-.17.11-.25.35-.25s.27.08.35.25L153,91.86a8,8,0,0,0,6.75,4.92l63.92,5.16c.15,0,.24,0,.33.29S224,102.63,223.84,102.73Z"/></symbol>
+<symbol id="ph-file-html" viewBox="0 0 256 256"><path d="M216,120V88a8,8,0,0,0-2.34-5.66l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40v80a8,8,0,0,0,16,0V40h88V88a8,8,0,0,0,8,8h48v24a8,8,0,0,0,16,0ZM160,51.31,188.69,80H160ZM68,160v48a8,8,0,0,1-16,0V192H32v16a8,8,0,0,1-16,0V160a8,8,0,0,1,16,0v16H52V160a8,8,0,0,1,16,0Zm56,0a8,8,0,0,1-8,8h-8v40a8,8,0,0,1-16,0V168H84a8,8,0,0,1,0-16h32A8,8,0,0,1,124,160Zm72,0v48a8,8,0,0,1-16,0V184l-9.6,12.8a8,8,0,0,1-12.8,0L148,184v24a8,8,0,0,1-16,0V160a8,8,0,0,1,14.4-4.8L164,178.67l17.6-23.47A8,8,0,0,1,196,160Zm56,48a8,8,0,0,1-8,8H216a8,8,0,0,1-8-8V160a8,8,0,0,1,16,0v40h20A8,8,0,0,1,252,208Z"/></symbol>
+<symbol id="ph-copy" viewBox="0 0 256 256"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></symbol>
+<symbol id="ph-brackets-curly" viewBox="0 0 256 256"><path d="M43.18,128a29.78,29.78,0,0,1,8,10.26c4.8,9.9,4.8,22,4.8,33.74,0,24.31,1,36,24,36a8,8,0,0,1,0,16c-17.48,0-29.32-6.14-35.2-18.26-4.8-9.9-4.8-22-4.8-33.74,0-24.31-1-36-24-36a8,8,0,0,1,0-16c23,0,24-11.69,24-36,0-11.72,0-23.84,4.8-33.74C50.68,38.14,62.52,32,80,32a8,8,0,0,1,0,16C57,48,56,59.69,56,84c0,11.72,0,23.84-4.8,33.74A29.78,29.78,0,0,1,43.18,128ZM240,120c-23,0-24-11.69-24-36,0-11.72,0-23.84-4.8-33.74C205.32,38.14,193.48,32,176,32a8,8,0,0,0,0,16c23,0,24,11.69,24,36,0,11.72,0,23.84,4.8,33.74a29.78,29.78,0,0,0,8,10.26,29.78,29.78,0,0,0-8,10.26c-4.8,9.9-4.8,22-4.8,33.74,0,24.31-1,36-24,36a8,8,0,0,0,0,16c17.48,0,29.32-6.14,35.2-18.26,4.8-9.9,4.8-22,4.8-33.74,0-24.31,1-36,24-36a8,8,0,0,0,0-16Z"/></symbol>
+<symbol id="ph-slack-logo" viewBox="0 0 256 256"><path d="M221.13,128A32,32,0,0,0,184,76.31V56a32,32,0,0,0-56-21.13A32,32,0,0,0,76.31,72H56a32,32,0,0,0-21.13,56A32,32,0,0,0,72,179.69V200a32,32,0,0,0,56,21.13A32,32,0,0,0,179.69,184H200a32,32,0,0,0,21.13-56ZM72,152a16,16,0,1,1-16-16H72Zm48,48a16,16,0,0,1-32,0V152a16,16,0,0,1,16-16h16Zm0-80H56a16,16,0,0,1,0-32h48a16,16,0,0,1,16,16Zm0-48H104a16,16,0,1,1,16-16Zm16-16a16,16,0,0,1,32,0v48a16,16,0,0,1-16,16H136Zm16,160a16,16,0,0,1-16-16V184h16a16,16,0,0,1,0,32Zm48-48H152a16,16,0,0,1-16-16V136h64a16,16,0,0,1,0,32Zm0-48H184V104a16,16,0,1,1,16,16Z"/></symbol>
+<symbol id="ph-discord-logo" viewBox="0 0 256 256"><path d="M104,140a12,12,0,1,1-12-12A12,12,0,0,1,104,140Zm60-12a12,12,0,1,0,12,12A12,12,0,0,0,164,128Zm74.45,64.9-67,29.71a16.17,16.17,0,0,1-21.71-9.1l-8.11-22q-6.72.45-13.63.46t-13.63-.46l-8.11,22a16.18,16.18,0,0,1-21.71,9.1l-67-29.71a15.93,15.93,0,0,1-9.06-18.51L38,58A16.07,16.07,0,0,1,51,46.14l36.06-5.93a16.22,16.22,0,0,1,18.26,11.88l3.26,12.84Q118.11,64,128,64t19.4.93l3.26-12.84a16.21,16.21,0,0,1,18.26-11.88L205,46.14A16.07,16.07,0,0,1,218,58l29.53,116.38A15.93,15.93,0,0,1,238.45,192.9ZM232,178.28,202.47,62s0,0-.08,0L166.33,56a.17.17,0,0,0-.17,0l-2.83,11.14c5,.94,10,2.06,14.83,3.42A8,8,0,0,1,176,86.31a8.09,8.09,0,0,1-2.16-.3A172.25,172.25,0,0,0,128,80a172.25,172.25,0,0,0-45.84,6,8,8,0,1,1-4.32-15.4c4.82-1.36,9.78-2.48,14.82-3.42L89.83,56s0,0-.12,0h0L53.61,61.93a.17.17,0,0,0-.09,0L24,178.33,91,208a.23.23,0,0,0,.22,0L98,189.72a173.2,173.2,0,0,1-20.14-4.32A8,8,0,0,1,82.16,170,171.85,171.85,0,0,0,128,176a171.85,171.85,0,0,0,45.84-6,8,8,0,0,1,4.32,15.41A173.2,173.2,0,0,1,158,189.72L164.75,208a.22.22,0,0,0,.21,0Z"/></symbol>
+<symbol id="ph-list-numbers" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H104a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM104,72H216a8,8,0,0,0,0-16H104a8,8,0,0,0,0,16ZM216,184H104a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM43.58,55.16,48,52.94V104a8,8,0,0,0,16,0V40a8,8,0,0,0-11.58-7.16l-16,8a8,8,0,0,0,7.16,14.32ZM79.77,156.72a23.73,23.73,0,0,0-9.6-15.95,24.86,24.86,0,0,0-34.11,4.7,23.63,23.63,0,0,0-3.57,6.46,8,8,0,1,0,15,5.47,7.84,7.84,0,0,1,1.18-2.13,8.76,8.76,0,0,1,12-1.59A7.91,7.91,0,0,1,63.93,159a7.64,7.64,0,0,1-1.57,5.78,1,1,0,0,0-.08.11L33.59,203.21A8,8,0,0,0,40,216H72a8,8,0,0,0,0-16H56l19.08-25.53A23.47,23.47,0,0,0,79.77,156.72Z"/></symbol>
+<symbol id="ph-magnifying-glass" viewBox="0 0 256 256"><path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/></symbol>
+<symbol id="ph-users-three" viewBox="0 0 256 256"><path d="M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z"/></symbol>
+<symbol id="ph-terminal-window" viewBox="0 0 256 256"><path d="M128,128a8,8,0,0,1-3,6.25l-40,32a8,8,0,1,1-10-12.5L107.19,128,75,102.25a8,8,0,1,1,10-12.5l40,32A8,8,0,0,1,128,128Zm48,24H136a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm56-96V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Z"/></symbol>
+<symbol id="ph-shield-warning" viewBox="0 0 256 256"><path d="M120,136V96a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm8,48a12,12,0,1,0-12-12A12,12,0,0,0,128,184ZM224,56v56c0,52.72-25.52,84.67-46.93,102.19-23.06,18.86-46,25.27-47,25.53a8,8,0,0,1-4.2,0c-1-.26-23.91-6.67-47-25.53C57.52,196.67,32,164.72,32,112V56A16,16,0,0,1,48,40H208A16,16,0,0,1,224,56Zm-16,0L48,56l0,56c0,37.3,13.82,67.51,41.07,89.81A128.25,128.25,0,0,0,128,223.62a129.3,129.3,0,0,0,39.41-22.2C194.34,179.16,208,149.07,208,112Z"/></symbol>
+<symbol id="ph-link" viewBox="0 0 256 256"><path d="M240,88.23a54.43,54.43,0,0,1-16,37L189.25,160a54.27,54.27,0,0,1-38.63,16h-.05A54.63,54.63,0,0,1,96,119.84a8,8,0,0,1,16,.45A38.62,38.62,0,0,0,150.58,160h0a38.39,38.39,0,0,0,27.31-11.31l34.75-34.75a38.63,38.63,0,0,0-54.63-54.63l-11,11A8,8,0,0,1,135.7,59l11-11A54.65,54.65,0,0,1,224,48,54.86,54.86,0,0,1,240,88.23ZM109,185.66l-11,11A38.41,38.41,0,0,1,70.6,208h0a38.63,38.63,0,0,1-27.29-65.94L78,107.31A38.63,38.63,0,0,1,144,135.71a8,8,0,0,0,16,.45A54.86,54.86,0,0,0,144,96a54.65,54.65,0,0,0-77.27,0L32,130.75A54.62,54.62,0,0,0,70.56,224h0a54.28,54.28,0,0,0,38.64-16l11-11A8,8,0,0,0,109,185.66Z"/></symbol>
+<symbol id="ph-text-aa" viewBox="0 0 256 256"><path d="M87.24,52.59a8,8,0,0,0-14.48,0l-64,136a8,8,0,1,0,14.48,6.81L39.9,160h80.2l16.66,35.4a8,8,0,1,0,14.48-6.81ZM47.43,144,80,74.79,112.57,144ZM200,96c-12.76,0-22.73,3.47-29.63,10.32a8,8,0,0,0,11.26,11.36c3.8-3.77,10-5.68,18.37-5.68,13.23,0,24,9,24,20v3.22A42.76,42.76,0,0,0,200,128c-22.06,0-40,16.15-40,36s17.94,36,40,36a42.73,42.73,0,0,0,24-7.25,8,8,0,0,0,16-.75V132C240,112.15,222.06,96,200,96Zm0,88c-13.23,0-24-9-24-20s10.77-20,24-20,24,9,24,20S213.23,184,200,184Z"/></symbol>
+<symbol id="ph-prohibit" viewBox="0 0 256 256"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm88,104a87.56,87.56,0,0,1-20.41,56.28L71.72,60.4A88,88,0,0,1,216,128ZM40,128A87.56,87.56,0,0,1,60.41,71.72L184.28,195.6A88,88,0,0,1,40,128Z"/></symbol>
+<symbol id="ph-user-check" viewBox="0 0 256 256"><path d="M144,157.68a68,68,0,1,0-71.9,0c-20.65,6.76-39.23,19.39-54.17,37.17a8,8,0,0,0,12.25,10.3C50.25,181.19,77.91,168,108,168s57.75,13.19,77.87,37.15a8,8,0,0,0,12.25-10.3C183.18,177.07,164.6,164.44,144,157.68ZM56,100a52,52,0,1,1,52,52A52.06,52.06,0,0,1,56,100Zm197.66,33.66-32,32a8,8,0,0,1-11.32,0l-16-16a8,8,0,0,1,11.32-11.32L216,148.69l26.34-26.35a8,8,0,0,1,11.32,11.32Z"/></symbol>
+<symbol id="ph-lock-key" viewBox="0 0 256 256"><path d="M128,112a28,28,0,0,0-8,54.83V184a8,8,0,0,0,16,0V166.83A28,28,0,0,0,128,112Zm0,40a12,12,0,1,1,12-12A12,12,0,0,1,128,152Zm80-72H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96ZM208,208H48V96H208V208Z"/></symbol>
+<symbol id="ph-database" viewBox="0 0 256 256"><path d="M128,24C74.17,24,32,48.6,32,80v96c0,31.4,42.17,56,96,56s96-24.6,96-56V80C224,48.6,181.83,24,128,24Zm80,104c0,9.62-7.88,19.43-21.61,26.92C170.93,163.35,150.19,168,128,168s-42.93-4.65-58.39-13.08C55.88,147.43,48,137.62,48,128V111.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64ZM69.61,53.08C85.07,44.65,105.81,40,128,40s42.93,4.65,58.39,13.08C200.12,60.57,208,70.38,208,80s-7.88,19.43-21.61,26.92C170.93,115.35,150.19,120,128,120s-42.93-4.65-58.39-13.08C55.88,99.43,48,89.62,48,80S55.88,60.57,69.61,53.08ZM186.39,202.92C170.93,211.35,150.19,216,128,216s-42.93-4.65-58.39-13.08C55.88,195.43,48,185.62,48,176V159.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64V176C208,185.62,200.12,195.43,186.39,202.92Z"/></symbol>
+<symbol id="ph-envelope" viewBox="0 0 256 256"><path d="M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48Zm-96,85.15L52.57,64H203.43ZM98.71,128,40,181.81V74.19Zm11.84,10.85,12,11.05a8,8,0,0,0,10.82,0l12-11.05,58,53.15H52.57ZM157.29,128,216,74.18V181.82Z"/></symbol>
+<symbol id="ph-webhooks-logo" viewBox="0 0 256 256"><path d="M178.16,176H111.32A48,48,0,1,1,25.6,139.19a8,8,0,0,1,12.8,9.61A31.69,31.69,0,0,0,32,168a32,32,0,0,0,64,0,8,8,0,0,1,8-8h74.16a16,16,0,1,1,0,16ZM64,184a16,16,0,0,0,14.08-23.61l35.77-58.14a8,8,0,0,0-2.62-11,32,32,0,1,1,46.1-40.06A8,8,0,1,0,172,44.79a48,48,0,1,0-75.62,55.33L64.44,152c-.15,0-.29,0-.44,0a16,16,0,0,0,0,32Zm128-64a48.18,48.18,0,0,0-18,3.49L142.08,71.6A16,16,0,1,0,128,80l.44,0,35.78,58.15a8,8,0,0,0,11,2.61A32,32,0,1,1,192,200a8,8,0,0,0,0,16,48,48,0,0,0,0-96Z"/></symbol>
+<symbol id="ph-gauge" viewBox="0 0 256 256"><path d="M207.06,72.67A111.24,111.24,0,0,0,128,40h-.4C66.07,40.21,16,91,16,153.13V176a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V152A111.25,111.25,0,0,0,207.06,72.67ZM224,176H119.71l54.76-75.3a8,8,0,0,0-12.94-9.42L99.92,176H32V153.13c0-3.08.15-6.12.43-9.13H56a8,8,0,0,0,0-16H35.27c10.32-38.86,44-68.24,84.73-71.66V80a8,8,0,0,0,16,0V56.33A96.14,96.14,0,0,1,221,128H200a8,8,0,0,0,0,16h23.67c.21,2.65.33,5.31.33,8Z"/></symbol>
+<symbol id="ph-arrow-u-up-left" viewBox="0 0 256 256"><path d="M232,144a64.07,64.07,0,0,1-64,64H80a8,8,0,0,1,0-16h88a48,48,0,0,0,0-96H51.31l34.35,34.34a8,8,0,0,1-11.32,11.32l-48-48a8,8,0,0,1,0-11.32l48-48A8,8,0,0,1,85.66,45.66L51.31,80H168A64.07,64.07,0,0,1,232,144Z"/></symbol>
+<symbol id="ph-check" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></symbol>
+<symbol id="ph-package" viewBox="0 0 256 256"><path d="M223.68,66.15,135.68,18a15.88,15.88,0,0,0-15.36,0l-88,48.17a16,16,0,0,0-8.32,14v95.64a16,16,0,0,0,8.32,14l88,48.17a15.88,15.88,0,0,0,15.36,0l88-48.17a16,16,0,0,0,8.32-14V80.18A16,16,0,0,0,223.68,66.15ZM128,32l80.34,44-29.77,16.3-80.35-44ZM128,120,47.66,76l33.9-18.56,80.34,44ZM40,90l80,43.78v85.79L40,175.82Zm176,85.78h0l-80,43.79V133.82l32-17.51V152a8,8,0,0,0,16,0V107.55L216,90v85.77Z"/></symbol>
+<symbol id="ph-fingerprint" viewBox="0 0 256 256"><path d="M72,128a134.63,134.63,0,0,1-14.16,60.47,8,8,0,1,1-14.32-7.12A118.8,118.8,0,0,0,56,128,71.73,71.73,0,0,1,83,71.8,8,8,0,1,1,93,84.29,55.76,55.76,0,0,0,72,128Zm56-8a8,8,0,0,0-8,8,184.12,184.12,0,0,1-23,89.1,8,8,0,0,0,14,7.76A200.19,200.19,0,0,0,136,128,8,8,0,0,0,128,120Zm0-32a40,40,0,0,0-40,40,8,8,0,0,0,16,0,24,24,0,0,1,48,0,214.09,214.09,0,0,1-20.51,92A8,8,0,1,0,146,226.83,230,230,0,0,0,168,128,40,40,0,0,0,128,88Zm0-64A104.11,104.11,0,0,0,24,128a87.76,87.76,0,0,1-5,29.33,8,8,0,0,0,15.09,5.33A103.9,103.9,0,0,0,40,128a88,88,0,0,1,176,0,282.24,282.24,0,0,1-5.29,54.45,8,8,0,0,0,6.3,9.4,8.22,8.22,0,0,0,1.55.15,8,8,0,0,0,7.84-6.45A298.37,298.37,0,0,0,232,128,104.12,104.12,0,0,0,128,24ZM94.4,152.17A8,8,0,0,0,85,158.42a151,151,0,0,1-17.21,45.44,8,8,0,0,0,13.86,8,166.67,166.67,0,0,0,19-50.25A8,8,0,0,0,94.4,152.17ZM128,56a72.85,72.85,0,0,0-9,.56,8,8,0,0,0,2,15.87A56.08,56.08,0,0,1,184,128a252.12,252.12,0,0,1-1.92,31A8,8,0,0,0,189,168a8.39,8.39,0,0,0,1,.06,8,8,0,0,0,7.92-7,266.48,266.48,0,0,0,2-33A72.08,72.08,0,0,0,128,56Zm57.93,128.25a8,8,0,0,0-9.75,5.75c-1.46,5.69-3.15,11.4-5,17a8,8,0,0,0,5,10.13,7.88,7.88,0,0,0,2.55.42,8,8,0,0,0,7.58-5.46c2-5.92,3.79-12,5.35-18.05A8,8,0,0,0,185.94,184.26Z"/></symbol>
+<symbol id="ph-chart-line-up" viewBox="0 0 256 256"><path d="M232,208a8,8,0,0,1-8,8H32a8,8,0,0,1-8-8V48a8,8,0,0,1,16,0V156.69l50.34-50.35a8,8,0,0,1,11.32,0L128,132.69,180.69,80H160a8,8,0,0,1,0-16h40a8,8,0,0,1,8,8v40a8,8,0,0,1-16,0V91.31l-58.34,58.35a8,8,0,0,1-11.32,0L96,123.31l-56,56V200H224A8,8,0,0,1,232,208Z"/></symbol>
+<symbol id="ph-funnel" viewBox="0 0 256 256"><path d="M230.6,49.53A15.81,15.81,0,0,0,216,40H40A16,16,0,0,0,28.19,66.76l.08.09L96,139.17V216a16,16,0,0,0,24.87,13.32l32-21.34A16,16,0,0,0,160,194.66V139.17l67.74-72.32.08-.09A15.8,15.8,0,0,0,230.6,49.53ZM40,56h0Zm106.18,74.58A8,8,0,0,0,144,136v58.66L112,216V136a8,8,0,0,0-2.16-5.47L40,56H216Z"/></symbol>
+<symbol id="ph-cloud-arrow-up" viewBox="0 0 256 256"><path d="M178.34,165.66,160,147.31V208a8,8,0,0,1-16,0V147.31l-18.34,18.35a8,8,0,0,1-11.32-11.32l32-32a8,8,0,0,1,11.32,0l32,32a8,8,0,0,1-11.32,11.32ZM160,40A88.08,88.08,0,0,0,81.29,88.68,64,64,0,1,0,72,216h40a8,8,0,0,0,0-16H72a48,48,0,0,1,0-96c1.1,0,2.2,0,3.29.12A88,88,0,0,0,72,128a8,8,0,0,0,16,0,72,72,0,1,1,100.8,66,8,8,0,0,0,3.2,15.34,7.9,7.9,0,0,0,3.2-.68A88,88,0,0,0,160,40Z"/></symbol>
+<symbol id="ph-clipboard-text" viewBox="0 0 256 256"><path d="M168,152a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,152Zm-8-40H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm56-64V216a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V48A16,16,0,0,1,56,32H92.26a47.92,47.92,0,0,1,71.48,0H200A16,16,0,0,1,216,48ZM96,64h64a32,32,0,0,0-64,0ZM200,48H173.25A47.93,47.93,0,0,1,176,64v8a8,8,0,0,1-8,8H88a8,8,0,0,1-8-8V64a47.93,47.93,0,0,1,2.75-16H56V216H200Z"/></symbol>
+<symbol id="ph-book-open" viewBox="0 0 256 256"><path d="M232,48H160a40,40,0,0,0-32,16A40,40,0,0,0,96,48H24a8,8,0,0,0-8,8V200a8,8,0,0,0,8,8H96a24,24,0,0,1,24,24,8,8,0,0,0,16,0,24,24,0,0,1,24-24h72a8,8,0,0,0,8-8V56A8,8,0,0,0,232,48ZM96,192H32V64H96a24,24,0,0,1,24,24V200A39.81,39.81,0,0,0,96,192Zm128,0H160a39.81,39.81,0,0,0-24,8V88a24,24,0,0,1,24-24h64Z"/></symbol>
+<symbol id="ph-chat-circle-dots" viewBox="0 0 256 256"><path d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM84,116a12,12,0,1,0,12,12A12,12,0,0,0,84,116Zm88,0a12,12,0,1,0,12,12A12,12,0,0,0,172,116Zm60,12A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z"/></symbol>
+</svg>
 
-<nav>
-  <span class="nav-brand">dsforms</span>
-  <div class="nav-links">
-    <a href="https://github.com/barancezayirli/dsforms" target="_blank">GitHub ↗</a>
-    <a href="#webhooks">Webhooks ↓</a>
-    <a href="#waitlist">Waitlist ↓</a>
-    <a href="#self-host">Self-host ↓</a>
+<nav class="top">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <span class="mark"><svg class="i" style="font-size:15px"><use href="#ph-tray-arrow-down"/></svg></span>
+      ds<em>forms</em>
+    </a>
+    <a class="link" href="#how">How it works</a>
+    <a class="link" href="#spam">Spam filter</a>
+    <a class="link" href="#webhooks">Webhooks</a>
+    <a class="link" href="#waitlist">Waitlist</a>
+    <a class="link" href="#admin">Admin</a>
+    <div style="margin-left:auto;display:flex;gap:9px;flex-wrap:wrap">
+      <a class="btn btn-secondary" href="https://github.com/barancezayirli/dsforms">
+        <svg class="i" style="font-size:15px"><use href="#ph-star"/></svg>Star
+      </a>
+      <a class="btn btn-primary" href="#self-host">Self-host it</a>
+    </div>
   </div>
 </nav>
 
-<main class="container">
-
-  <!-- Hero -->
-  <section class="hero">
-    <h1>Form submissions<br>for static sites.</h1>
-    <p class="hero-sub">Self-hosted · One binary · No SaaS</p>
-    <div class="hero-buttons">
-      <a class="btn-primary" href="#self-host">Self-host in 5 min →</a>
-      <a class="btn-secondary" href="https://github.com/barancezayirli/dsforms" target="_blank">View on GitHub →</a>
-    </div>
-  </section>
-
-  <hr class="divider">
-
-  <!-- How it works -->
-  <section>
-    <div class="section-title">// how it works</div>
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">01</div>
-        <div class="step-title">Deploy DSForms</div>
-        <div class="step-desc">on your server with Docker Compose</div>
+<!-- Hero -->
+<section style="position:relative;overflow:hidden;padding-top:64px">
+  <div class="glow" aria-hidden="true" style="width:820px;height:560px;max-width:140vw;top:-260px;left:-160px"></div>
+  <div class="wrap row" style="position:relative;align-items:center">
+    <div style="flex:1 1 440px;min-width:0">
+      <div class="kick"><span></span><span>Self-hosted</span></div>
+      <h1 style="font-size:clamp(38px,5.4vw,58px);letter-spacing:-.03em;text-wrap:balance">
+        Form submissions for static sites.
+      </h1>
+      <p class="lede" style="font-size:18px;color:var(--n-400)">
+        Point your HTML form at one endpoint. Get an email, a webhook, and a
+        searchable inbox — on your own server, in one SQLite file you can copy.
+      </p>
+      <div style="display:flex;gap:10px;margin-top:24px;flex-wrap:wrap">
+        <a class="btn btn-primary btn-lg" href="#self-host">
+          <svg class="i" style="font-size:16px"><use href="#ph-terminal-window"/></svg>Self-host it
+        </a>
+        <a class="btn btn-secondary btn-lg" href="https://github.com/barancezayirli/dsforms">
+          <svg class="i" style="font-size:16px"><use href="#ph-github-logo"/></svg>Read the source
+        </a>
       </div>
-      <div class="step">
-        <div class="step-num">02</div>
-        <div class="step-title">Create a form</div>
-        <div class="step-desc">in the admin UI and get your endpoint URL</div>
-      </div>
-      <div class="step">
-        <div class="step-num">03</div>
-        <div class="step-title">Paste the snippet</div>
-        <div class="step-desc">into your HTML and you're done</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- HTML Snippet -->
-  <section>
-    <div class="section-title">// drop this in your html</div>
-    <div class="code-block">
-      <div class="code-bar">
-        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
-        <span class="code-filename">contact.html</span>
-        <button class="code-copy" id="copy-btn" aria-label="Copy code snippet">Copy</button>
-      </div>
-      <pre class="code-body" id="snippet"><span class="t-tag">&lt;form</span> <span class="t-attr">action</span>=<span class="t-val">"https://your-server.com/f/YOUR_FORM_ID"</span> <span class="t-attr">method</span>=<span class="t-val">"POST"</span><span class="t-tag">&gt;</span>
-  <span class="t-tag">&lt;input</span> <span class="t-attr">type</span>=<span class="t-val">"hidden"</span> <span class="t-attr">name</span>=<span class="t-val">"_redirect"</span> <span class="t-attr">value</span>=<span class="t-val">"https://yoursite.com/thanks"</span><span class="t-tag">&gt;</span>
-  <span class="t-tag">&lt;input</span> <span class="t-attr">type</span>=<span class="t-val">"text"</span>   <span class="t-attr">name</span>=<span class="t-val">"name"</span>    <span class="t-attr">placeholder</span>=<span class="t-val">"Your name"</span>    <span class="t-kw">required</span><span class="t-tag">&gt;</span>
-  <span class="t-tag">&lt;input</span> <span class="t-attr">type</span>=<span class="t-val">"email"</span>  <span class="t-attr">name</span>=<span class="t-val">"email"</span>   <span class="t-attr">placeholder</span>=<span class="t-val">"Your email"</span>   <span class="t-kw">required</span><span class="t-tag">&gt;</span>
-  <span class="t-tag">&lt;textarea</span>            <span class="t-attr">name</span>=<span class="t-val">"message"</span> <span class="t-attr">placeholder</span>=<span class="t-val">"Your message"</span> <span class="t-kw">required</span><span class="t-tag">&gt;&lt;/textarea&gt;</span>
-  <span class="t-tag">&lt;button</span> <span class="t-attr">type</span>=<span class="t-val">"submit"</span><span class="t-tag">&gt;</span>Send<span class="t-tag">&lt;/button&gt;</span>
-<span class="t-tag">&lt;/form&gt;</span></pre>
-    </div>
-
-    <table class="fields-table">
-      <thead><tr><th>Field</th><th>Purpose</th></tr></thead>
-      <tbody>
-        <tr><td><code>_redirect</code></td><td>Where to send the user after submission</td></tr>
-        <tr><td><code>_subject</code></td><td>Custom email subject line</td></tr>
-        <tr><td><code>_honeypot</code></td><td>Hidden spam trap — bots fill it, humans don't</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <!-- Features -->
-  <section>
-    <div class="section-title">// what you get</div>
-    <div class="features">
-      <div class="feature">Email notifications on every submission</div>
-      <div class="feature">Webhook notifications (Slack, Discord, JSON)</div>
-      <div class="feature">Waitlist mode — positions, confirmations &amp; broadcasts</div>
-      <div class="feature">Submissions stored in SQLite</div>
-      <div class="feature">Simple admin UI to view &amp; manage</div>
-      <div class="feature">CSV export</div>
-      <div class="feature">Honeypot + rate limiting built in</div>
-      <div class="feature">Single Docker Compose deploy</div>
-      <div class="feature">Open source — MIT license</div>
-      <div class="feature">No per-submission fees, ever</div>
-    </div>
-  </section>
-
-  <hr class="divider">
-
-  <!-- Webhooks -->
-  <section id="webhooks" class="webhook-section">
-    <div class="section-title">// webhook notifications</div>
-    <p style="color:var(--muted);font-size:15px;margin-bottom:24px;">
-      Get notified on every submission — in your Slack workspace, Discord server, or any HTTP endpoint. Configure per-form in the admin UI. Email remains optional.
-    </p>
-
-    <div class="webhook-formats">
-      <div class="webhook-format">
-        <div class="webhook-format-name">Slack</div>
-        <div class="webhook-format-desc">Block Kit layout. Short fields appear side-by-side; long fields get their own row. Drop in your Incoming Webhook URL and done.</div>
-      </div>
-      <div class="webhook-format">
-        <div class="webhook-format-name">Discord</div>
-        <div class="webhook-format-desc">Rich embed with inline fields. Short values are inline (up to 3 per row); long values span the full width. Username set to "DSForms".</div>
-      </div>
-      <div class="webhook-format">
-        <div class="webhook-format-name">Generic JSON</div>
-        <div class="webhook-format-desc">Flat JSON payload for Zapier, n8n, Make, or any custom endpoint. Includes form name, form ID, timestamp, and all submitted fields.</div>
+      <div style="display:flex;gap:7px;margin-top:22px;flex-wrap:wrap">
+        <span class="tag">One Go binary</span>
+        <span class="tag">SQLite, no ORM</span>
+        <span class="tag">MIT licensed</span>
+        <span class="tag">~20MB image</span>
+        <span class="tag">No SaaS</span>
       </div>
     </div>
 
-    <div class="code-block">
-      <div class="code-bar">
-        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
-        <span class="code-filename">generic payload</span>
+    <div class="codecard">
+      <header>
+        <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-file-html"/></svg>
+        <span class="name">contact.html</span>
+        <button class="btn btn-ghost" data-copy>
+          <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span>Copy</span>
+        </button>
+      </header>
+<pre><span class="t">&lt;form</span>
+  <span class="an">method</span>=<span class="av">"POST"</span>
+  <span class="an">action</span>=<span class="av">"https://forms.you.dev/f/4b91c0"</span><span class="t">&gt;</span>
+
+  <span class="t">&lt;input</span> <span class="an">name</span>=<span class="av">"name"</span>    <span class="kw">required</span><span class="t">&gt;</span>
+  <span class="t">&lt;input</span> <span class="an">name</span>=<span class="av">"email"</span>   <span class="kw">required</span><span class="t">&gt;</span>
+  <span class="t">&lt;textarea</span> <span class="an">name</span>=<span class="av">"message"</span><span class="t">&gt;&lt;/textarea&gt;</span>
+
+  <span class="cm">&lt;!-- bots fill this, people don't --&gt;</span>
+  <span class="t">&lt;input</span> <span class="an">name</span>=<span class="av">"_honeypot"</span> <span class="an">hidden</span><span class="t">&gt;</span>
+
+  <span class="t">&lt;button&gt;</span>Send<span class="t">&lt;/button&gt;</span>
+<span class="t">&lt;/form&gt;</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section id="how">
+  <div class="wrap">
+    <div class="kick"><span></span><span>How it works</span></div>
+    <h2>Three steps, then it is someone else's problem.</h2>
+    <p class="lede">No JavaScript on your site. No account. No third party between
+       your visitor and your server.</p>
+
+    <div class="grid" style="margin-top:32px">
+      <div class="card step">
+        <div style="display:flex;align-items:flex-start">
+          <span class="num">01</span>
+          <span class="tile"><svg class="i" style="font-size:17px"><use href="#ph-clipboard-text"/></svg></span>
+        </div>
+        <h3 style="font-size:17px;margin-top:12px">Create a form</h3>
+        <p class="muted" style="font-size:14px;margin-top:6px">
+          Name it, give it an address to notify, and copy the endpoint. About twenty seconds.
+        </p>
       </div>
-      <pre class="code-body">{
-  <span class="t-attr">"form_name"</span>:    <span class="t-val">"Contact"</span>,
-  <span class="t-attr">"form_id"</span>:      <span class="t-val">"abc123"</span>,
-  <span class="t-attr">"submitted_at"</span>: <span class="t-val">"2026-03-26T14:30:00Z"</span>,
-  <span class="t-attr">"fields"</span>: {
-    <span class="t-attr">"name"</span>:    <span class="t-val">"Jane"</span>,
-    <span class="t-attr">"email"</span>:   <span class="t-val">"jane@example.com"</span>,
-    <span class="t-attr">"message"</span>: <span class="t-val">"Hello!"</span>
+      <div class="card step">
+        <div style="display:flex;align-items:flex-start">
+          <span class="num">02</span>
+          <span class="tile"><svg class="i" style="font-size:17px"><use href="#ph-file-html"/></svg></span>
+        </div>
+        <h3 style="font-size:17px;margin-top:12px">Point your form at it</h3>
+        <p class="muted" style="font-size:14px;margin-top:6px">
+          A plain <code class="mono">action</code> attribute. Works on Netlify, Pages,
+          S3, or a file on a USB stick.
+        </p>
+      </div>
+      <div class="card step">
+        <div style="display:flex;align-items:flex-start">
+          <span class="num">03</span>
+          <span class="tile"><svg class="i" style="font-size:17px"><use href="#ph-envelope"/></svg></span>
+        </div>
+        <h3 style="font-size:17px;margin-top:12px">Read it wherever</h3>
+        <p class="muted" style="font-size:14px;margin-top:6px">
+          Email, a Slack webhook, CSV export, or the admin's own searchable inbox.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Spam filter -->
+<section id="spam">
+  <div class="wrap">
+    <div class="kick"><span></span><span>Spam filter</span></div>
+    <h2>It holds spam. It does not silently eat mail.</h2>
+    <p class="lede">A weighted filter with no configuration to get wrong. Anything it
+       holds stays reviewable for thirty days, with the exact reason attached — because
+       the expensive failure is not spam getting through, it is a real customer
+       disappearing.</p>
+
+    <div class="row" style="margin-top:32px;align-items:flex-start">
+      <div style="flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:10px">
+          <svg class="i" style="font-size:16px;color:var(--accent);margin-top:3px"><use href="#ph-check"/></svg>
+          <p style="font-size:14.5px">Link markup, injection probes, keyword pile-ups,
+             synthetic-looking text and repeat-IP bursts — each weighted, never one
+             signal deciding alone.</p>
+        </div>
+        <div style="display:flex;gap:10px">
+          <svg class="i" style="font-size:16px;color:var(--accent);margin-top:3px"><use href="#ph-check"/></svg>
+          <p style="font-size:14.5px">Every held submission keeps its breakdown: which
+             rule, which field, which characters, worth how many points.</p>
+        </div>
+        <div style="display:flex;gap:10px">
+          <svg class="i" style="font-size:16px;color:var(--accent);margin-top:3px"><use href="#ph-check"/></svg>
+          <p style="font-size:14.5px">Restore puts it back in the inbox as unread and
+             sends the notification that was withheld.</p>
+        </div>
+        <div style="display:flex;gap:10px">
+          <svg class="i" style="font-size:16px;color:var(--accent);margin-top:3px"><use href="#ph-check"/></svg>
+          <p style="font-size:14.5px">Block or allow an address, a domain, an IP or a
+             CIDR range. Allow always wins.</p>
+        </div>
+      </div>
+
+      <!-- The reviewer's actual panel, not a feature bullet about it. -->
+      <div class="card" style="flex:1 1 340px;max-width:460px;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-right:auto">why it was held</span>
+          <span class="tag" style="border:1px solid var(--accent);color:var(--accent);background:transparent">score 11 / 6</span>
+        </div>
+        <div style="font-size:15px;font-weight:500;margin-top:6px">Marketing Bot</div>
+        <div class="dim mono" style="font-size:12px;margin-top:2px">45.155.204.7 · Contact · 2d</div>
+
+        <div style="margin-top:16px">
+          <div class="meter"><i style="width:92%"></i></div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--n-600);margin-top:4px">
+            <span>0</span><span>threshold 6</span><span>12</span>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px">
+          <div class="rulebox">
+            <div style="display:flex;align-items:center;gap:8px">
+              <svg class="i" style="font-size:14px;color:var(--accent)"><use href="#ph-link"/></svg>
+              <span style="font-size:12px;font-weight:500">Link markup</span>
+              <span class="tag" style="margin-left:auto;border:1px solid var(--accent);color:var(--accent);background:transparent;font-size:10px">+6</span>
+            </div>
+            <div style="font-size:11px;color:var(--n-600);margin-top:5px">field <code class="mono">message</code> · matched</div>
+            <div class="chip" style="margin-top:5px">[url=</div>
+          </div>
+          <div class="rulebox">
+            <div style="display:flex;align-items:center;gap:8px">
+              <svg class="i" style="font-size:14px;color:var(--accent)"><use href="#ph-text-aa"/></svg>
+              <span style="font-size:12px;font-weight:500">Keyword hit</span>
+              <span class="tag" style="margin-left:auto;border:1px solid var(--accent);color:var(--accent);background:transparent;font-size:10px">+5</span>
+            </div>
+            <div style="font-size:11px;color:var(--n-600);margin-top:5px">field <code class="mono">message</code> · matched</div>
+            <div class="chip" style="margin-top:5px">backlinks</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+          <span class="btn btn-primary" style="width:100%">
+            <svg class="i" style="font-size:15px"><use href="#ph-arrow-u-up-left"/></svg>Not spam
+          </span>
+          <span class="btn btn-secondary" style="width:100%">
+            <svg class="i" style="font-size:15px"><use href="#ph-prohibit"/></svg>Block this IP
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Webhooks -->
+<section id="webhooks">
+  <div class="wrap">
+    <div class="kick"><span></span><span>Webhooks</span></div>
+    <h2>Straight into the channel you already watch.</h2>
+
+    <div class="row" style="margin-top:32px;align-items:flex-start">
+      <div style="flex:1 1 320px;min-width:0;display:grid;gap:14px">
+        <div class="card" style="display:flex;align-items:center;gap:12px">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:17px"><use href="#ph-slack-logo"/></svg></span>
+          <div><div style="font-weight:500">Slack</div><div class="muted" style="font-size:13px">Formatted attachment per submission</div></div>
+        </div>
+        <div class="card" style="display:flex;align-items:center;gap:12px">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:17px"><use href="#ph-discord-logo"/></svg></span>
+          <div><div style="font-weight:500">Discord</div><div class="muted" style="font-size:13px">Embed with every field</div></div>
+        </div>
+        <div class="card" style="display:flex;align-items:center;gap:12px">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:17px"><use href="#ph-brackets-curly"/></svg></span>
+          <div><div style="font-weight:500">Generic JSON</div><div class="muted" style="font-size:13px">POST it anywhere you like</div></div>
+        </div>
+      </div>
+
+      <div class="codecard">
+        <header>
+          <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-brackets-curly"/></svg>
+          <span class="name">POST your-endpoint</span>
+          <button class="btn btn-ghost" data-copy>
+            <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span>Copy</span>
+          </button>
+        </header>
+<pre>{
+  <span class="an">"form_id"</span>: <span class="av">"4b91c0"</span>,
+  <span class="an">"form_name"</span>: <span class="av">"Contact"</span>,
+  <span class="an">"submitted_at"</span>: <span class="av">"2026-09-09T12:04:11Z"</span>,
+  <span class="an">"data"</span>: {
+    <span class="an">"name"</span>: <span class="av">"Jane Doe"</span>,
+    <span class="an">"email"</span>: <span class="av">"jane@example.com"</span>,
+    <span class="an">"message"</span>: <span class="av">"Loved the article."</span>
   }
 }</pre>
-    </div>
-
-    <p style="font-size:13px;color:var(--muted);">
-      Webhooks fire in a background goroutine — never blocking the form response. A built-in "Test Webhook" button in the admin UI lets you verify your endpoint before going live.
-    </p>
-  </section>
-
-  <hr class="divider">
-
-  <!-- Waitlist -->
-  <section id="waitlist" class="webhook-section">
-    <div class="section-title">// waitlist mode</div>
-    <p style="color:var(--muted);font-size:15px;margin-bottom:24px;">
-      A form notifies <em>you</em>. A waitlist captures unique people and emails <em>them</em> back. Collect signups by email, show each person their place in line, and broadcast to the whole list when you launch — all self-hosted, no mailing-list SaaS.
-    </p>
-
-    <div class="webhook-formats">
-      <div class="webhook-format">
-        <div class="webhook-format-name">Dedup by email</div>
-        <div class="webhook-format-desc">One row per email address. A repeat signup returns the existing position instead of creating a duplicate.</div>
-      </div>
-      <div class="webhook-format">
-        <div class="webhook-format-name">Position</div>
-        <div class="webhook-format-desc">Every signup gets a place in line — "you're #1,247" — returned instantly so your page can show it.</div>
-      </div>
-      <div class="webhook-format">
-        <div class="webhook-format-name">Broadcast</div>
-        <div class="webhook-format-desc">Compose once, send to everyone. A restart-safe queue delivers each email with throttling and retries.</div>
       </div>
     </div>
+  </div>
+</section>
 
-    <div class="code-block">
-      <div class="code-bar">
-        <div class="dots"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
-        <span class="code-filename">POST /w/YOUR_WAITLIST_ID</span>
-      </div>
-      <pre class="code-body"><span class="t-tag">&lt;form</span> <span class="t-attr">action</span>=<span class="t-val">"https://your-server.com/w/YOUR_WAITLIST_ID"</span> <span class="t-attr">method</span>=<span class="t-val">"POST"</span><span class="t-tag">&gt;</span>
-  <span class="t-tag">&lt;input</span> <span class="t-attr">type</span>=<span class="t-val">"email"</span> <span class="t-attr">name</span>=<span class="t-val">"email"</span> <span class="t-attr">required</span><span class="t-tag">&gt;</span>
-  <span class="t-tag">&lt;button&gt;</span>Join the waitlist<span class="t-tag">&lt;/button&gt;</span>
-<span class="t-tag">&lt;/form&gt;</span>
+<!-- Waitlist -->
+<section id="waitlist">
+  <div class="wrap">
+    <div class="kick"><span></span><span>Waitlist mode</span></div>
+    <h2>The same endpoint shape, with positions.</h2>
 
-<span class="t-val">// JSON response (Accept: application/json)</span>
+    <div class="row" style="margin-top:32px;align-items:flex-start">
+      <div class="codecard">
+        <header>
+          <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-list-numbers"/></svg>
+          <span class="name">POST /w/{id}</span>
+          <button class="btn btn-ghost" data-copy>
+            <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span>Copy</span>
+          </button>
+        </header>
+<pre><span class="pr">$</span> curl -X POST https://forms.you.dev/w/launch \
+    -d <span class="av">"email=jane@example.com"</span>
+
 {
-  <span class="t-attr">"success"</span>:        <span class="t-val">true</span>,
-  <span class="t-attr">"position"</span>:       <span class="t-val">1247</span>,
-  <span class="t-attr">"already_joined"</span>: <span class="t-val">false</span>
+  <span class="an">"success"</span>: <span class="kw">true</span>,
+  <span class="an">"position"</span>: <span class="kw">2481</span>,
+  <span class="an">"already_joined"</span>: <span class="kw">false</span>
 }</pre>
+      </div>
+
+      <div style="flex:1 1 320px;min-width:0;display:grid;gap:14px">
+        <div class="card">
+          <div style="font-weight:500">Deduplicated by email</div>
+          <p class="muted" style="font-size:13.5px;margin-top:4px">
+            Signing up twice returns the original position instead of creating a second row.
+          </p>
+        </div>
+        <div class="card">
+          <div style="font-weight:500">Positions from #1</div>
+          <p class="muted" style="font-size:13.5px;margin-top:4px">
+            Handed out in signup order, and shown back so you can put them in a confirmation email.
+          </p>
+        </div>
+        <div class="card">
+          <div style="font-weight:500">Restart-safe broadcasts</div>
+          <p class="muted" style="font-size:13.5px;margin-top:4px">
+            A throttled queue with per-recipient retries. Restarting the server resumes it.
+          </p>
+        </div>
+      </div>
     </div>
+  </div>
+</section>
 
-    <p style="font-size:13px;color:var(--muted);">
-      Optional per-waitlist confirmation email sends the moment someone joins — with <span style="font-family:var(--font-mono)">{{name}}</span>, <span style="font-family:var(--font-mono)">{{position}}</span> and <span style="font-family:var(--font-mono)">{{email}}</span> variables — fired in a background goroutine so it never blocks the response. Manage waitlists, signups, CSV export and broadcasts from the admin <strong>Waitlist</strong> tab.
-    </p>
-  </section>
+<!-- Admin -->
+<section id="admin">
+  <div class="wrap">
+    <div class="kick"><span></span><span>Admin</span></div>
+    <h2>An inbox, not a database viewer.</h2>
+    <p class="lede">A dark, compact dashboard: what arrived, what is unread, what got
+       held, and why. Server-rendered — no JavaScript framework anywhere in it.</p>
 
-  <hr class="divider">
+    <div class="grid" style="margin-top:32px">
+      <div class="card">
+        <span class="tile" style="margin:0"><svg class="i" style="font-size:17px"><use href="#ph-chart-line-up"/></svg></span>
+        <h3 style="font-size:16px;margin-top:12px">Overview</h3>
+        <p class="muted" style="font-size:13.5px;margin-top:5px">
+          Submissions over time, spam rate, per-form breakdown and rate-limit activity.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tile" style="margin:0"><svg class="i" style="font-size:17px"><use href="#ph-envelope"/></svg></span>
+        <h3 style="font-size:16px;margin-top:12px">Reader</h3>
+        <p class="muted" style="font-size:13.5px;margin-top:5px">
+          Click a row and it opens over the list. Step through with the arrows without losing your place.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tile" style="margin:0"><svg class="i" style="font-size:17px"><use href="#ph-shield-warning"/></svg></span>
+        <h3 style="font-size:16px;margin-top:12px">Quarantine</h3>
+        <p class="muted" style="font-size:13.5px;margin-top:5px">
+          Everything the filter held, with its score breakdown and one click to put it back.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tile" style="margin:0"><svg class="i" style="font-size:17px"><use href="#ph-funnel"/></svg></span>
+        <h3 style="font-size:16px;margin-top:12px">Filter rules</h3>
+        <p class="muted" style="font-size:13.5px;margin-top:5px">
+          Block or allow addresses, domains, IPs and CIDR ranges. Add your own keywords.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
 
-  <!-- Self-host -->
-  <section id="self-host">
-    <div class="section-title">// self-host in 5 min</div>
+<!-- What you get -->
+<section>
+  <div class="wrap">
+    <div class="kick"><span></span><span>Everything, in one binary</span></div>
+    <h2>No add-ons, no tiers, no per-submission pricing.</h2>
 
-    <div class="cmd-block"><span class="comment"># Clone and configure</span>
-<span class="prompt">$</span> git clone https://github.com/barancezayirli/dsforms
-<span class="prompt">$</span> cd dsforms
-<span class="prompt">$</span> cp .env.example .env
-<span class="comment"># Edit .env — set SECRET_KEY and SMTP credentials</span></div>
+    <div style="max-width:960px;margin-top:32px">
+      <div style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--n-600)">Notifications</div>
+      <hr class="hr" style="margin:8px 0 16px">
+      <div class="grid feat">
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-envelope"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Email per submission</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Sent asynchronously, so a slow SMTP server never delays the visitor.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">SMTP_HOST</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-webhooks-logo"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Webhooks</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Slack, Discord or generic JSON, testable from the form's settings page.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">per form</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-users-three"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Waitlist broadcasts</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Throttled, retried per recipient, and resumed after a restart.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">BROADCAST_THROTTLE_MS</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-chat-circle-dots"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Quarantine digest</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">One daily summary of what was held — never one email per spam message.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">DIGEST_TO</div>
+        </div>
+      </div>
 
-    <div class="cmd-block"><span class="comment"># Start (with Mailpit for email testing)</span>
-<span class="prompt">$</span> make dev-up
-<span class="comment"># Or production (bring your own SMTP)</span>
-<span class="prompt">$</span> make docker-up</div>
+      <div style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--n-600);margin-top:34px">Data</div>
+      <hr class="hr" style="margin:8px 0 16px">
+      <div class="grid feat">
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-database"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">One SQLite file</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Everything lives in it. Copy it and you have moved house.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">DB_PATH</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-cloud-arrow-up"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Backup and restore</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">A consistent snapshot while the server keeps running.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">/admin/backups</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-magnifying-glass"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Full-text search</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">SQLite FTS5 across every field. No external search service.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">⌘K</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-package"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">CSV export</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Every field, with formula injection neutralised on the way out.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">/export</div>
+        </div>
+      </div>
 
-    <div class="cmd-block"><span class="comment"># Open the admin UI</span>
-<span class="prompt">$</span> open http://localhost:8080
-<span class="comment"># Default login: admin / admin</span></div>
+      <div style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--n-600);margin-top:34px">Security</div>
+      <hr class="hr" style="margin:8px 0 16px">
+      <div class="grid feat">
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-lock-key"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Sessions in the database</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Opaque tokens, hashed at rest. Changing a password ends every session.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">SECRET_KEY</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-gauge"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Rate limiting</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Per-IP token bucket on the public endpoints, plus a login lockout.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">RATE_BURST</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-fingerprint"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Honeypot field</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">A hidden input bots fill in and people never see.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">_honeypot</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-user-check"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Multiple users</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">bcrypt at cost 12, managed from the admin or the CLI.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">dsforms user add</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <p class="cmd-note">Requires Docker + Docker Compose. A $5 VPS is enough.</p>
-  </section>
+<!-- Self-host -->
+<section id="self-host">
+  <div class="wrap">
+    <div class="kick"><span></span><span>Self-host</span></div>
+    <h2>Three commands and a domain.</h2>
 
-</main>
+    <div class="row" style="margin-top:32px;align-items:flex-start">
+      <div style="flex:1 1 320px;min-width:0">
+        <p style="font-size:15px">
+          Docker Compose with a published image, or <code class="mono">go build</code>
+          if you would rather. The container is roughly 20MB and needs one writable
+          volume for the database.
+        </p>
+        <div class="card" style="margin-top:18px">
+          <div class="dim" style="font-size:11px;letter-spacing:.09em;text-transform:uppercase">Image</div>
+          <div class="mono" style="font-size:13px;margin-top:6px;overflow-x:auto">ghcr.io/barancezayirli/dsforms:latest</div>
+        </div>
+        <a class="btn btn-secondary btn-lg" style="margin-top:18px"
+           href="https://github.com/barancezayirli/dsforms#readme">
+          <svg class="i" style="font-size:16px"><use href="#ph-book-open"/></svg>Full deployment guide
+        </a>
+      </div>
+
+      <div style="flex:1 1 360px;min-width:0;display:flex;flex-direction:column;gap:14px">
+        <div class="codecard" style="max-width:none">
+          <header>
+            <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-terminal-window"/></svg>
+            <span class="name">clone and configure</span>
+            <button class="btn btn-ghost" data-copy>
+              <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span>Copy</span>
+            </button>
+          </header>
+<pre><span class="pr">$</span> git clone https://github.com/barancezayirli/dsforms
+<span class="pr">$</span> cd dsforms &amp;&amp; cp .env.example .env
+<span class="cm"># set SECRET_KEY and your SMTP details</span></pre>
+        </div>
+
+        <div class="codecard" style="max-width:none">
+          <header>
+            <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-terminal-window"/></svg>
+            <span class="name">start it</span>
+            <button class="btn btn-ghost" data-copy>
+              <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span>Copy</span>
+            </button>
+          </header>
+<pre><span class="pr">$</span> docker compose up -d</pre>
+        </div>
+
+        <div class="codecard" style="max-width:none">
+          <header>
+            <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-terminal-window"/></svg>
+            <span class="name">log in</span>
+            <button class="btn btn-ghost" data-copy>
+              <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span>Copy</span>
+            </button>
+          </header>
+<pre><span class="cm"># admin / admin — change it immediately</span>
+<span class="pr">$</span> open http://localhost:8080/admin</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Closing CTA -->
+<section style="padding-top:0">
+  <div class="wrap">
+    <div style="position:relative;overflow:hidden;border-radius:12px;background:var(--section);padding:46px 32px">
+      <div aria-hidden="true" style="position:absolute;width:620px;height:420px;top:-200px;right:-120px;border-radius:50%;
+           pointer-events:none;background:radial-gradient(closest-side,var(--section-glow),transparent)"></div>
+      <div style="position:relative;max-width:640px">
+        <h2>Your forms, your server, your data.</h2>
+        <p style="color:var(--a-300);font-size:16px;margin-top:12px">
+          No submission quotas, no vendor reading your customers' messages, and
+          nothing to migrate off when the pricing changes.
+        </p>
+        <div style="display:flex;gap:10px;margin-top:24px;flex-wrap:wrap">
+          <a class="btn btn-lg" style="border-color:var(--text)" href="https://github.com/barancezayirli/dsforms">
+            <svg class="i" style="font-size:16px"><use href="#ph-github-logo"/></svg>Star on GitHub
+          </a>
+          <a class="btn btn-lg" style="border-color:var(--section-ghost);color:var(--a-300)" href="#self-host">
+            Deploy it now
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
 <footer>
-  <div><span class="footer-brand">dsforms</span> · MIT License · Made by <a href="https://barancezayirli.com">Baran Cezayirli</a></div>
-  <div class="footer-links">
-    <a href="https://github.com/barancezayirli/dsforms" target="_blank">GitHub ↗</a>
-    <a href="https://github.com/barancezayirli/dsforms/issues" target="_blank">Issues ↗</a>
+  <div class="wrap" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <span class="mark"><svg class="i" style="font-size:15px"><use href="#ph-tray-arrow-down"/></svg></span>
+    <span class="muted" style="font-size:13px">MIT · Go + SQLite</span>
+    <div style="margin-left:auto;display:flex;gap:16px;flex-wrap:wrap">
+      <a class="muted" style="font-size:13px" href="https://github.com/barancezayirli/dsforms">GitHub</a>
+      <a class="muted" style="font-size:13px" href="https://github.com/barancezayirli/dsforms/issues">Issues</a>
+      <a class="muted" style="font-size:13px" href="https://github.com/barancezayirli">barancezayirli</a>
+    </div>
   </div>
 </footer>
 
 <script>
-document.getElementById('copy-btn').addEventListener('click', function() {
-  var code = document.getElementById('snippet').innerText;
-  navigator.clipboard.writeText(code).then(function() {
-    var btn = document.getElementById('copy-btn');
-    btn.textContent = 'Copied!';
-    btn.setAttribute('aria-label', 'Copied');
-    setTimeout(function() {
-      btn.textContent = 'Copy';
-      btn.setAttribute('aria-label', 'Copy code snippet');
-    }, 2000);
+  // The page's only script: copy the <pre> that follows each button's header.
+  // Nothing else here animates or reacts.
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-copy]');
+    if (!btn) return;
+    var pre = btn.closest('.codecard').querySelector('pre');
+    if (!pre || !navigator.clipboard) return;
+    navigator.clipboard.writeText(pre.innerText.trim()).then(function () {
+      var label = btn.querySelector('span'), original = label.textContent;
+      label.textContent = 'Copied!';
+      btn.setAttribute('aria-label', 'Copied');
+      setTimeout(function () {
+        label.textContent = original;
+        btn.setAttribute('aria-label', 'Copy');
+      }, 2000);
+    });
   });
-});
 </script>
-
 </body>
 </html>
