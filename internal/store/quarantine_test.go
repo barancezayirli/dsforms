@@ -517,3 +517,62 @@ func TestPaginationIsStableWithTiedTimestamps(t *testing.T) {
 		}
 	}
 }
+
+// TestGetSubmissionPopulatesQuarantineFields is a regression test for a bug the
+// type design invited: GetSubmission selected only the pre-quarantine columns,
+// so SpamScore came back 0 on every read. The submission reader renders that
+// number beside the stored signal breakdown, so a restored submission displayed
+// "score 0" above weights summing to 11 — the one place spam.Detail's
+// weights-sum-to-score invariant is shown to a human was the place it broke.
+func TestGetSubmissionPopulatesQuarantineFields(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+
+	signals := []SpamSignal{
+		{Rule: "markup", Field: "message", Match: "[url=", Weight: 6},
+		{Rule: "keyword", Field: "message", Match: "backlinks", Weight: 5},
+	}
+	if err := s.CreateHeldSubmission(heldFixture("s1", "f1", 11, time.Now().UTC()), 11, 6, signals); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	// While held.
+	sub, err := s.GetSubmission("s1")
+	if err != nil {
+		t.Fatalf("GetSubmission: %v", err)
+	}
+	if sub.SpamScore != 11 {
+		t.Errorf("SpamScore = %d, want 11 — the reader renders this beside the breakdown", sub.SpamScore)
+	}
+	if !sub.IsHeld {
+		t.Error("IsHeld = false on a held submission; a handler guard written against it would be a silent no-op")
+	}
+	if sub.HeldThreshold != 6 {
+		t.Errorf("HeldThreshold = %d, want 6", sub.HeldThreshold)
+	}
+
+	// And after restore, which is when the reader actually shows it.
+	if _, err := s.RestoreSubmission("s1"); err != nil {
+		t.Fatalf("RestoreSubmission: %v", err)
+	}
+	sub, err = s.GetSubmission("s1")
+	if err != nil {
+		t.Fatalf("GetSubmission after restore: %v", err)
+	}
+	if sub.IsHeld {
+		t.Error("IsHeld = true after restore")
+	}
+
+	stored, err := s.SubmissionSignals("s1")
+	if err != nil {
+		t.Fatalf("SubmissionSignals: %v", err)
+	}
+	sum := 0
+	for _, sig := range stored {
+		sum += sig.Weight
+	}
+	if sum != sub.SpamScore {
+		t.Errorf("the reader would show score %d beside a breakdown summing to %d", sub.SpamScore, sum)
+	}
+}

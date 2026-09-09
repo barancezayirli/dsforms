@@ -275,3 +275,45 @@ func TestRulesSplitByKind(t *testing.T) {
 		t.Error("allow rule not in the allowlist")
 	}
 }
+
+// A held submission must not be readable through the ordinary submission
+// reader. That route auto-marks read, so opening one there would quietly change
+// quarantine state from a screen that shows none of the review controls — and
+// the URL is guessable from any held id.
+func TestSubmissionReaderRejectsHeldSubmissions(t *testing.T) {
+	t.Parallel()
+	s, _, _ := setupQuarantine(t)
+	seedHeld(t, s, "h1", 6, nil)
+
+	base := template.Must(template.New("base").Parse(`{{define "base"}}{{template "content" .}}{{end}}`))
+	page := template.Must(template.Must(base.Clone()).Parse(
+		`{{define "content"}}<span class="read">{{.Submission.ID}}</span>{{end}}` +
+			`{{define "drawer"}}<span class="drawer">{{.Submission.ID}}</span>{{end}}`))
+
+	ah := &AdminHandler{Base: Base{
+		Store: s, SecretKey: testSecretKey, BaseURL: "https://example.com",
+		Templates: map[string]*template.Template{"submission_detail.html": page},
+	}}
+	r := chi.NewRouter()
+	r.Group(func(r chi.Router) {
+		r.Use(auth.RequireAuth(s))
+		r.Get("/admin/forms/{formID}/submissions/{subID}", ah.SubmissionDetail)
+	})
+
+	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/submissions/h1", "")
+	if w.Code == http.StatusOK {
+		t.Errorf("held submission rendered in the ordinary reader (status %d)", w.Code)
+	}
+
+	// And it must not have been marked read as a side effect.
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("submission left quarantine: %v", held)
+	}
+	if held[0].Read {
+		t.Error("the reader marked a held submission read")
+	}
+}

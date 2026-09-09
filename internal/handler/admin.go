@@ -476,6 +476,16 @@ func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// A held submission belongs to the quarantine screen, which shows the score
+	// breakdown and the restore/confirm controls this page has none of. The
+	// guard comes before the auto-mark below: without it, opening a guessable
+	// held id here would silently mark it read from a screen that cannot act on
+	// it. Sending the operator to the right screen beats a 404.
+	if sub.IsHeld {
+		http.Redirect(w, r, "/admin/quarantine?sel="+subID, http.StatusSeeOther)
+		return
+	}
+
 	// Auto-mark read
 	if !sub.Read {
 		if err := h.Store.MarkRead(subID); err != nil {

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -786,18 +787,20 @@ func (s *Store) DeleteSubmissions(formID string, ids []string) error {
 
 // GetSubmission returns a single submission by ID.
 func (s *Store) GetSubmission(id string) (Submission, error) {
-	var sub Submission
-	var rawData string
-	var readInt int
-	err := s.db.QueryRow(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE id = ?", id,
-	).Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt)
+	// Reads the quarantine columns too, via the same helpers the held-submission
+	// queries use. It previously selected only the pre-quarantine columns, which
+	// left SpamScore and IsHeld at zero on every read — and the submission
+	// reader renders SpamScore beside the stored signal breakdown, so a restored
+	// submission showed "score 0" above weights summing to 11. A handler guard
+	// written against IsHeld would likewise have been a silent no-op.
+	sub, err := scanHeld(s.db.QueryRow("SELECT "+heldColumns+" FROM submissions WHERE id = ?", id))
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Callers distinguish "no such submission" from a real failure.
+			return Submission{}, err
+		}
 		return Submission{}, fmt.Errorf("get submission: %w", err)
 	}
-	sub.RawData = rawData
-	sub.Read = readInt == 1
-	sub.Data = decodeSubmissionData(sub.ID, rawData)
 	return sub, nil
 }
 
