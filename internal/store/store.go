@@ -165,7 +165,10 @@ CREATE TABLE IF NOT EXISTS forms (
     redirect       TEXT NOT NULL DEFAULT '',
     webhook_url    TEXT NOT NULL DEFAULT '',
     webhook_format TEXT NOT NULL DEFAULT '',
-    created_at     DATETIME NOT NULL DEFAULT (datetime('now'))
+    created_at     DATETIME NOT NULL DEFAULT (datetime('now')),
+    -- Per-form spam sensitivity. 0 means inherit the instance default, not a
+    -- literal threshold of zero, which would hold every submission.
+    spam_threshold INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
@@ -748,7 +751,7 @@ func (s *Store) CountAllSubmissions() (int, error) {
 
 // MarkAllRead marks all submissions for a form as read.
 func (s *Store) MarkAllRead(formID string) error {
-	_, err := s.db.Exec("UPDATE submissions SET read = 1 WHERE form_id = ?", formID)
+	_, err := s.db.Exec("UPDATE submissions SET read = 1 WHERE form_id = ? AND is_held = 0", formID)
 	if err != nil {
 		return fmt.Errorf("mark all read: %w", err)
 	}

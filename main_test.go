@@ -441,3 +441,36 @@ func TestLandingPageIsSelfContained(t *testing.T) {
 		}
 	}
 }
+
+// TestRecoveryRendersStyled500 covers the other half of errorPages. 500.html has
+// been in templates/ since before the redesign and was parsed but never
+// rendered — the recovery middleware wrote a plain string, so the styled page
+// was dead weight.
+func TestRecoveryRendersStyled500(t *testing.T) {
+	templates, err := parseTemplates()
+	if err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	r := newRouter()
+	errorPages(r, templates)
+	t.Cleanup(func() {
+		// serverErrorPage is package-level, so restore the plain-text default
+		// rather than leaking a template-backed renderer into other tests.
+		serverErrorPage = func(w http.ResponseWriter) {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+	})
+
+	r.Get("/boom", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
+
+	req := httptest.NewRequest("GET", "/boom", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Something went wrong") {
+		t.Errorf("styled 500 not rendered; got %.160q", w.Body.String())
+	}
+}

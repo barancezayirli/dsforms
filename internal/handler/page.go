@@ -75,6 +75,7 @@ var navGroups = map[string]string{
 	"quarantine": "Moderate",
 	"rules":      "Moderate",
 	"users":      "System",
+	"account":    "System",
 	"backups":    "System",
 }
 

@@ -36,7 +36,11 @@ func (s *Store) AddFilterRule(kind, ruleType, value, note string) (filter.Rule, 
 
 	_, err = s.db.Exec(
 		"INSERT INTO filter_rules (id, kind, type, value, note, hits, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
-		rule.ID, rule.Kind, rule.Type, rule.Value, rule.Note, rule.CreatedAt,
+		// Formatted, not bound as a time.Time — see sqliteTime. The column's own
+		// datetime('now') default produces this layout, and a row written in Go's
+		// String() form would sort against those rows wrongly and return NULL
+		// from date().
+		rule.ID, rule.Kind, rule.Type, rule.Value, rule.Note, rule.CreatedAt.Format(sqliteTime),
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/barancezayirli/dsforms/internal/filter"
 )
@@ -138,5 +139,32 @@ func TestIncrementRuleHits(t *testing.T) {
 	}
 	if len(rules) != 1 || rules[0].Hits != 3 {
 		t.Errorf("Hits = %v, want 3", rules)
+	}
+}
+
+// Filter rules must store timestamps in the same layout as every other write.
+// A raw time.Time binds as "2026-09-09 20:51:12 +0000 UTC", which date()
+// cannot parse and which sorts wrongly against rows written by the column's own
+// datetime('now') default — this table has one, so the two formats would end up
+// side by side.
+func TestAddFilterRuleStoresQueryableTimestamps(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+
+	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", ""); err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+
+	var day *string
+	var raw string
+	err := s.db.QueryRow("SELECT date(created_at), created_at FROM filter_rules").Scan(&day, &raw)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if day == nil {
+		t.Fatalf("SQLite cannot parse created_at %q — date() returned NULL", raw)
+	}
+	if want := time.Now().UTC().Format("2006-01-02"); *day != want {
+		t.Errorf("date(created_at) = %q, want %q", *day, want)
 	}
 }

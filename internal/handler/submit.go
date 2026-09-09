@@ -182,11 +182,16 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	case ruleHit && matched.Kind == filter.KindBlock:
 		// Held whatever the content scores. The score is stamped at the
-		// threshold so the quarantine meter reads as a full bar rather than
-		// implying the content itself was damning.
+		// threshold so the breakdown still adds up, and the single "rule"
+		// signal carries the same weight — the content itself scored nothing,
+		// and the meter should not imply otherwise.
 		held = true
 		score = threshold
-		signals = []spam.Signal{{Rule: "rule", Field: matched.Type, Match: matched.Value, Weight: threshold}}
+		// Field stays empty: it means "the form field whose value matched", and
+		// putting the rule's *type* there rendered "field cidr · matched" to
+		// the operator. The label already says a filter rule fired, and Match
+		// carries the rule value.
+		signals = []spam.Signal{{Rule: "rule", Match: matched.Value, Weight: threshold}}
 		h.countRuleHit(matched.ID)
 
 	default:
