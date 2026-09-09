@@ -1254,3 +1254,54 @@ func TestInMemoryStoreIsOneDatabase(t *testing.T) {
 		}
 	}
 }
+
+// Sessions must store expires_at in the same layout as every other write.
+//
+// This one predates the rule and was the last place a raw time.Time reached the
+// driver. It stringified as "2026-09-09 16:58:22.04 -0700 PDT m=+7200.21", which
+// is compared against datetime('now') — a UTC value with no offset and no
+// monotonic-clock suffix. Three things follow: date() and datetime() on the
+// column return NULL, expiry is out by the host's UTC offset, and the string
+// comparison in GetSession is only accidentally right.
+//
+// It has not bitten because both callers use a 30-day TTL, where the date
+// component still differs and the comparison survives. Shorten the TTL to hours
+// and every session on a negative-offset host is born expired, which is why this
+// asserts the stored format rather than just "login works".
+func TestCreateSessionStoresQueryableExpiry(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+
+	user, err := s.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	token, err := s.CreateSession(user.ID, 2*time.Hour)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	var day *string
+	var raw string
+	if err := s.db.QueryRow("SELECT date(expires_at), expires_at FROM sessions").Scan(&day, &raw); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if day == nil {
+		t.Fatalf("SQLite cannot parse expires_at %q — date() returned NULL", raw)
+	}
+
+	// A session with two hours left must validate on any host, whatever its
+	// offset from UTC. Under the old format this failed on every negative
+	// offset, because the string comparison put "…16:58" before "…21:58".
+	if _, err := s.GetSession(token); err != nil {
+		t.Errorf("GetSession on a session with 2h remaining: %v (stored %q)", err, raw)
+	}
+
+	// And the cleanup sweep must not take it.
+	if err := s.CleanExpiredSessions(); err != nil {
+		t.Fatalf("CleanExpiredSessions: %v", err)
+	}
+	if _, err := s.GetSession(token); err != nil {
+		t.Errorf("the cleanup sweep deleted a live session: %v", err)
+	}
+}

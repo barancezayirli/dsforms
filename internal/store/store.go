@@ -881,7 +881,11 @@ func (s *Store) CreateSession(userID string, expiry time.Duration) (string, erro
 	}
 	token := hex.EncodeToString(b)
 	tokenHash := hashToken(token)
-	expiresAt := time.Now().Add(expiry)
+	// Formatted, not bound as a time.Time. The driver stringifies one with an
+	// offset ("2026-09-09T17:22:21.69-07:00"), which datetime('now') — UTC, no
+	// offset — neither parses nor compares against correctly, so expires_at is
+	// read as a plain string that sorts by the wrong digits.
+	expiresAt := time.Now().Add(expiry).UTC().Format(sqliteTime)
 	_, err := s.db.Exec(
 		"INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
 		tokenHash, userID, expiresAt,
