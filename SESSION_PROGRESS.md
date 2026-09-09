@@ -11,9 +11,9 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 | 0 | Vendored assets (Inter, Phosphor), Nocturne tokens, `base.html` shell | **done** |
 | 1 | `spam.Detail`/`Signal`/`DefaultThreshold`, `config.SpamThreshold`, schema, store methods | **done** |
 | 2 | Submit-handler rewiring (allow → block → honeypot → score → hold) | not started |
-| 3 | Forms, form detail, reader drawer | not started |
+| 3 | Forms, form detail, reader drawer | **done** |
 | 4 | Quarantine + breakdown, Filter rules | not started |
-| 5 | Home aggregates, inline-SVG charts, rate-limit snapshot | not started |
+| 5 | Home aggregates, inline-SVG charts, rate-limit snapshot | store aggregates + chart helpers done; page pending |
 | 6 | Form settings, Waitlists, Users, Backups, Login, empty states | not started |
 | 7 | FTS5 search (⌘K), digest email, false-positive reporting | not started |
 | 8 | Landing page (`docs/index.html`) | not started |

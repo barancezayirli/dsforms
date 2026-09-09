@@ -126,7 +126,16 @@
     return root;
   }
 
-  function openDrawer(url, push) {
+  // history: 'push' when opening from the list, 'replace' when stepping between
+  // submissions inside an already-open drawer, 'none' when responding to a
+  // popstate we did not cause.
+  //
+  // Stepping must replace rather than push. Pushing would give the drawer one
+  // history entry per submission viewed, and since closeDrawer navigates back,
+  // closing after five steps would land on the fourth drawer — which popstate
+  // would faithfully reopen. The drawer occupies exactly one entry, so Back
+  // always returns to the list.
+  function openDrawer(url, history_) {
     var root = drawerRoot();
     root.setAttribute('aria-busy', 'true');
     fetch(url, { headers: { 'X-Fragment': '1' }, credentials: 'same-origin' })
@@ -135,7 +144,8 @@
         root.innerHTML = html;
         root.removeAttribute('aria-busy');
         document.body.style.overflow = 'hidden';
-        if (push) history.pushState({ drawer: url }, '', url);
+        if (history_ === 'push') history.pushState({ drawer: url }, '', url);
+        else if (history_ === 'replace') history.replaceState({ drawer: url }, '', url);
         var panel = $('.drawer', root);
         if (panel) {
           var focusable = panel.querySelector('[autofocus], button, a[href], input');
@@ -219,8 +229,12 @@
       // Let modified clicks (new tab, download) behave normally.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
       e.preventDefault();
-      lastFocus = document.activeElement;
-      openDrawer(el.getAttribute('href') || el.getAttribute('data-drawer'), true);
+      // Stepping from inside the drawer replaces its single history entry;
+      // opening from the list pushes a new one.
+      var stepping = !!closest(el, '#drawer-root');
+      if (!stepping) lastFocus = document.activeElement;
+      openDrawer(el.getAttribute('href') || el.getAttribute('data-drawer'),
+                 stepping ? 'replace' : 'push');
       return;
     }
 
@@ -244,7 +258,7 @@
     if ((el = closest(e.target, '[data-row-open]'))) {
       if (closest(e.target, 'a, button, input, label')) return;
       var link = $('[data-drawer]', el);
-      if (link) { lastFocus = document.activeElement; openDrawer(link.getAttribute('href'), true); }
+      if (link) { lastFocus = document.activeElement; openDrawer(link.getAttribute('href'), 'push'); }
     }
   });
 
@@ -291,7 +305,7 @@
   });
 
   window.addEventListener('popstate', function (e) {
-    if (e.state && e.state.drawer) openDrawer(e.state.drawer, false);
+    if (e.state && e.state.drawer) openDrawer(e.state.drawer, 'none');
     else closeDrawer(true);
   });
 

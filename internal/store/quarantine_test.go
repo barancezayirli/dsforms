@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -391,5 +392,128 @@ func TestUpgradeFromPreQuarantineSchema(t *testing.T) {
 	}
 	if len(held) != 1 {
 		t.Fatalf("got %d held after upgrade, want 1", len(held))
+	}
+}
+
+func TestNeighbours(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+
+	base := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	// Newest first once ordered, so c, b, a.
+	for i, id := range []string{"a", "b", "c"} {
+		if err := s.CreateSubmission(Submission{
+			ID: id, FormID: "f1", Data: map[string]string{"n": id},
+			RawData: `{"n":"` + id + `"}`, CreatedAt: base.Add(time.Duration(i) * time.Hour),
+		}); err != nil {
+			t.Fatalf("CreateSubmission(%s): %v", id, err)
+		}
+	}
+	// A held submission must not appear in the sequence the drawer walks.
+	if err := s.CreateHeldSubmission(heldFixture("held", "f1", 8, base.Add(90*time.Minute)), 8, 6, nil); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	tests := []struct {
+		id                   string
+		wantNewer, wantOlder string
+		wantPos              int
+	}{
+		{id: "c", wantNewer: "", wantOlder: "b", wantPos: 1},
+		{id: "b", wantNewer: "c", wantOlder: "a", wantPos: 2},
+		{id: "a", wantNewer: "b", wantOlder: "", wantPos: 3},
+	}
+	for _, tt := range tests {
+		newer, older, pos, total, err := s.Neighbours("f1", tt.id)
+		if err != nil {
+			t.Fatalf("Neighbours(%s): %v", tt.id, err)
+		}
+		if newer != tt.wantNewer || older != tt.wantOlder {
+			t.Errorf("Neighbours(%s) = newer %q older %q, want %q / %q", tt.id, newer, older, tt.wantNewer, tt.wantOlder)
+		}
+		if pos != tt.wantPos {
+			t.Errorf("Neighbours(%s) position = %d, want %d", tt.id, pos, tt.wantPos)
+		}
+		if total != 3 {
+			t.Errorf("Neighbours(%s) total = %d, want 3 (held rows excluded)", tt.id, total)
+		}
+	}
+}
+
+// TestPaginationIsStableWithTiedTimestamps guards against a subtle data-loss
+// bug rather than a crash. Submissions arriving in the same second have equal
+// created_at values, and SQLite may order tied rows differently between
+// queries — so with LIMIT/OFFSET and no tiebreaker, a row can appear on two
+// pages or on none. The drawer's Neighbours query already tie-breaks by id, so
+// an untied list query would also make the up/down arrows walk a different
+// sequence from the table behind them.
+func TestPaginationIsStableWithTiedTimestamps(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+
+	// Every row at the identical instant — the worst case, and a realistic one
+	// for an import or a burst.
+	same := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 30; i++ {
+		id := fmt.Sprintf("s%02d", i)
+		if err := s.CreateSubmission(Submission{
+			ID: id, FormID: "f1", Data: map[string]string{"n": id},
+			RawData: `{"n":"` + id + `"}`, CreatedAt: same,
+		}); err != nil {
+			t.Fatalf("CreateSubmission: %v", err)
+		}
+	}
+
+	collect := func() []string {
+		var ids []string
+		for offset := 0; offset < 30; offset += 10 {
+			page, err := s.ListSubmissionsPaged("f1", 10, offset)
+			if err != nil {
+				t.Fatalf("ListSubmissionsPaged(offset %d): %v", offset, err)
+			}
+			for _, sub := range page {
+				ids = append(ids, sub.ID)
+			}
+		}
+		return ids
+	}
+
+	first := collect()
+	if len(first) != 30 {
+		t.Fatalf("paging returned %d rows, want 30", len(first))
+	}
+	seen := map[string]bool{}
+	for _, id := range first {
+		if seen[id] {
+			t.Fatalf("submission %s appeared on more than one page: %v", id, first)
+		}
+		seen[id] = true
+	}
+
+	// And the order must be repeatable, or a reload reshuffles the list under
+	// whoever is reading it.
+	for i := 0; i < 5; i++ {
+		if again := collect(); !reflect.DeepEqual(first, again) {
+			t.Fatalf("page order is not stable across queries:\n  %v\n  %v", first, again)
+		}
+	}
+
+	// The drawer must walk the same sequence the table shows.
+	for i, id := range first {
+		newer, older, pos, _, err := s.Neighbours("f1", id)
+		if err != nil {
+			t.Fatalf("Neighbours(%s): %v", id, err)
+		}
+		if pos != i+1 {
+			t.Errorf("%s is row %d in the list but Neighbours reports position %d", id, i+1, pos)
+		}
+		if i > 0 && newer != first[i-1] {
+			t.Errorf("%s: newer = %q, want %q (the row above it in the list)", id, newer, first[i-1])
+		}
+		if i < len(first)-1 && older != first[i+1] {
+			t.Errorf("%s: older = %q, want %q (the row below it in the list)", id, older, first[i+1])
+		}
 	}
 }

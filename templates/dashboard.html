@@ -1,59 +1,89 @@
 {{template "base" .}}
+
+{{define "header-actions"}}
+<a class="btn btn-primary btn-34" href="/admin/forms/new">
+  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>New form
+</a>
+{{end}}
+
 {{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">Forms</h1>
-  <a class="btn btn-mint" href="/admin/forms/new">+ New form</a>
+{{if .Cards}}
+<div class="page-head">
+  <h4>Forms</h4>
+  <span class="muted" style="font-size:13px">
+    {{.TotalForms}} form{{if ne .TotalForms 1}}s{{end}} ·
+    {{.TotalAll}} submission{{if ne .TotalAll 1}}s{{end}}
+    {{if .TotalUnread}}· <strong class="stat-accent">{{.TotalUnread}} unread</strong>{{end}}
+  </span>
 </div>
 
-<div class="stats">
-  <div class="stat stat-accent">
-    <div class="stat-label">Total forms</div>
-    <div class="stat-val">{{.TotalForms}}</div>
+<div class="grid">
+  {{range .Cards}}
+  <div class="card elev-sm" style="padding:15px 16px;gap:0">
+    <div class="card-head">
+      <span class="card-kicker" style="margin-right:auto">form</span>
+      <a class="btn btn-quiet btn-icon sm" href="/admin/forms/{{.ID}}/edit" title="Settings" aria-label="Form settings">
+        <svg class="i" style="font-size:15px"><use href="#ph-dots-three"/></svg>
+      </a>
+    </div>
+
+    <a href="/admin/forms/{{.ID}}" style="font-size:17px;font-weight:500;display:block;margin-top:2px">{{.Name}}</a>
+    <div class="dim truncate" style="font-size:12px;margin-top:2px">
+      {{if .EmailTo}}&rarr; {{.EmailTo}}{{else}}no notification address{{end}}
+    </div>
+
+    <div style="display:flex;gap:18px;margin-top:14px">
+      <div>
+        <div class="stat-value sm">{{.Total}}</div>
+        <div class="stat-label">total</div>
+      </div>
+      <div>
+        <div class="stat-value sm {{if .Unread}}stat-accent{{end}}">{{.Unread}}</div>
+        <div class="stat-label">unread</div>
+      </div>
+      <div>
+        <div class="stat-value sm">{{.Held}}</div>
+        <div class="stat-label">held</div>
+      </div>
+    </div>
+
+    {{if .Spark.Line}}
+    <!-- 30 days of accepted submissions. preserveAspectRatio="none" lets the
+         path stretch to whatever width the card gets. -->
+    <svg viewBox="{{FormSparkViewBox}}" preserveAspectRatio="none" aria-hidden="true"
+         style="width:100%;height:34px;margin-top:12px;overflow:visible">
+      <path d="{{.Spark.Line}}" fill="none" stroke="var(--a-700)" stroke-width="1.5"/>
+    </svg>
+    {{else}}
+    <div style="height:34px;margin-top:12px"></div>
+    {{end}}
+
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <a class="btn btn-secondary" href="/admin/forms/{{.ID}}" style="flex:1">
+        <svg class="i" style="font-size:15px"><use href="#ph-tray"/></svg>Submissions
+      </a>
+      <a class="btn btn-secondary btn-icon" href="/admin/forms/{{.ID}}/edit" title="Settings" aria-label="Form settings">
+        <svg class="i" style="font-size:15px"><use href="#ph-gear-six"/></svg>
+      </a>
+    </div>
   </div>
-  <div class="stat">
-    <div class="stat-label">Unread</div>
-    <div class="stat-val">{{.TotalUnread}}</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">All time</div>
-    <div class="stat-val">{{.TotalAll}}</div>
-  </div>
+  {{end}}
+
+  <a class="tile-new" href="/admin/forms/new">
+    <svg class="i"><use href="#ph-plus"/></svg>
+    <span style="font-size:13px;font-weight:500">New form</span>
+    <span class="dim" style="font-size:11px;max-width:24ch">Name it, pick a notify address, paste the snippet</span>
+  </a>
 </div>
 
-{{if .Forms}}
-<div class="card">
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Email To</th>
-        <th>Unread</th>
-        <th>Created</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Forms}}
-      <tr>
-        <td><a href="/admin/forms/{{.ID}}">{{.Name}}</a></td>
-        <td class="text-muted">{{.EmailTo}}</td>
-        <td>{{if gt .UnreadCount 0}}<strong>{{.UnreadCount}}</strong>{{else}}0{{end}}</td>
-        <td class="text-muted">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
-        <td class="actions">
-          <a href="/admin/forms/{{.ID}}/edit" class="btn-ghost">Edit</a>
-          <form method="POST" action="/admin/forms/{{.ID}}/delete" style="display:inline">
-            <button type="submit" class="btn-ghost btn-ghost-danger" onclick="return confirm('Delete this form and all its submissions?')">Delete</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-</div>
 {{else}}
-<div class="empty-state">
-  <p>No forms yet.</p>
-  <p class="text-muted">Create your first form to get started.</p>
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-tray"/></svg></span>
+  <h3>No forms yet</h3>
+  <p>A form is a name, a notify address and an endpoint. Takes about twenty seconds.</p>
+  <a class="btn btn-primary" href="/admin/forms/new">
+    <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Create your first form
+  </a>
 </div>
 {{end}}
 {{end}}

@@ -35,8 +35,8 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 
 	dashTmpl, _ := baseTmpl.Clone()
 	template.Must(dashTmpl.New("content").Parse(
-		`{{range .Forms}}<span class="form-name">{{.Name}}</span><span class="unread">{{.UnreadCount}}</span>{{end}}` +
-			`{{if not .Forms}}<p>No forms yet</p>{{end}}` +
+		`{{range .Cards}}<span class="form-name">{{.Name}}</span><span class="unread">{{.Unread}}</span>{{end}}` +
+			`{{if not .Cards}}<p>No forms yet</p>{{end}}` +
 			`<span class="stat-forms">{{.TotalForms}}</span>` +
 			`<span class="stat-unread">{{.TotalUnread}}</span>` +
 			`<span class="stat-all">{{.TotalAll}}</span>`))
@@ -61,9 +61,9 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 			`{{range .Submissions}}<span class="sub-id">{{.ID}}</span>{{end}}` +
 			`<span class="total">{{.TotalCount}}</span>` +
 			`<span class="unread">{{.UnreadCount}}</span>` +
-			`<span class="page">{{.Page}}</span>` +
-			`{{if .HasPrev}}<span class="has-prev">true</span>{{end}}` +
-			`{{if .HasNext}}<span class="has-next">true</span>{{end}}` +
+			`<span class="page">{{.Pager.Page}}</span>` +
+			`{{if .Pager.HasPrev}}<span class="has-prev">true</span>{{end}}` +
+			`{{if .Pager.HasNext}}<span class="has-next">true</span>{{end}}` +
 			`{{else}}<p>No submissions yet</p>{{end}}`))
 
 	// submission_detail template
@@ -386,8 +386,9 @@ func TestFormDetailPagination(t *testing.T) {
 	t.Parallel()
 	s, r := setupAdmin(t)
 	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
-	// Create 25 submissions (more than one page of 20)
-	for i := 1; i <= 25; i++ {
+	// More than one page. The default page size is 25 (the design's Rows
+	// selector offers 25/50/100), so 30 rows spill onto a second page.
+	for i := 1; i <= 30; i++ {
 		_ = s.CreateSubmission(store.Submission{
 			ID:      fmt.Sprintf("s%02d", i),
 			FormID:  "f1",

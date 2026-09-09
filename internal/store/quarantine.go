@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 )
@@ -50,12 +49,7 @@ func scanHeld(sc interface{ Scan(...any) error }) (Submission, error) {
 	sub.Read = readInt == 1
 	sub.IsHeld = heldInt == 1
 	sub.Notified = notified == 1
-	if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
-		// Matches the existing behaviour in ListSubmissions: surface the raw
-		// payload rather than losing the row entirely.
-		log.Printf("store: submission %s has undecodable data: %v", sub.ID, err)
-		sub.Data = map[string]string{"_raw": rawData}
-	}
+	sub.Data = decodeSubmissionData(sub.ID, rawData)
 	return sub, nil
 }
 
@@ -78,6 +72,12 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 		raw = string(b)
 	}
 
+	createdAt := sub.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	createdAt = createdAt.UTC()
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("create held submission: begin: %w", err)
@@ -87,7 +87,11 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 	if _, err := tx.Exec(`
 		INSERT INTO submissions (id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, held_at, notified)
 		VALUES (?, ?, ?, ?, 0, ?, 1, ?, ?, ?, 0)`,
-		sub.ID, sub.FormID, raw, sub.IP, sub.CreatedAt, score, threshold, sub.CreatedAt,
+		// Formatted, not handed over as a time.Time: the driver would stringify
+		// it as "2026-09-09 19:53:04 +0000 UTC", which SQLite's date()/datetime()
+		// cannot parse and which sorts differently from every other timestamp in
+		// this table. CreateSubmission has always used sqliteTime; so must this.
+		sub.ID, sub.FormID, raw, sub.IP, createdAt.Format(sqliteTime), score, threshold, createdAt.Format(sqliteTime),
 	); err != nil {
 		return fmt.Errorf("create held submission: %w", err)
 	}
@@ -111,7 +115,7 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 // HeldSubmissions returns a page of the quarantine queue, newest first.
 func (s *Store) HeldSubmissions(limit, offset int) ([]Submission, error) {
 	rows, err := s.db.Query(
-		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?",
+		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
 		limit, offset,
 	)
 	if err != nil {
@@ -242,7 +246,7 @@ func (s *Store) DeleteHeld(ids []string) error {
 // how many went. The caller supplies the cutoff rather than a duration so the
 // sweep is testable without sleeping.
 func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
-	res, err := s.db.Exec("DELETE FROM submissions WHERE is_held = 1 AND created_at < ?", cutoff)
+	res, err := s.db.Exec("DELETE FROM submissions WHERE is_held = 1 AND created_at < ?", cutoff.UTC().Format(sqliteTime))
 	if err != nil {
 		return 0, fmt.Errorf("purge held: %w", err)
 	}
@@ -267,4 +271,47 @@ func (s *Store) NavCounts() (NavCounts, error) {
 		return NavCounts{}, fmt.Errorf("nav counts: %w", err)
 	}
 	return n, nil
+}
+
+// HeldCountForForm returns how many of one form's submissions are in
+// quarantine, for the "Held" stat on the form detail page.
+func (s *Store) HeldCountForForm(formID string) (int, error) {
+	var n int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ? AND is_held = 1", formID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("held count for form: %w", err)
+	}
+	return n, nil
+}
+
+// Neighbours locates a submission within its form's list so the reader drawer
+// can show "3 of 612" and step to the adjacent one without closing.
+//
+// The ordering must match ListSubmissionsPaged exactly (newest first, held rows
+// excluded), or the drawer's up/down arrows would walk a different sequence
+// from the table behind them. Newer is the row above (a lower row number).
+func (s *Store) Neighbours(formID, subID string) (newerID, olderID string, position, total int, err error) {
+	var newer, older *string
+	err = s.db.QueryRow(`
+		WITH ordered AS (
+			SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC, id) AS rn
+			FROM submissions WHERE form_id = ? AND is_held = 0
+		)
+		SELECT
+			COALESCE((SELECT rn FROM ordered WHERE id = ?), 0),
+			(SELECT COUNT(*) FROM ordered),
+			(SELECT id FROM ordered WHERE rn = (SELECT rn FROM ordered WHERE id = ?) - 1),
+			(SELECT id FROM ordered WHERE rn = (SELECT rn FROM ordered WHERE id = ?) + 1)`,
+		formID, subID, subID, subID,
+	).Scan(&position, &total, &newer, &older)
+	if err != nil {
+		return "", "", 0, 0, fmt.Errorf("submission neighbours: %w", err)
+	}
+	if newer != nil {
+		newerID = *newer
+	}
+	if older != nil {
+		olderID = *older
+	}
+	return newerID, olderID, position, total, nil
 }

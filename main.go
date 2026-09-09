@@ -81,8 +81,20 @@ var standalonePages = []string{"login.html", "success.html", "404.html", "500.ht
 // into one set would leave the last page's "content" defined for every page.
 // The icon sprite is parsed into the base set so each clone inherits it.
 func parseTemplates() (map[string]*template.Template, error) {
+	// Chart geometry is exposed as template functions rather than hardcoded in
+	// the markup, so a viewBox can never drift from the coordinate space the
+	// paths in internal/handler were generated in.
 	funcMap := template.FuncMap{
-		"add": func(a, b int) int { return a + b },
+		"add":              func(a, b int) int { return a + b },
+		"sub":              func(a, b int) int { return a - b },
+		"pct":              handler.Percent,
+		"SparkViewBox":     handler.SparkViewBox,
+		"FormSparkViewBox": handler.FormSparkViewBox,
+		"ChartViewBox":     handler.ChartViewBox,
+		"BarWidth":         handler.BarWidth,
+		"ruleIcon":         handler.RuleIcon,
+		"ruleLabel":        handler.RuleLabel,
+		"initial":          handler.Initial,
 	}
 
 	baseTmpl, err := template.New("base").Funcs(funcMap).ParseFS(templateFS,

@@ -661,7 +661,7 @@ func (s *Store) CreateSubmission(sub Submission) error {
 // ListSubmissions returns all submissions for a form.
 func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
 	rows, err := s.db.Query(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC",
+		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id",
 		formID,
 	)
 	if err != nil {
@@ -679,10 +679,7 @@ func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
 		}
 		sub.RawData = rawData
 		sub.Read = readInt == 1
-		if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
-			log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
-			sub.Data = map[string]string{"_raw": rawData}
-		}
+		sub.Data = decodeSubmissionData(sub.ID, rawData)
 		subs = append(subs, sub)
 	}
 	if err := rows.Err(); err != nil {
@@ -762,17 +759,14 @@ func (s *Store) GetSubmission(id string) (Submission, error) {
 	}
 	sub.RawData = rawData
 	sub.Read = readInt == 1
-	if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
-		log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
-		sub.Data = map[string]string{"_raw": rawData}
-	}
+	sub.Data = decodeSubmissionData(sub.ID, rawData)
 	return sub, nil
 }
 
 // ListSubmissionsPaged returns a page of submissions for a form.
 func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submission, error) {
 	rows, err := s.db.Query(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?",
+		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
 		formID, limit, offset,
 	)
 	if err != nil {
@@ -790,10 +784,7 @@ func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submis
 		}
 		sub.RawData = rawData
 		sub.Read = readInt == 1
-		if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
-			log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
-			sub.Data = map[string]string{"_raw": rawData}
-		}
+		sub.Data = decodeSubmissionData(sub.ID, rawData)
 		subs = append(subs, sub)
 	}
 	if err := rows.Err(); err != nil {
@@ -1308,4 +1299,19 @@ func (u User) Initials() string {
 	default:
 		return strings.ToUpper(string([]rune(fields[0])[0:1]) + string([]rune(fields[1])[0:1]))
 	}
+}
+
+// decodeSubmissionData unmarshals a stored submission payload.
+//
+// A row whose JSON will not parse is surfaced under a "_raw" key rather than
+// dropped: the payload is the whole value of a submission, and showing an
+// operator something unreadable beats showing them nothing and no error. This
+// was inlined identically at four call sites before it was extracted here.
+func decodeSubmissionData(id, rawData string) map[string]string {
+	var data map[string]string
+	if err := json.Unmarshal([]byte(rawData), &data); err != nil {
+		log.Printf("warning: failed to unmarshal submission %s data: %v", id, err)
+		return map[string]string{"_raw": rawData}
+	}
+	return data
 }

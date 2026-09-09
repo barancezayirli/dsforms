@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -38,9 +38,19 @@ func newFlash(msgType, message string) *FlashData {
 }
 
 // dashboardData holds the data passed to dashboard.html.
+// formCard is one tile in the forms grid: the form itself, its counts, and the
+// 30-day sparkline drawn on it.
+type formCard struct {
+	store.Form
+	Total  int
+	Unread int
+	Held   int
+	Spark  Spark
+}
+
 type dashboardData struct {
 	PageData
-	Forms       []store.FormSummary
+	Cards       []formCard
 	TotalForms  int
 	TotalUnread int
 	TotalAll    int
@@ -78,23 +88,44 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Counts and sparklines come from two grouped queries rather than a pair
+	// per form: an instance with fifty forms would otherwise issue a hundred
+	// queries to draw one page.
+	stats, err := h.Store.PerFormStats()
+	if err != nil {
+		log.Printf("dashboard: per-form stats: %v", err)
+	}
+	byForm := make(map[string]store.FormStats, len(stats))
+	for _, st := range stats {
+		byForm[st.FormID] = st
+	}
+	series, err := h.Store.SubmissionsPerFormPerDay(sparkDays)
+	if err != nil {
+		log.Printf("dashboard: per-form series: %v", err)
+	}
+
 	totalUnread := 0
+	cards := make([]formCard, 0, len(forms))
 	for _, f := range forms {
 		totalUnread += f.UnreadCount
+		st := byForm[f.ID]
+		cards = append(cards, formCard{
+			Form:   f.Form,
+			Total:  st.Received,
+			Unread: f.UnreadCount,
+			Held:   st.Held,
+			Spark:  Sparkline(series[f.ID], sparkWidth, formSparkHeight, 3),
+		})
 	}
 
 	data := dashboardData{
 		PageData:    h.Shell(w, r, "Forms", "forms"),
-		Forms:       forms,
+		Cards:       cards,
 		TotalForms:  len(forms),
 		TotalUnread: totalUnread,
 		TotalAll:    totalAll,
 	}
-
-	if err := h.Templates["dashboard.html"].ExecuteTemplate(w, "base", data); err != nil {
-		log.Printf("dashboard template error: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-	}
+	h.Render(w, "dashboard.html", data)
 }
 
 // NewFormPage renders the new form creation page.
@@ -343,18 +374,35 @@ type formDetailData struct {
 	Submissions []store.Submission
 	TotalCount  int
 	UnreadCount int
-	Page        int
-	HasPrev     bool
-	HasNext     bool
-	PrevPage    int
-	NextPage    int
+	HeldCount   int
+	Pager       Pagination
 }
 
 // submissionDetailData holds the data passed to submission_detail.html.
+// Field is one key/value pair in the reader's field grid.
+type Field struct {
+	Key   string
+	Value string
+}
+
 type submissionDetailData struct {
 	PageData
 	Form       store.Form
 	Submission store.Submission
+
+	// Fields are the submission's data keys in sorted order, excluding the
+	// message body. Sorted because Go randomises map iteration and the old
+	// template ranged over the map directly — so the reader reshuffled its own
+	// field order on every refresh.
+	Fields  []Field
+	Message string
+
+	Signals []store.SpamSignal
+
+	NewerID  string
+	OlderID  string
+	Position int
+	Total    int
 }
 
 const pageSize = 20
@@ -373,17 +421,22 @@ func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page := 1
-	if p := r.URL.Query().Get("page"); p != "" {
-		if n, err := strconv.Atoi(p); err == nil && n > 0 {
-			page = n
-		}
+	total, err := h.Store.CountSubmissions(formID)
+	if err != nil {
+		log.Printf("admin: count submissions for %s: %v", formID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
-	offset := (page - 1) * pageSize
+	pager := PaginationFrom(r, total)
 
-	subs, _ := h.Store.ListSubmissionsPaged(formID, pageSize, offset)
-	total, _ := h.Store.CountSubmissions(formID)
+	subs, err := h.Store.ListSubmissionsPaged(formID, pager.PageSize, pager.Offset())
+	if err != nil {
+		log.Printf("admin: list submissions for %s: %v", formID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	unread, _ := h.Store.UnreadCount(formID)
+	held, _ := h.Store.HeldCountForForm(formID)
 
 	data := formDetailData{
 		PageData:    h.Shell(w, r, form.Name, "forms"),
@@ -391,17 +444,10 @@ func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
 		Submissions: subs,
 		TotalCount:  total,
 		UnreadCount: unread,
-		Page:        page,
-		HasPrev:     page > 1,
-		HasNext:     offset+pageSize < total,
-		PrevPage:    page - 1,
-		NextPage:    page + 1,
+		HeldCount:   held,
+		Pager:       pager,
 	}
-
-	if err := h.Templates["form_detail.html"].ExecuteTemplate(w, "base", data); err != nil {
-		log.Printf("form detail template error: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-	}
+	h.Render(w, "form_detail.html", data)
 }
 
 // SubmissionDetail renders a single submission detail page and auto-marks it read.
@@ -429,16 +475,68 @@ func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) 
 		sub.Read = true
 	}
 
+	fields, message := splitSubmissionFields(sub.Data)
+	signals, err := h.Store.SubmissionSignals(subID)
+	if err != nil {
+		log.Printf("submission detail: signals for %s: %v", subID, err)
+	}
+	newer, older, position, total, err := h.Store.Neighbours(formID, subID)
+	if err != nil {
+		log.Printf("submission detail: neighbours for %s: %v", subID, err)
+	}
+
 	data := submissionDetailData{
 		PageData:   h.Shell(w, r, form.Name, "forms"),
 		Form:       form,
 		Submission: sub,
+		Fields:     fields,
+		Message:    message,
+		Signals:    signals,
+		NewerID:    newer,
+		OlderID:    older,
+		Position:   position,
+		Total:      total,
 	}
 
-	if err := h.Templates["submission_detail.html"].ExecuteTemplate(w, "base", data); err != nil {
-		log.Printf("submission detail template error: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	// app.js asks for the same URL with X-Fragment when it opens the drawer over
+	// the list. Without JS — or when the link is opened directly, or shared —
+	// the identical content renders as a full page instead.
+	if r.Header.Get("X-Fragment") != "" {
+		tmpl := h.Templates["submission_detail.html"]
+		if err := tmpl.ExecuteTemplate(w, "drawer", data); err != nil {
+			log.Printf("submission drawer template error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
 	}
+	h.Render(w, "submission_detail.html", data)
+}
+
+// messageKeys are the field names rendered as the message body rather than as a
+// row in the field grid.
+var messageKeys = map[string]bool{"message": true, "body": true, "content": true}
+
+// splitSubmissionFields separates the message body from the rest of a
+// submission's fields and returns those fields in a stable order.
+func splitSubmissionFields(data map[string]string) ([]Field, string) {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var (
+		fields  []Field
+		message string
+	)
+	for _, k := range keys {
+		if messageKeys[strings.ToLower(k)] && message == "" {
+			message = data[k]
+			continue
+		}
+		fields = append(fields, Field{Key: k, Value: data[k]})
+	}
+	return fields, message
 }
 
 // MarkRead handles POST to mark a single submission as read.

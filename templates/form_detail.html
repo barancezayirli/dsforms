@@ -1,113 +1,176 @@
 {{template "base" .}}
+
+{{define "header-actions"}}
+<a class="btn btn-secondary btn-34" href="/admin/forms/{{.Form.ID}}/export">
+  <svg class="i" style="font-size:15px"><use href="#ph-file-csv"/></svg>Export CSV
+</a>
+<a class="btn btn-primary btn-34" href="/admin/forms/{{.Form.ID}}/edit">
+  <svg class="i" style="font-size:15px"><use href="#ph-gear-six"/></svg>Settings
+</a>
+{{end}}
+
 {{define "content"}}
-<!-- Topbar -->
-<div class="page-header">
-  <h1 class="page-title">{{.Form.Name}}</h1>
-  <div style="display:flex;gap:8px">
-    <button type="submit" form="bulk-delete-form" id="bulk-delete-btn" class="btn btn-danger" disabled>Delete selected</button>
-    <form method="POST" action="/admin/forms/{{.Form.ID}}/read-all" style="display:inline">
-      <button type="submit" class="btn">Mark all read</button>
+<div class="page-head">
+  <h4>{{.Form.Name}}</h4>
+  <span class="tag tag-neutral mono">/f/{{.Form.ID}}</span>
+  <div class="actions">
+    <form method="POST" action="/admin/forms/{{.Form.ID}}/read-all">
+      <button class="btn btn-secondary" type="submit">
+        <svg class="i" style="font-size:15px"><use href="#ph-envelope-open"/></svg>Mark all read
+      </button>
     </form>
-    <a href="/admin/forms/{{.Form.ID}}/export" class="btn">Export CSV</a>
-    <a href="/admin/forms/{{.Form.ID}}/edit" class="btn">Edit form</a>
   </div>
 </div>
 
-<!-- Standalone form (no DOM nesting) that the header button and each row's
-     checkbox target via the form="" attribute, since checkboxes live inside
-     the submissions table alongside each row's own single-delete form. -->
-<form id="bulk-delete-form" method="POST" action="/admin/forms/{{.Form.ID}}/submissions/bulk-delete" onsubmit="return confirmBulkDelete()"></form>
-
-<div class="stats" style="grid-template-columns: repeat(2, 1fr);">
-  <div class="stat stat-accent">
-    <div class="stat-label">Unread</div>
-    <div class="stat-val">{{.UnreadCount}}</div>
-  </div>
-  <div class="stat">
+<div class="row">
+  <div class="card elev-sm stat">
+    <div class="stat-value">{{.TotalCount}}</div>
     <div class="stat-label">Total</div>
-    <div class="stat-val">{{.TotalCount}}</div>
+    <div class="stat-sub">all time</div>
+  </div>
+  <div class="card elev-sm stat">
+    <div class="stat-value {{if .UnreadCount}}stat-accent{{end}}">{{.UnreadCount}}</div>
+    <div class="stat-label">Unread</div>
+    <div class="stat-sub">{{if .UnreadCount}}waiting for you{{else}}inbox zero{{end}}</div>
+  </div>
+  <div class="card elev-sm stat">
+    <div class="stat-value">{{.HeldCount}}</div>
+    <div class="stat-label">Held</div>
+    <div class="stat-sub">{{if .HeldCount}}<a class="link" href="/admin/quarantine">review them</a>{{else}}nothing quarantined{{end}}</div>
   </div>
 </div>
 
 {{if .Submissions}}
-<div class="card">
-  <table class="table">
-    <thead>
-      <tr>
-        <th style="width:20px"><input type="checkbox" id="select-all-checkbox" onchange="toggleAllSubmissionCheckboxes(this)"></th>
-        <th style="width:20px"></th>
-        <th>From</th>
-        <th>Preview</th>
-        <th>Date</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Submissions}}
-      <tr class="{{if not .Read}}row-unread{{end}}">
-        <td><input type="checkbox" name="ids" value="{{.ID}}" form="bulk-delete-form" class="submission-checkbox" onchange="updateBulkDeleteButton()"></td>
-        <td>{{if not .Read}}<span class="unread-dot"></span>{{end}}</td>
-        <td>
-          <a href="/admin/forms/{{$.Form.ID}}/submissions/{{.ID}}" class="sub-name{{if not .Read}} sub-unread{{end}}">
-            {{if index .Data "name"}}{{index .Data "name"}}{{else if index .Data "email"}}{{index .Data "email"}}{{else}}Submission{{end}}
-          </a>
-          {{if index .Data "email"}}<div class="sub-email">{{index .Data "email"}}</div>{{end}}
-        </td>
-        <td class="sub-preview">{{if index .Data "message"}}{{index .Data "message"}}{{else if index .Data "body"}}{{index .Data "body"}}{{else if index .Data "content"}}{{index .Data "content"}}{{else}}—{{end}}</td>
-        <td class="text-muted" style="white-space:nowrap">{{.CreatedAt.Format "Jan 2, 3:04 PM"}}</td>
-        <td class="actions">
-          <form method="POST" action="/admin/submissions/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this submission?')">
-            <button type="submit" class="btn-ghost btn-ghost-danger">Delete</button>
-          </form>
-        </td>
-      </tr>
+<!-- Standalone form (no DOM nesting) that the bulk bar's buttons and each row's
+     checkbox target via the form="" attribute. It cannot wrap the table:
+     every row already contains its own single-submission delete form, and
+     forms cannot nest. -->
+<form id="bulk-form" method="POST" action="/admin/forms/{{.Form.ID}}/submissions/bulk-delete"
+      data-confirm="Delete the selected submissions? This cannot be undone."></form>
+
+<div class="card elev-sm" data-bulk>
+  <div class="bulkbar" data-bulk-bar hidden>
+    <label class="radio">
+      <input type="checkbox" data-bulk-all aria-label="Select all submissions on this page">
+      <span class="dot"></span>
+    </label>
+    <span class="count" data-bulk-count>0 selected</span>
+    <div class="actions">
+      <button class="btn btn-danger" type="submit" form="bulk-form" data-bulk-action>
+        <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>Delete
+      </button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table" style="min-width:640px">
+      <thead>
+        <tr>
+          <th style="width:28px"></th>
+          <th>From</th>
+          <th>Preview</th>
+          <th>Signals</th>
+          <th>Received</th>
+          <th style="width:40px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Submissions}}
+        <tr class="row-link {{if not .Read}}unread{{end}}" data-row-open>
+          <td>
+            <label class="radio">
+              <input type="checkbox" name="ids" value="{{.ID}}" form="bulk-form" data-bulk-item
+                     aria-label="Select this submission">
+              <span class="dot"></span>
+            </label>
+          </td>
+          <td>
+            <div class="from-cell">
+              <!-- The dot is decorative colour; the tag beside it carries the
+                   same information as text for anyone who cannot see it. -->
+              <span class="unread-dot" aria-hidden="true"></span>
+              <div style="min-width:0">
+                <a class="from-name" data-drawer href="/admin/forms/{{$.Form.ID}}/submissions/{{.ID}}">
+                  {{if index .Data "name"}}{{index .Data "name"}}{{else if index .Data "email"}}{{index .Data "email"}}{{else}}Submission{{end}}
+                </a>
+                {{if index .Data "email"}}<div class="from-email truncate">{{index .Data "email"}}</div>{{end}}
+              </div>
+            </div>
+          </td>
+          <td class="preview truncate">
+            {{if index .Data "message"}}{{index .Data "message"}}{{else if index .Data "body"}}{{index .Data "body"}}{{else if index .Data "content"}}{{index .Data "content"}}{{else}}—{{end}}
+          </td>
+          <td>
+            {{if not .Read}}<span class="tag tag-accent tag-sm">new</span>
+            {{else}}<span class="tag tag-neutral tag-sm">read</span>{{end}}
+          </td>
+          <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "Jan 2, 15:04"}}</td>
+          <td>
+            <form method="POST" action="/admin/submissions/{{.ID}}/delete"
+                  data-confirm="Delete this submission? This cannot be undone.">
+              <button class="btn btn-quiet btn-icon sm" type="submit" title="Delete" aria-label="Delete submission">
+                <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager rule-b" style="background-position:top">
+    <form method="GET" style="display:flex;align-items:center;gap:8px">
+      <label class="dim" style="font-size:12px" for="rows">Rows</label>
+      <select class="input" id="rows" name="size" data-autosubmit style="width:auto;min-height:30px;font-size:12px">
+        {{$size := .Pager.PageSize}}
+        {{range .Pager.Sizes}}<option value="{{.}}" {{if eq . $size}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </form>
+    <span class="muted" style="font-size:12px">{{.Pager.From}}–{{.Pager.To}} of {{.Pager.Total}}</span>
+
+    {{if gt .Pager.TotalPages 1}}
+    <nav class="pages" aria-label="Pagination">
+      {{$form := .Form.ID}}{{$size := .Pager.PageSize}}{{$cur := .Pager.Page}}
+      <a class="btn btn-secondary {{if not .Pager.HasPrev}}disabled{{end}}"
+         href="/admin/forms/{{$form}}?page=1&size={{$size}}" title="First page" aria-label="First page"
+         {{if not .Pager.HasPrev}}aria-disabled="true" tabindex="-1"{{end}}>
+        <svg class="i" style="font-size:13px"><use href="#ph-caret-double-left"/></svg>
+      </a>
+      <a class="btn btn-secondary {{if not .Pager.HasPrev}}disabled{{end}}"
+         href="/admin/forms/{{$form}}?page={{.Pager.PrevPage}}&size={{$size}}" title="Previous page" aria-label="Previous page"
+         {{if not .Pager.HasPrev}}aria-disabled="true" tabindex="-1"{{end}}>
+        <svg class="i" style="font-size:13px"><use href="#ph-caret-left"/></svg>
+      </a>
+      {{range .Pager.Pages}}
+        {{if eq . 0}}<span class="ellipsis" aria-hidden="true">…</span>
+        {{else if eq . $cur}}<a class="btn btn-primary" href="/admin/forms/{{$form}}?page={{.}}&size={{$size}}" aria-current="page">{{.}}</a>
+        {{else}}<a class="btn btn-secondary" href="/admin/forms/{{$form}}?page={{.}}&size={{$size}}">{{.}}</a>{{end}}
       {{end}}
-    </tbody>
-  </table>
+      <a class="btn btn-secondary {{if not .Pager.HasNext}}disabled{{end}}"
+         href="/admin/forms/{{$form}}?page={{.Pager.NextPage}}&size={{$size}}" title="Next page" aria-label="Next page"
+         {{if not .Pager.HasNext}}aria-disabled="true" tabindex="-1"{{end}}>
+        <svg class="i" style="font-size:13px"><use href="#ph-caret-right"/></svg>
+      </a>
+      <a class="btn btn-secondary {{if not .Pager.HasNext}}disabled{{end}}"
+         href="/admin/forms/{{$form}}?page={{.Pager.TotalPages}}&size={{$size}}" title="Last page" aria-label="Last page"
+         {{if not .Pager.HasNext}}aria-disabled="true" tabindex="-1"{{end}}>
+        <svg class="i" style="font-size:13px"><use href="#ph-caret-double-right"/></svg>
+      </a>
+    </nav>
+    {{end}}
+  </div>
 </div>
-
-{{if or .HasPrev .HasNext}}
-<div class="pagination">
-  {{if .HasPrev}}<a href="/admin/forms/{{.Form.ID}}?page={{.PrevPage}}" class="btn">&larr; Newer</a>{{end}}
-  <span class="text-muted">Page {{.Page}}</span>
-  {{if .HasNext}}<a href="/admin/forms/{{.Form.ID}}?page={{.NextPage}}" class="btn">Older &rarr;</a>{{end}}
-</div>
-{{end}}
-
-<script>
-function submissionCheckboxes() {
-  return document.querySelectorAll('.submission-checkbox');
-}
-
-function updateBulkDeleteButton() {
-  var checked = document.querySelectorAll('.submission-checkbox:checked').length;
-  var btn = document.getElementById('bulk-delete-btn');
-  btn.disabled = checked === 0;
-  btn.textContent = checked === 0 ? 'Delete selected' : 'Delete selected (' + checked + ')';
-
-  var boxes = submissionCheckboxes();
-  var selectAll = document.getElementById('select-all-checkbox');
-  selectAll.checked = boxes.length > 0 && checked === boxes.length;
-}
-
-function toggleAllSubmissionCheckboxes(source) {
-  var boxes = submissionCheckboxes();
-  for (var i = 0; i < boxes.length; i++) {
-    boxes[i].checked = source.checked;
-  }
-  updateBulkDeleteButton();
-}
-
-function confirmBulkDelete() {
-  var checked = document.querySelectorAll('.submission-checkbox:checked').length;
-  return confirm('Delete ' + checked + ' selected submission' + (checked === 1 ? '' : 's') + '?');
-}
-</script>
 
 {{else}}
-<div class="empty-state">
-  <p>No submissions yet.</p>
-  <p class="text-muted">Submissions will appear here when someone fills out your form.</p>
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-tray"/></svg></span>
+  <h3>No submissions yet</h3>
+  <p>Paste the endpoint snippet into your form and submissions land here, with an
+     email notification for each one.</p>
+  <a class="btn btn-primary" href="/admin/forms/{{.Form.ID}}/edit">
+    <svg class="i" style="font-size:15px"><use href="#ph-clipboard-text"/></svg>Get the snippet
+  </a>
 </div>
 {{end}}
 {{end}}
