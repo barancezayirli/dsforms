@@ -9,7 +9,11 @@
 <!-- The right-hand breakdown is also served on its own, so clicking a row can
      swap just this panel instead of reloading the page. -->
 {{define "held-panel"}}
-{{template "degraded-notice" .}}
+<!-- Only when the panel *is* the response. app.js swaps it in on every row
+     click, bypassing base.html, so without this the operator reads a panel
+     built from a failed query with nothing saying so. On a full page render the
+     shell already shows it, and two stacked banners is just noise. -->
+{{if .Fragment}}{{template "degraded-notice" .}}{{end}}
 {{if .Selected}}
 {{with .Selected}}
 <div class="card elev-sm" style="gap:0">

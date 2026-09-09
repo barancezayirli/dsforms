@@ -85,6 +85,11 @@ type quarantineData struct {
 	TrafficRecent int
 	RetentionDays int
 	Pager         Pagination
+
+	// Fragment is set when the response is the panel alone rather than the whole
+	// page, so the panel knows to carry the degraded notice the shell would
+	// otherwise provide.
+	Fragment bool
 }
 
 // Page renders the quarantine queue.
@@ -183,6 +188,7 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 
 	// app.js swaps just the panel when a row is clicked.
 	if r.Header.Get("X-Fragment") != "" {
+		data.Fragment = true
 		if err := h.Templates["quarantine.html"].ExecuteTemplate(w, "held-panel", data); err != nil {
 			log.Printf("quarantine panel template error: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
