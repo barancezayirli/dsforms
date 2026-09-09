@@ -40,10 +40,16 @@
 
         <hr class="hr">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <span class="muted" style="font-size:12px">{{.EntryCount}} recipient{{if ne .EntryCount 1}}s{{end}}</span>
+          <!-- Never render a count from a query that failed: this number also
+               goes into the confirmation dialog below, which tells the operator
+               the send cannot be recalled. -->
+          <span class="muted" style="font-size:12px">
+            {{if .RecipientCountKnown}}{{.EntryCount}} recipient{{if ne .EntryCount 1}}s{{end}}
+            {{else}}recipient count unavailable{{end}}
+          </span>
           <div class="actions">
             <button class="btn btn-primary" type="submit"
-                    data-confirm="Send this broadcast to {{.EntryCount}} recipients? It cannot be recalled.">
+                    data-confirm="Send this broadcast to {{if .RecipientCountKnown}}{{.EntryCount}}{{else}}all{{end}} recipients? It cannot be recalled.">
               <svg class="i" style="font-size:15px"><use href="#ph-paper-plane-tilt"/></svg>Send broadcast
             </button>
           </div>

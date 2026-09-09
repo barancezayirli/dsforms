@@ -103,11 +103,13 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	names := h.formNames()
+	names, namesFailed := h.formNames()
+	anySignalsFailed := false
 	rows := make([]heldRow, 0, len(held))
 	for _, sub := range held {
 		signals, err := h.Store.SubmissionSignals(sub.ID)
 		signalsFailed := err != nil
+		anySignalsFailed = anySignalsFailed || signalsFailed
 		if err != nil {
 			// Rendering a hold with no stated reason reads as "the filter is
 			// arbitrary" — the exact impression this queue exists to prevent —
@@ -162,7 +164,10 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 		Threshold:     h.DefaultThreshold,
 		Pager:         pager,
 	}
-	data.Degraded = data.Degraded || sinceErr != nil
+	// Per-row degradation is right for a single unreadable breakdown, but the
+	// page still owes an aggregate signal — a queue where every Form column has
+	// fallen back to a raw id is the "reads like a fresh install" shape.
+	data.Degraded = data.Degraded || sinceErr != nil || anySignalsFailed || namesFailed
 	if selected != nil {
 		data.Threshold = selected.HeldThreshold
 		if data.Threshold == 0 {
@@ -376,20 +381,22 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 }
 
 // formNames maps form ids to names for the queue, which spans every form.
-func (h *QuarantineHandler) formNames() map[string]string {
+// formNames returns form ids to display names, and whether the lookup failed.
+//
+// The failure is reported rather than only logged because callers fall back to
+// the raw form id: every row's Form column degrades at once, which is the
+// "page reads like a fresh install" shape the Degraded banner exists for.
+func (h *QuarantineHandler) formNames() (map[string]string, bool) {
 	forms, err := h.Store.ListForms()
 	if err != nil {
-		// Callers fall back to the form id. Returning nil blanked the form
-		// column for every row while the page otherwise looked entirely normal,
-		// leaving the operator unable to tell which form each hold came from.
 		log.Printf("quarantine: list forms: %v", err)
-		return nil
+		return nil, true
 	}
 	names := make(map[string]string, len(forms))
 	for _, f := range forms {
 		names[f.ID] = f.Name
 	}
-	return names
+	return names, false
 }
 
 // senderLabel picks the best available identity for a held submission. The

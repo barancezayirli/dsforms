@@ -420,6 +420,11 @@ type submissionDetailData struct {
 	OlderID  string
 	Position int
 	Total    int
+	// SignalsFailed distinguishes "nothing was recorded" from "the breakdown
+	// could not be read"; PositionKnown suppresses the "N of M" counter rather
+	// than rendering "0 of 0" from a query that failed.
+	SignalsFailed bool
+	PositionKnown bool
 }
 
 const pageSize = 20
@@ -510,22 +515,35 @@ func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Auto-mark read
+	// Auto-mark read. The in-memory flag follows the write, not the intent: it
+	// used to be set unconditionally, so a failed MarkRead rendered the
+	// submission as read while the database still said unread — the sidebar
+	// badge kept counting it and the inbox row kept its unread styling, and the
+	// reader disagreed with both.
+	markReadFailed := false
 	if !sub.Read {
 		if err := h.Store.MarkRead(subID); err != nil {
 			log.Printf("submission detail: mark read %s error: %v", subID, err)
+			markReadFailed = true
+		} else {
+			sub.Read = true
 		}
-		sub.Read = true
 	}
 
 	fields, message := splitSubmissionFields(sub.Data)
-	signals, err := h.Store.SubmissionSignals(subID)
-	if err != nil {
-		log.Printf("submission detail: signals for %s: %v", subID, err)
+
+	// A restored submission keeps its spam score, so an unreadable breakdown
+	// renders "score 11" with nothing beside it — the inverse of the bug the
+	// full-column read was written to fix.
+	signals, signalsErr := h.Store.SubmissionSignals(subID)
+	if signalsErr != nil {
+		log.Printf("submission detail: signals for %s: %v", subID, signalsErr)
 	}
-	newer, older, position, total, err := h.Store.Neighbours(formID, subID)
-	if err != nil {
-		log.Printf("submission detail: neighbours for %s: %v", subID, err)
+	// A failed Neighbours renders the drawer counter as "0 of 0" — a hard
+	// numeric claim manufactured from a query that did not run.
+	newer, older, position, total, neighboursErr := h.Store.Neighbours(formID, subID)
+	if neighboursErr != nil {
+		log.Printf("submission detail: neighbours for %s: %v", subID, neighboursErr)
 	}
 
 	data := submissionDetailData{
@@ -539,7 +557,14 @@ func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) 
 		OlderID:    older,
 		Position:   position,
 		Total:      total,
+
+		// Distinguishes "no signals recorded" from "the breakdown could not be
+		// read", which look identical otherwise — the same distinction heldRow
+		// makes on the quarantine screen.
+		SignalsFailed: signalsErr != nil,
+		PositionKnown: neighboursErr == nil && total > 0,
 	}
+	data.Degraded = data.Degraded || signalsErr != nil || neighboursErr != nil || markReadFailed
 
 	// app.js asks for the same URL with X-Fragment when it opens the drawer over
 	// the list. Without JS — or when the link is opened directly, or shared —

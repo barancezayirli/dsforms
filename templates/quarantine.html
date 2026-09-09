@@ -9,6 +9,7 @@
 <!-- The right-hand breakdown is also served on its own, so clicking a row can
      swap just this panel instead of reloading the page. -->
 {{define "held-panel"}}
+{{template "degraded-notice" .}}
 {{if .Selected}}
 {{with .Selected}}
 <div class="card elev-sm" style="gap:0">

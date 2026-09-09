@@ -336,6 +336,10 @@ type broadcastNewData struct {
 	Subject    string
 	Body       string
 	Error      string
+
+	// RecipientCountKnown suppresses the count rather than rendering 0 into a
+	// confirmation dialog that says the send cannot be recalled.
+	RecipientCountKnown bool
 }
 
 type broadcastDetailData struct {
@@ -383,20 +387,27 @@ func (h *WaitlistHandler) CreateBroadcast(w http.ResponseWriter, r *http.Request
 	subject := r.FormValue("subject")
 	body := r.FormValue("body")
 
+	// The GET path 500s on these same two queries. Degrading them to zero here
+	// renders "0 recipients" into both the page and the send-confirmation
+	// dialog for a list that may have thousands, and silently empties the past-
+	// broadcasts panel — so the reasonable read is that the signups are gone.
 	rerender := func(errMsg string) {
-		count, err := h.Store.CountEntries(id)
-		if err != nil {
-			log.Printf("broadcast rerender: count entries %s: %v", id, err)
+		count, countErr := h.Store.CountEntries(id)
+		if countErr != nil {
+			log.Printf("broadcast rerender: count entries %s: %v", id, countErr)
 		}
-		past, err := h.Store.ListBroadcasts(id)
-		if err != nil {
-			log.Printf("broadcast rerender: list broadcasts %s: %v", id, err)
+		past, listErr := h.Store.ListBroadcasts(id)
+		if listErr != nil {
+			log.Printf("broadcast rerender: list broadcasts %s: %v", id, listErr)
 		}
-		h.render(w, "broadcast_new.html", broadcastNewData{
+		data := broadcastNewData{
 			PageData: h.Shell(w, r, "Broadcast", "waitlists"),
 			Waitlist: wl, EntryCount: count, Broadcasts: past,
 			Subject: subject, Body: body, Error: errMsg,
-		})
+		}
+		data.Degraded = data.Degraded || countErr != nil || listErr != nil
+		data.RecipientCountKnown = countErr == nil
+		h.render(w, "broadcast_new.html", data)
 	}
 
 	if subject == "" || body == "" {

@@ -129,16 +129,11 @@
       </div>
       {{end}}
 
-      {{if .Degraded}}
       <!-- Some of this page's data could not be read. Without this, a broken
            database renders as a fully-formed page reading zero everywhere,
-           which is indistinguishable from a fresh install. -->
-      <div class="notice banner">
-        <svg class="i"><use href="#ph-warning"/></svg>
-        <span>Some data could not be loaded, so counts on this page may be
-              wrong or missing. Check the server log.</span>
-      </div>
-      {{end}}
+           which is indistinguishable from a fresh install. Shared with the
+           fragment responses, which do not go through this shell. -->
+      {{template "degraded-notice" .}}
 
       {{if .Flash}}
       <div class="notice flash flash-{{.Flash.Type}}">
@@ -157,4 +152,17 @@
   <script src="/static/app.js?v={{.AssetVer}}" defer></script>
 </body>
 </html>
+{{end}}
+
+{{define "degraded-notice"}}
+{{if .Degraded}}
+<!-- The same signal base.html renders. Fragment responses bypass the shell
+     entirely, so without this a panel swapped in by app.js is read as fact
+     while the query behind it failed. -->
+<div class="notice banner">
+  <svg class="i"><use href="#ph-warning"/></svg>
+  <span>Some data could not be loaded, so counts here may be wrong or missing.
+        Check the server log.</span>
+</div>
+{{end}}
 {{end}}
