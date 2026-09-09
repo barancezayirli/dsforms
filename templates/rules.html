@@ -1,0 +1,174 @@
+{{template "base" .}}
+
+{{define "content"}}
+<div class="page-head">
+  <h4>Filter rules</h4>
+  <span class="muted" style="font-size:12px">
+    Explicit overrides of the scoring filter. Allow always beats block.
+  </span>
+</div>
+
+{{if .Error}}
+<div class="notice">
+  <svg class="i"><use href="#ph-warning"/></svg>
+  <span>{{.Error}}</span>
+</div>
+{{end}}
+
+<div class="row">
+  <div class="col-main">
+    <div class="card elev-sm">
+      <div class="card-head">
+        <svg class="i i-accent" style="font-size:16px"><use href="#ph-prohibit"/></svg>
+        <span class="card-title">Blocklist</span>
+        <span class="tag tag-accent tag-sm">{{len .Block}} rule{{if ne (len .Block) 1}}s{{end}}</span>
+      </div>
+      <p class="card-body" style="flex:none">
+        Anything matching a rule here is held on arrival, whatever it scores.
+      </p>
+
+      <form method="POST" action="/admin/rules" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <input type="hidden" name="kind" value="block">
+        <div class="seg">
+          <label class="seg-opt"><input type="radio" name="type" value="email" checked><span>Email</span></label>
+          <label class="seg-opt"><input type="radio" name="type" value="domain"><span>Domain</span></label>
+          <label class="seg-opt"><input type="radio" name="type" value="ip"><span>IP</span></label>
+          <label class="seg-opt"><input type="radio" name="type" value="cidr"><span>CIDR</span></label>
+        </div>
+        <input class="input" name="value" style="flex:1 1 220px;min-width:0"
+               placeholder="spammer@example.com, example.ru, or 45.155.204.0/24"
+               aria-label="Rule to block" required>
+        <button class="btn btn-primary" type="submit">Block</button>
+      </form>
+
+      {{if .Block}}
+      <div class="table-wrap" style="margin-top:6px">
+        <table class="table" style="min-width:460px">
+          <thead>
+            <tr><th>Rule</th><th>Type</th><th>Blocked</th><th>Added</th><th style="width:36px"></th></tr>
+          </thead>
+          <tbody>
+            {{range .Block}}
+            <tr>
+              <td class="mono" style="font-size:12.5px">{{.Value}}</td>
+              <td><span class="tag tag-neutral tag-sm">{{.Type}}</span></td>
+              <td class="muted">{{.Hits}}</td>
+              <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "Jan 2"}}</td>
+              <td>
+                <form method="POST" action="/admin/rules/{{.ID}}/delete">
+                  <button class="btn btn-quiet btn-icon sm" type="submit"
+                          title="Remove rule" aria-label="Remove rule {{.Value}}">
+                    <svg class="i" style="font-size:14px"><use href="#ph-x"/></svg>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <p class="dim" style="font-size:12px">No block rules yet.</p>
+      {{end}}
+    </div>
+
+    <div class="card elev-sm" style="margin-top:12px">
+      <div class="card-head">
+        <svg class="i i-accent" style="font-size:16px"><use href="#ph-text-aa"/></svg>
+        <span class="card-title">Custom keywords</span>
+        <span class="tag tag-neutral tag-sm">{{len .Keywords}}</span>
+      </div>
+      <p class="card-body" style="flex:none">
+        Added to the built-in list. Each hit scores +5 — below the threshold on
+        purpose, so a single keyword never holds a submission on its own.
+      </p>
+
+      {{if .Keywords}}
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        {{range .Keywords}}
+        <span class="tag tag-neutral">
+          {{.Value}}
+          <form method="POST" action="/admin/rules/{{.ID}}/delete" style="display:inline-flex">
+            <button class="btn btn-quiet" type="submit" style="padding:0 0 0 4px;min-height:0"
+                    title="Remove keyword" aria-label="Remove keyword {{.Value}}">
+              <svg class="i" style="font-size:12px"><use href="#ph-x"/></svg>
+            </button>
+          </form>
+        </span>
+        {{end}}
+      </div>
+      {{end}}
+
+      <form method="POST" action="/admin/rules" style="display:flex;gap:8px;margin-top:8px">
+        <input type="hidden" name="kind" value="block">
+        <input type="hidden" name="type" value="keyword">
+        <input class="input" name="value" placeholder="crypto pump" aria-label="Keyword to add" required>
+        <button class="btn btn-secondary" type="submit">Add</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-side">
+    <div class="card elev-sm">
+      <div class="card-head">
+        <svg class="i i-accent" style="font-size:16px"><use href="#ph-gauge"/></svg>
+        <span class="card-title">Score threshold</span>
+      </div>
+      <p class="card-body" style="flex:none">
+        Submissions scoring at or above this are held. The instance default is
+        <strong>{{.Threshold}}</strong>, set with <code>SPAM_THRESHOLD</code>;
+        each form can override it in its own settings.
+      </p>
+      <!-- The weights are absolute, so moving the threshold changes which
+           single signals are enough on their own. Saying so here is the
+           tradeoff the operator is actually making. -->
+      <div class="panel-box" style="font-size:11.5px;line-height:1.6">
+        <div><strong>Lenient · 9</strong> <span class="dim">— a lone link-markup hit (+6) no longer holds.</span></div>
+        <div style="margin-top:5px"><strong>Balanced · 6</strong> <span class="dim">— the default. One markup link holds; one keyword never does.</span></div>
+        <div style="margin-top:5px"><strong>Strict · 4</strong> <span class="dim">— a lone keyword hit (+5) now holds on its own.</span></div>
+      </div>
+    </div>
+
+    <div class="card elev-sm" style="margin-top:12px">
+      <div class="card-head">
+        <svg class="i i-accent" style="font-size:16px"><use href="#ph-user-check"/></svg>
+        <span class="card-title">Allowlist</span>
+        <span class="tag tag-neutral tag-sm">{{len .Allow}}</span>
+      </div>
+      <p class="card-body" style="flex:none">
+        Never held, whatever the score, and scoring is skipped entirely. Use it
+        after a false positive.
+      </p>
+
+      <form method="POST" action="/admin/rules" style="display:flex;gap:8px">
+        <input type="hidden" name="kind" value="allow">
+        <input type="hidden" name="type" value="email">
+        <input class="input" name="value" placeholder="real.customer@example.com"
+               aria-label="Address to allow" required>
+        <button class="btn btn-secondary" type="submit">Allow</button>
+      </form>
+
+      {{if .Allow}}
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+        {{range .Allow}}
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="min-width:0;flex:1">
+            <div class="mono truncate" style="font-size:12.5px">{{.Value}}</div>
+            {{if .Note}}<div class="dim" style="font-size:11px">{{.Note}}</div>{{end}}
+          </div>
+          <form method="POST" action="/admin/rules/{{.ID}}/delete">
+            <button class="btn btn-quiet btn-icon sm" type="submit"
+                    title="Remove rule" aria-label="Remove allow rule {{.Value}}">
+              <svg class="i" style="font-size:14px"><use href="#ph-x"/></svg>
+            </button>
+          </form>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="dim" style="font-size:12px;margin-top:6px">No allow rules yet.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

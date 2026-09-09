@@ -70,6 +70,7 @@ var basePages = []string{
 	"submission_detail.html", "users.html", "users_new.html", "account.html",
 	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
 	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
+	"quarantine.html", "rules.html",
 }
 
 var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
@@ -503,6 +504,12 @@ func main() {
 	}
 
 	authHandler := &handler.AuthHandler{Base: base, LoginGuard: loginGuard}
+	quarantineHandler := &handler.QuarantineHandler{
+		Base:             base,
+		Notifier:         mailer,
+		RetentionDays:    int(quarantineRetention / (24 * time.Hour)),
+		DefaultThreshold: cfg.SpamThreshold,
+	}
 	adminHandler := &handler.AdminHandler{Base: base, Webhook: webhookSender}
 	usersHandler := &handler.UsersHandler{Base: base}
 	backupHandler := &handler.BackupHandler{Base: base}
@@ -552,6 +559,14 @@ func main() {
 		r.Get("/admin/forms/{formID}/submissions/{subID}", adminHandler.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", adminHandler.MarkRead)
 		r.Post("/admin/submissions/{id}/delete", adminHandler.DeleteSubmission)
+		r.Get("/admin/quarantine", quarantineHandler.Page)
+		r.Post("/admin/quarantine/{id}/restore", quarantineHandler.Restore)
+		r.Post("/admin/quarantine/{id}/report", quarantineHandler.Report)
+		r.Post("/admin/quarantine/delete", quarantineHandler.Delete)
+		r.Post("/admin/quarantine/empty", quarantineHandler.Empty)
+		r.Get("/admin/rules", quarantineHandler.RulesPage)
+		r.Post("/admin/rules", quarantineHandler.AddRule)
+		r.Post("/admin/rules/{id}/delete", quarantineHandler.DeleteRule)
 		r.Get("/admin/waitlists", waitlistHandler.List)
 		r.Get("/admin/waitlists/new", waitlistHandler.NewPage)
 		r.Post("/admin/waitlists/new", waitlistHandler.Create)

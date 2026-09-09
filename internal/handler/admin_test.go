@@ -117,11 +117,19 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 	return s, r
 }
 
-func doAdminRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
+// loginCookie mints a session cookie for the seeded admin. Extracted from
+// doAdminRequest because tests that build their own request (to set a header,
+// say) need the same thing.
+func loginCookie(t *testing.T, s *store.Store) *http.Cookie {
 	t.Helper()
 	admin, _ := s.GetUserByUsername("admin")
 	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
-	cookie := auth.CreateSessionCookie(token, "https://example.com")
+	return auth.CreateSessionCookie(token, "https://example.com")
+}
+
+func doAdminRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	cookie := loginCookie(t, s)
 
 	var req *http.Request
 	if body != "" {

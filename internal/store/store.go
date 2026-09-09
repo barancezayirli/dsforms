@@ -334,6 +334,17 @@ func New(path string) (*Store, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
+	if path == ":memory:" {
+		// database/sql pools connections, and every new connection to an
+		// in-memory database gets its own private, empty one. A second
+		// connection would therefore see no tables at all — "no such table:
+		// submissions" from a perfectly valid query. Capping the pool at one
+		// keeps every caller on the same database.
+		//
+		// This only affects tests; the file-backed path keeps WAL concurrency.
+		db.SetMaxOpenConns(1)
+	}
+
 	if err := runMigrations(db); err != nil {
 		return nil, err
 	}

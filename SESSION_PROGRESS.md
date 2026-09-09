@@ -12,7 +12,7 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 | 1 | `spam.Detail`/`Signal`/`DefaultThreshold`, `config.SpamThreshold`, schema, store methods | **done** |
 | 2 | Submit-handler rewiring (allow → block → honeypot → score → hold) | not started |
 | 3 | Forms, form detail, reader drawer | **done** |
-| 4 | Quarantine + breakdown, Filter rules | not started |
+| 4 | Quarantine + breakdown, Filter rules | **done** |
 | 5 | Home aggregates, inline-SVG charts, rate-limit snapshot | store aggregates + chart helpers done; page pending |
 | 6 | Form settings, Waitlists, Users, Backups, Login, empty states | not started |
 | 7 | FTS5 search (⌘K), digest email, false-positive reporting | not started |

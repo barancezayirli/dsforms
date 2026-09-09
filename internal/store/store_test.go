@@ -1225,3 +1225,32 @@ func TestBroadcastIsSending(t *testing.T) {
 		t.Error("IsSending should be false for done status")
 	}
 }
+
+// TestInMemoryStoreIsOneDatabase guards a trap that made the whole test suite
+// quietly fragile: database/sql pools connections, and each new connection to
+// an in-memory database gets its own private, empty one. Any concurrent access
+// could therefore hit "no such table", and nothing noticed until a handler
+// under test started a goroutine.
+func TestInMemoryStoreIsOneDatabase(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+
+	// Hammer it from several goroutines; a second connection would surface as
+	// a missing table rather than as a race.
+	errs := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		go func() {
+			_, err := s.GetForm("f1")
+			errs <- err
+		}()
+	}
+	for i := 0; i < 16; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent read hit a different database: %v", err)
+		}
+	}
+}

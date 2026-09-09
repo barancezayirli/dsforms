@@ -2,7 +2,9 @@ package handler
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Charts are hand-built inline SVG rendered from aggregate rows. A charting
@@ -234,4 +236,24 @@ func Initial(s string) string {
 		return strings.ToUpper(string(r))
 	}
 	return "?"
+}
+
+// itoa is strconv.Itoa under a shorter name, used by the small formatting
+// helpers in this package.
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// Age renders how long ago something happened, at the coarseness an operator
+// triaging a queue actually reads: "6d", "3h", "just now".
+func Age(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return itoa(int(d.Minutes())) + "m"
+	case d < 24*time.Hour:
+		return itoa(int(d.Hours())) + "h"
+	default:
+		return itoa(int(d.Hours()/24)) + "d"
+	}
 }
