@@ -68,9 +68,35 @@
         btn.setAttribute('aria-label', 'Copy');
       }, 1500);
     };
+    // navigator.clipboard is undefined on any non-secure origin except
+    // localhost, and this project explicitly supports plain-http deployments.
+    // Swallowing that left a button labelled "Copy" doing literally nothing —
+    // no label change, no error — so the user pastes whatever they had before.
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text.trim()).then(done, function () {});
+      navigator.clipboard.writeText(text.trim()).then(done, function (err) {
+        console.warn('dsforms: clipboard write refused', err);
+        selectInstead(btn, text);
+      });
+      return;
     }
+    selectInstead(btn, text);
+  }
+
+  // selectInstead selects the source text and tells the user to copy it
+  // themselves — the honest fallback when the clipboard API is unavailable.
+  function selectInstead(btn, text) {
+    var target = btn.getAttribute('data-copy') && $(btn.getAttribute('data-copy'));
+    if (target && window.getSelection) {
+      var range = document.createRange();
+      range.selectNodeContents(target);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    var label = $('.copy-label', btn) || btn;
+    var original = label.textContent;
+    label.textContent = 'Press ' + (navigator.platform.indexOf('Mac') === 0 ? '⌘C' : 'Ctrl+C');
+    setTimeout(function () { label.textContent = original; }, 2500);
   }
 
   /* — bulk selection ————————————————————————————————————————————————————
@@ -139,7 +165,16 @@
     var root = drawerRoot();
     root.setAttribute('aria-busy', 'true');
     fetch(url, { headers: { 'X-Fragment': '1' }, credentials: 'same-origin' })
-      .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+      .then(function (r) {
+        // A redirect is never a fragment. fetch follows one transparently, and
+        // an expired session redirects to /admin/login, which answers 200 with a
+        // full page — so r.ok alone would put the login form inside the drawer,
+        // where Escape, the backdrop and the close button all select elements
+        // that page does not contain. The server also answers 401 here now;
+        // this covers any other redirect.
+        if (r.redirected) { window.location.href = r.url; return Promise.reject('redirected'); }
+        return r.ok ? r.text() : Promise.reject(r.status);
+      })
       .then(function (html) {
         root.innerHTML = html;
         root.removeAttribute('aria-busy');
@@ -152,7 +187,12 @@
           (focusable || panel).focus();
         }
       })
-      .catch(function () {
+      .catch(function (reason) {
+        // Clear the busy state before leaving: if the navigation does not take
+        // (a cancelled beforeunload, a response that triggers a download), an
+        // empty region left marked aria-busy is announced as loading forever.
+        root.removeAttribute('aria-busy');
+        if (reason === 'redirected') return; // already navigating
         // A fragment we cannot load should still take the user somewhere real.
         window.location.href = url;
       });
@@ -190,7 +230,12 @@
     var panel = $('#held-panel');
     if (!panel) return false;
     fetch(link.href, { headers: { 'X-Fragment': '1' }, credentials: 'same-origin' })
-      .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+      .then(function (r) {
+        // Same redirect hazard as openDrawer: an expired session would
+        // otherwise render the login page inside the breakdown panel.
+        if (r.redirected) { window.location.href = r.url; return Promise.reject('redirected'); }
+        return r.ok ? r.text() : Promise.reject(r.status);
+      })
       .then(function (html) {
         panel.innerHTML = html;
         history.replaceState({}, '', link.href);
@@ -198,7 +243,10 @@
         var row = closest(link, '[data-held-row]');
         if (row) row.classList.add('on');
       })
-      .catch(function () { window.location.href = link.href; });
+      .catch(function (reason) {
+        if (reason === 'redirected') return;
+        window.location.href = link.href;
+      });
     return true;
   }
 
