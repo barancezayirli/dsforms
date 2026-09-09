@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/mail"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 func setupWaitlistSubmit(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {

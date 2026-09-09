@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/filter"
-	"github.com/youruser/dsforms/internal/mail"
-	"github.com/youruser/dsforms/internal/spam"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 func setupQuarantine(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {

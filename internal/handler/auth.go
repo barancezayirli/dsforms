@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/ratelimit"
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/ratelimit"
 )
 
 // AuthHandler handles login and logout.

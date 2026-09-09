@@ -5,7 +5,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/youruser/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/spam"
 )
 
 // Config holds all application configuration loaded from environment variables.

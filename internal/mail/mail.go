@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // Mailer sends email over SMTP. It implements handler.Notifier (SendNotification)

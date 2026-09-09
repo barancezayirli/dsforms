@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/flash"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/filter"
-	"github.com/youruser/dsforms/internal/flash"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 // QuarantineHandler serves the spam review queue and the filter rules screen.

@@ -1,4 +1,4 @@
-module github.com/youruser/dsforms
+module github.com/barancezayirli/dsforms
 
 go 1.25.4
 

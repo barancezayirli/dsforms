@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/mail"
-	"github.com/youruser/dsforms/internal/spam"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 type mockWebhookSender struct {

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // SearchHandler serves the header search field and ⌘K.

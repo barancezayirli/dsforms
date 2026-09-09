@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/ratelimit"
 )
 
 func TestHealthz(t *testing.T) {

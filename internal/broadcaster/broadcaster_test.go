@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // fakeStore implements the Store interface for deterministic worker tests.

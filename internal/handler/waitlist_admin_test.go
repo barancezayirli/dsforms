@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 // testTemplates parses the real templates the same way main.go does.

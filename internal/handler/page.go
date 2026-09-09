@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/flash"
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/flash"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // Base is the state every admin handler needs. AdminHandler, AuthHandler,

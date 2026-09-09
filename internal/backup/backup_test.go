@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 	_ "modernc.org/sqlite"
 )
 

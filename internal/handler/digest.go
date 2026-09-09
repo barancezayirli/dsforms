@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // DigestMailer sends the daily quarantine digest. It is the SendMail half of

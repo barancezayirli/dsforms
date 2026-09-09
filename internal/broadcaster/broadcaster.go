@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // Store is the subset of *store.Store the worker needs.

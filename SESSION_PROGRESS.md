@@ -18,11 +18,17 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 | 7 | FTS5 search (⌘K), digest email, false-positive reporting | **done** |
 | 8 | Landing page (`docs/index.html`) | **done** |
 
+## Done since
+
+- **Module path** `github.com/youruser/dsforms` → `github.com/barancezayirli/dsforms`.
+  The `go mod init` placeholder from commit `fcb19d1` never matched the repo URL, which
+  made `go get github.com/barancezayirli/dsforms` fail outright. It is one isolated
+  commit on this branch, so it still reviews and reverts independently.
+
 ## Deferred items
 
 | Item | Why deferred | Target |
 |---|---|---|
-| Module path `github.com/youruser/dsforms` → `github.com/barancezayirli/dsforms` | The `go mod init` placeholder from the very first commit (`fcb19d1`) was never replaced; `CLAUDE.md:20` has documented the intended path all along. **Not cosmetic:** because the declared module path does not match the repo URL, `go get github.com/barancezayirli/dsforms` fails — Go rejects a module whose declared path differs from where it was fetched. Purely mechanical to fix: `go mod edit -module` plus a sed over 34 files / 70 import lines, fully verified by the compiler. Kept out of this branch so it does not bury the redesign diff. | Its own PR — worth doing before the repo is consumed as a dependency |
 | Screenshots in `docs/screenshots/` for the landing page's Admin UI section | The admin section currently describes the four screens in cards rather than showing them. Real screenshots need a populated instance and a decision about what data to show publicly. | A follow-up PR |
 
 ## Open questions

@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"github.com/youruser/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/filter"
 )
 
 func TestAddAndListFilterRules(t *testing.T) {

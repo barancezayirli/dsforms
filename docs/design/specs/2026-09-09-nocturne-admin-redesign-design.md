@@ -35,7 +35,7 @@ These were open in the handoff and are settled here.
 | D7 | **Spam weights stay absolute constants**; the threshold-invariant tradeoff is stated in the UI, not engineered away | Deriving weights from the threshold would change the meaning of already-stored `spam_signals` rows whenever an operator moves the slider — history must not be rewritten. See "The threshold invariant" below. |
 | D8 | **Digest email is a daily `time.Ticker` goroutine** in `main.go`, mirroring the existing session-cleanup loop | Off by default, per-form toggle. The only background timer this redesign adds. |
 | D9 | `Detail` **sorts field keys** before scoring | Go map iteration is randomized. `Score`'s `int` return hid this; returning an ordered `[]Signal` exposes it, and the handoff asks for a test asserting signal order. |
-| D10 | The `youruser` → `barancezayirli` module-path mismatch is **not** fixed here | `go.mod` says `github.com/youruser/dsforms`; `CLAUDE.md` documents `github.com/barancezayirli/dsforms`. Renaming touches every import in the repo and would bury this diff. Deferred — tracked in `SESSION_PROGRESS.md`. |
+| D10 | The `youruser` → `barancezayirli` module-path rename is a **separate commit** on this branch | Originally deferred entirely, then folded in at the operator's request. Kept as its own commit rather than spread through the redesign: the `go mod init` placeholder never matched the repo URL, so `go get` failed outright. |
 
 ---
 
@@ -265,6 +265,6 @@ Each phase ends with `go test -race ./...` green and a commit.
 ## Out of scope
 
 - The "Focused inbox" home variation (D2).
-- Module-path rename (D10).
+- Module-path rename (D10) — folded in later, as its own commit.
 - Persisted rate-limit history (D6) — snapshot only.
 - Any charting library, JS framework, or build step.

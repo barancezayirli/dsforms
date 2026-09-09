@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/filter"
-	"github.com/youruser/dsforms/internal/mail"
-	"github.com/youruser/dsforms/internal/spam"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 // submitTo posts a form body to the handler and returns the recorder.

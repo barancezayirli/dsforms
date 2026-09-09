@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/youruser/dsforms/internal/ratelimit"
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/ratelimit"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // OverviewHandler renders the admin home: what arrived, what is waiting, and

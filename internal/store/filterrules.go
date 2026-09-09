@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/google/uuid"
-	"github.com/youruser/dsforms/internal/filter"
 )
 
 // AddFilterRule validates a rule and stores its normalised form.

@@ -16,17 +16,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/backup"
+	"github.com/barancezayirli/dsforms/internal/broadcaster"
+	"github.com/barancezayirli/dsforms/internal/config"
+	"github.com/barancezayirli/dsforms/internal/handler"
+	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/ratelimit"
+	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/webhook"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/backup"
-	"github.com/youruser/dsforms/internal/broadcaster"
-	"github.com/youruser/dsforms/internal/config"
-	"github.com/youruser/dsforms/internal/handler"
-	"github.com/youruser/dsforms/internal/mail"
-	"github.com/youruser/dsforms/internal/ratelimit"
-	"github.com/youruser/dsforms/internal/spam"
-	"github.com/youruser/dsforms/internal/store"
-	"github.com/youruser/dsforms/internal/webhook"
 )
 
 // Compile-time checks that *mail.Mailer satisfies the consumer interfaces it is wired into.

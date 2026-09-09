@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // Sender sends webhook notifications via HTTP POST.

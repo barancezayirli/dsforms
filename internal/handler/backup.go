@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/youruser/dsforms/internal/backup"
-	"github.com/youruser/dsforms/internal/flash"
+	"github.com/barancezayirli/dsforms/internal/backup"
+	"github.com/barancezayirli/dsforms/internal/flash"
 )
 
 // BackupHandler handles backup export and import.

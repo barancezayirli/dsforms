@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/youruser/dsforms/internal/filter"
-	"github.com/youruser/dsforms/internal/spam"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 // Notifier sends notifications for form submissions.

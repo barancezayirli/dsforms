@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 type stubMailer struct {

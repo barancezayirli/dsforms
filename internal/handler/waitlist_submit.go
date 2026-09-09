@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 // ConfirmationMailer sends a single confirmation email. Implemented by *mail.Mailer.
