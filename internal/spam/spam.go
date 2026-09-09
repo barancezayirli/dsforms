@@ -1,6 +1,11 @@
-// Package spam provides a hardcoded, conservative weighted-scoring filter for
-// detecting link/content spam in form submissions. It has no dependencies and
-// no configuration: the weights and threshold are fixed in this file.
+// Package spam provides a conservative weighted-scoring filter for detecting
+// link/content spam in form submissions. It has no dependencies.
+//
+// The weights are fixed in this file and deliberately absolute: a stored
+// spam_signals row records why one specific submission was held, and retuning a
+// weight must not retroactively rewrite that history. The *threshold* they are
+// compared against is not fixed — an operator sets it per instance
+// (SPAM_THRESHOLD) and per form, with DefaultThreshold as the fallback.
 package spam
 
 import "strings"
@@ -47,7 +52,7 @@ const extraLinkWeight = 2
 
 // gibberishWeight is the score for a field whose value contains a token that
 // looks synthetically generated rather than real text. Kept at half the
-// threshold — pile-up only, never an instant drop — because the underlying
+// threshold — pile-up only, never an instant hold — because the underlying
 // vowel-ratio/case-transition heuristic is biased toward English/Romance-
 // language phonotactics and can flag real names from consonant-heavy
 // languages (e.g. "Sobczyk"). A single flagged field must never lose a real
@@ -59,7 +64,7 @@ const gibberishWeight = 3
 // Matching is substring-based (strings.Contains), not word-boundary — keep
 // entries long/specific enough that a substring hit implies spam (this is why
 // "forex" is qualified to "forex trading"/"forex signals"). Because a single
-// keyword hit (keywordWeight) stays below the threshold, it only drops alongside
+// keyword hit (keywordWeight) stays below the threshold, it only holds alongside
 // another signal: e.g. "unsubscribe" is bulk-email leakage, harmless alone but
 // damning combined with link markup or multiple raw URLs.
 var spamKeywords = []string{
@@ -77,12 +82,12 @@ var spamKeywords = []string{
 
 // markupLinkMarkers indicate HTML/BBCode link markup, which has near-zero
 // legitimate use in a plain static-site form. Each match scores markupWeight,
-// enough to drop a submission on its own.
+// enough to hold a submission on its own.
 var markupLinkMarkers = []string{"[url=", "[url]", "[link]", "<a href"}
 
 // sqlInjectionMarkers indicate a SQL-injection probe (sqlmap-style automated
 // scanning), which has zero legitimate use in a plain static-site form field.
-// Each match scores markupWeight, enough to drop a submission on its own —
+// Each match scores markupWeight, enough to hold a submission on its own —
 // same tier as markup, because these strings do not occur in real prose.
 // "-- -" is sqlmap's default comment-out suffix and alone covers most probes;
 // the rest are common blind/error/union injection constructs.

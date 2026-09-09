@@ -12,9 +12,10 @@ type bucket struct {
 
 	// requests and throttled are counters for the admin overview only; they
 	// take no part in the limiting decision. They are in-process and reset on
-	// restart, which is why the panel that shows them says "since last
-	// restart" — persisting a row per request would put a database write on
-	// the hot path this limiter exists to avoid.
+	// restart — persisting a row per request would put a database write on the
+	// hot path this limiter exists to avoid — and StartCleanup drops whole
+	// buckets once idle, so the panel is a recent-activity view rather than a
+	// since-boot total.
 	requests  int
 	throttled int
 }
@@ -84,8 +85,9 @@ func (l *Limiter) Allow(ip string) bool {
 	return false
 }
 
-// Snapshot returns the busiest IPs seen since the process started, newest
-// counters first, capped at n.
+// Snapshot returns the busiest IPs currently tracked, busiest first, capped at
+// n. Buckets swept by StartCleanup are gone, so this is recent activity rather
+// than a total since boot.
 //
 // Read-only by construction: it iterates the buckets under the same mutex Allow
 // uses but never touches tokens or lastSeen. Implementing it in terms of Allow

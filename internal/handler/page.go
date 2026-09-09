@@ -13,14 +13,13 @@ import (
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
-// Base is the state every admin handler needs. AdminHandler, AuthHandler,
-// UsersHandler, BackupHandler and WaitlistHandler each embed it.
+// Base is the state every admin handler needs, and every admin handler embeds
+// it.
 //
-// These five fields were previously repeated field-for-field across all five
-// handlers. The sidebar shell needs several more values on every page (nav
-// badge counts, the database card, the version chip), and copying those into
-// five more places — and into thirteen per-page data structs — is how the
-// counts would drift apart. One struct, embedded.
+// These fields were previously repeated field-for-field in each handler. The
+// sidebar shell needs several more values on every page (nav badge counts, the
+// database card, the version chip), and copying those into every handler — and
+// into every per-page data struct — is how they drift apart.
 type Base struct {
 	Store     *store.Store
 	SecretKey string
@@ -29,13 +28,6 @@ type Base struct {
 	Version   string
 	AssetVer  string // content hash appended to /static URLs for cache busting
 	Templates map[string]*template.Template
-}
-
-// NavCounts are the sidebar badge numbers.
-type NavCounts struct {
-	Unread   int
-	Held     int
-	Waitlist int
 }
 
 // DBStatus fills the sidebar's database card.
@@ -56,7 +48,7 @@ type PageData struct {
 	AssetVer    string
 	CurrentUser store.User
 	Flash       *FlashData
-	Nav         NavCounts
+	Nav         store.NavCounts
 	DB          DBStatus
 
 	// Degraded is set when the shell's own queries failed, so a page can say so
@@ -65,9 +57,9 @@ type PageData struct {
 }
 
 // navGroups maps a sidebar item to the group heading above it. The header
-// breadcrumb shows that group over the page title, so deriving it here keeps
-// the two in step instead of asking sixteen call sites to remember which group
-// their page belongs to.
+// breadcrumb shows that group over the page title, so deriving it here keeps the
+// two in step instead of asking every call site to remember which group its page
+// belongs to.
 var navGroups = map[string]string{
 	"home":       "Overview",
 	"forms":      "Collect",
@@ -85,9 +77,11 @@ var navGroups = map[string]string{
 // handler and BackupHandler already has a Page method — an embedded method
 // with that name would be silently shadowed by it.
 //
-// Reading the flash has the side effect of clearing its cookie, so this must be
-// called exactly once per response — the same contract the individual handlers
-// already had with flash.Get.
+// Reading the flash consumes it: flash.Get clears the cookie on a successfully
+// validated one. Calling Shell twice does not double-consume — the second call
+// re-reads the unmodified request — but calling it on a path that then redirects
+// instead of rendering silently eats the operator's message. Call it on paths
+// that render.
 //
 // A failure to read the nav counts or stat the database is logged and left at
 // zero rather than returned: a sidebar badge is not worth turning a working
@@ -116,7 +110,7 @@ func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active strin
 			log.Printf("page: nav counts: %v", err)
 			data.Degraded = true
 		} else {
-			data.Nav = NavCounts{Unread: counts.Unread, Held: counts.Held, Waitlist: counts.Waitlist}
+			data.Nav = counts
 		}
 	}
 	return data

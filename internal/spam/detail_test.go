@@ -110,8 +110,8 @@ func TestDetailGibberishCapturesOriginalCaseToken(t *testing.T) {
 	if len(signals) != 1 {
 		t.Fatalf("got %d signals, want 1: %+v", len(signals), signals)
 	}
-	if signals[0].Rule != "gibberish" {
-		t.Errorf("Rule = %q, want %q", signals[0].Rule, "gibberish")
+	if signals[0].Rule != RuleGibberish {
+		t.Errorf("Rule = %q, want %q", signals[0].Rule, RuleGibberish)
 	}
 	if signals[0].Match != "xKqZjWmB" {
 		t.Errorf("Match = %q, want the original-case token %q", signals[0].Match, "xKqZjWmB")
@@ -156,8 +156,8 @@ func TestDetailRuleOrderWithinField(t *testing.T) {
 		"name": "<a href=http://x.com>casino</a> union select xKqZjWmB",
 	})
 
-	want := []string{"markup", "sql", "keyword", "url_in_name", "gibberish"}
-	got := make([]string, 0, len(signals))
+	want := []Rule{RuleMarkup, RuleSQL, RuleKeyword, RuleURLInName, RuleGibberish}
+	got := make([]Rule, 0, len(signals))
 	for _, s := range signals {
 		got = append(got, s.Rule)
 	}
@@ -178,7 +178,7 @@ func TestDetailExtraLinksSortsLast(t *testing.T) {
 		t.Fatal("want signals, got none")
 	}
 	last := signals[len(signals)-1]
-	if last.Rule != "extra_links" {
+	if last.Rule != RuleExtraLinks {
 		t.Errorf("last signal = %q, want extra_links (got all: %+v)", last.Rule, signals)
 	}
 	if last.Field != "" {

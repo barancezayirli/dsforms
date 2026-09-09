@@ -201,7 +201,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			// stamped here. Weighted at the threshold so it holds on its own —
 			// matching the old behaviour, where a repeat IP was an outright
 			// drop — while keeping the breakdown's weights summing to the score.
-			signals = append(signals, spam.Signal{Rule: "repeat_ip", Match: ip, Weight: threshold})
+			signals = append(signals, spam.Signal{Rule: spam.RuleRepeatIP, Match: ip, Weight: threshold})
 			score += threshold
 		}
 		held = score >= threshold

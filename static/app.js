@@ -138,8 +138,10 @@
      inside that template, but they arrive here already escaped — which is
      exactly why internal/spam and the quarantine templates must never wrap
      them in template.HTML. If that invariant is ever broken, this line becomes
-     the XSS sink; the fix belongs on the server side, not here. Note also that
-     innerHTML does not execute <script>, so a fragment cannot introduce one. */
+     the XSS sink; the fix belongs on the server side, not here. innerHTML does
+     not execute <script>, but it does run inline event handlers such as
+     onerror= — it is not a second line of defence, and the server-side escaping
+     is the only one. */
   var lastFocus = null;
 
   function drawerRoot() {

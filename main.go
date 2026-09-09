@@ -49,8 +49,8 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 // quarantineRetention is how long a held submission stays reviewable before it
-// is deleted. The quarantine UI states this figure; changing one means changing
-// both.
+// is deleted. It is passed to the handlers as RetentionDays, so the figure the
+// UI states tracks this constant automatically.
 const quarantineRetention = 30 * 24 * time.Hour
 
 // version is stamped at build time with -ldflags "-X main.version=…" and shown

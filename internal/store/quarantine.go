@@ -7,16 +7,19 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/barancezayirli/dsforms/internal/spam"
 )
 
 // SpamSignal is one stored reason a submission was held: which rule fired, on
 // which field, on what text, and for how many points.
 //
-// It mirrors spam.Signal but is a separate type on purpose — this one is a
-// historical record read back from the database, and it must not change meaning
-// when the weights or the threshold in internal/spam are retuned.
+// Separate from spam.Signal because this one is a row: it is scanned from the
+// database, carries whatever an older binary wrote, and is rendered rather than
+// computed. The Rule field is typed by internal/spam all the same, so the value
+// set has one definition — the same reason store returns filter.Rule directly.
 type SpamSignal struct {
-	Rule   string
+	Rule   spam.Rule
 	Field  string
 	Match  string
 	Weight int

@@ -9,6 +9,7 @@ import (
 
 	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/flash"
+	"github.com/barancezayirli/dsforms/internal/spam"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -29,8 +30,8 @@ type QuarantineHandler struct {
 	Notifier Notifier
 	Webhook  WebhookSender
 
-	// Retention is how long held submissions are kept, for the UI copy. It must
-	// match the sweep interval in main.go.
+	// RetentionDays is how long held submissions are kept, for the UI copy. It
+	// is derived from quarantineRetention in main.go, so the two cannot drift.
 	RetentionDays int
 
 	// DefaultThreshold is the instance-wide threshold, shown as the meter's
@@ -53,7 +54,7 @@ type heldRow struct {
 
 // Rules returns the rule names that fired, for the Signals column.
 func (h heldRow) Rules() []string {
-	seen := map[string]bool{}
+	seen := map[spam.Rule]bool{}
 	var out []string
 	for _, sig := range h.Signals {
 		if seen[sig.Rule] {
@@ -311,7 +312,7 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 
 	rules := make([]string, 0, len(signals))
 	for _, sig := range signals {
-		rules = append(rules, sig.Rule)
+		rules = append(rules, string(sig.Rule))
 	}
 	// Field values are deliberately not logged, here as everywhere else: the
 	// rules and the score are what a weight-tuning exercise needs, and the

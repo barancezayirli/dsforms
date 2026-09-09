@@ -3,6 +3,8 @@ package store
 import (
 	"fmt"
 	"time"
+
+	"github.com/barancezayirli/dsforms/internal/spam"
 )
 
 // DayCounts is one day's split of accepted against held submissions.
@@ -195,7 +197,7 @@ func (s *Store) RecentSubmissions(n int) ([]RecentSubmission, error) {
 
 // SignalTally is one row of the "Top spam signals" panel.
 type SignalTally struct {
-	Rule   string
+	Rule   spam.Rule
 	Hits   int
 	Weight int // the weight this rule was recorded at, for the "w6" label
 }
