@@ -9,6 +9,7 @@ import (
 
 	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/flash"
+	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/spam"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
@@ -243,12 +244,7 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// Nothing currently re-drives a notified = 0 row: there is no sweep and
 		// no admin action that reads the column, so in practice a failed send
 		// here is not retried. Tracked as a follow-up rather than papered over.
-		go func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					log.Printf("quarantine: panic notifying for restored %s: %v", sub.ID, rec)
-				}
-			}()
+		go safe.Do("quarantine: notify for restored "+sub.ID, func() {
 			// The two deliveries are independent. A failed email must not skip
 			// the webhook: the hold withheld both, so the restore owes both, and
 			// a dead SMTP server would otherwise silently cost the operator the
@@ -266,7 +262,7 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 					log.Printf("quarantine: withheld webhook for %s failed: %v", sub.ID, err)
 				}
 			}
-		}()
+		})
 	}
 
 	flash.Set(w, h.SecretKey, "success", "Restored to "+form.Name+" as unread.")

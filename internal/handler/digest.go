@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
@@ -92,14 +93,19 @@ func (d *Digest) Start(interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		for range ticker.C {
-			sent, err := d.Run()
-			if err != nil {
-				log.Printf("quarantine digest: %v", err)
-				continue
-			}
-			if sent {
-				log.Printf("quarantine digest sent to %s", d.To)
-			}
+			// Per tick: a malformed submission should cost one digest, not the
+			// process. Run reads every held row, so it is the loop here most
+			// exposed to bad data.
+			safe.Do("quarantine digest", func() {
+				sent, err := d.Run()
+				if err != nil {
+					log.Printf("quarantine digest: %v", err)
+					return
+				}
+				if sent {
+					log.Printf("quarantine digest sent to %s", d.To)
+				}
+			})
 		}
 	}()
 }

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
@@ -152,7 +153,13 @@ func (w *Worker) Start() {
 		w.ensureSignal()
 		go func() {
 			for {
-				n, err := w.RunOnce()
+				var (
+					n   int
+					err error
+				)
+				// Per iteration: a panic in one send should cost that batch, not
+				// the whole process.
+				safe.Do("broadcaster", func() { n, err = w.RunOnce() })
 				if err != nil {
 					log.Printf("broadcaster: run error: %v", err)
 					time.Sleep(w.Idle)

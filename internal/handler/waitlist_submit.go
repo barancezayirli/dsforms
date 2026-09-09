@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -121,21 +122,18 @@ func (h *WaitlistSubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 // sendConfirmation sends the confirmation email, recovering from any panic.
 func (h *WaitlistSubmitHandler) sendConfirmation(wl store.Waitlist, email, name string, position int) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("waitlist submit: panic in confirmation for %s: %v", email, rec)
+	safe.Do("waitlist submit: confirmation for "+email, func() {
+		vars := map[string]string{
+			"email":    email,
+			"name":     name,
+			"position": strconv.Itoa(position),
 		}
-	}()
-	vars := map[string]string{
-		"email":    email,
-		"name":     name,
-		"position": strconv.Itoa(position),
-	}
-	subject := substituteVars(wl.ConfirmSubject, vars)
-	body := substituteVars(wl.ConfirmBody, vars)
-	if err := h.Mailer.SendMail(email, subject, body); err != nil {
-		log.Printf("waitlist submit: confirmation email to %s failed: %v", email, err)
-	}
+		subject := substituteVars(wl.ConfirmSubject, vars)
+		body := substituteVars(wl.ConfirmBody, vars)
+		if err := h.Mailer.SendMail(email, subject, body); err != nil {
+			log.Printf("waitlist submit: confirmation email to %s failed: %v", email, err)
+		}
+	})
 }
 
 // substituteVars replaces {{key}} tokens with literal values via strings.NewReplacer.

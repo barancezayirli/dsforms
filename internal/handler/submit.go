@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/spam"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
@@ -147,12 +148,19 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		data[key] = values[0]
 	}
 
+	// Both rejections below are logged for the same reason the honeypot drop is:
+	// a site posting via fetch and checking only for a network error shows the
+	// visitor a success message while the submission is gone. Without a log line
+	// "I submitted and never heard back" has nothing to correlate against.
+	// Field values are not logged, only the reason.
 	if len(data) == 0 {
+		log.Printf("submit: rejected submission for form %s from %s (no form data)", formID, ExtractIP(r))
 		http.Error(w, "no form data", http.StatusBadRequest)
 		return
 	}
 
 	if !emailFieldValid(data) {
+		log.Printf("submit: rejected submission for form %s from %s (invalid or ambiguous email field)", formID, ExtractIP(r))
 		http.Error(w, "invalid email", http.StatusBadRequest)
 		return
 	}
@@ -199,7 +207,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		// putting the rule's *type* there rendered "field cidr · matched" to
 		// the operator. The label already says a filter rule fired, and Match
 		// carries the rule value.
-		signals = []spam.Signal{{Rule: "rule", Match: matched.Value, Weight: threshold}}
+		signals = []spam.Signal{{Rule: spam.RuleBlocked, Match: matched.Value, Weight: threshold}}
 		h.countRuleHit(matched.ID)
 
 	default:
@@ -282,12 +290,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("submit: panic in notification for form %s submission %s: %v", formID, sub.ID, r)
-			}
-		}()
+	go safe.Do("submit: notify for form "+formID+" submission "+sub.ID, func() {
 		if form.EmailTo != "" && h.Notifier != nil {
 			if err := h.Notifier.SendNotification(form, sub); err != nil {
 				log.Printf("submit: email failed for form %s submission %s: %v", formID, sub.ID, err)
@@ -298,7 +301,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 				log.Printf("submit: webhook failed for form %s submission %s: %v", formID, sub.ID, err)
 			}
 		}
-	}()
+	})
 
 	respondSuccess(w, r, formID, redirectURL)
 }

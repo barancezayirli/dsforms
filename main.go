@@ -23,6 +23,7 @@ import (
 	"github.com/barancezayirli/dsforms/internal/handler"
 	"github.com/barancezayirli/dsforms/internal/mail"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
+	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/spam"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/barancezayirli/dsforms/internal/webhook"
@@ -461,9 +462,14 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		for range ticker.C {
-			if err := s.CleanExpiredSessions(); err != nil {
-				log.Printf("session cleanup error: %v", err)
-			}
+			// Guarded per tick, not per goroutine: one bad sweep should cost one
+			// hour, not the HTTP server. A panic here would otherwise take the
+			// process down and read as a crash loop under Docker's restart policy.
+			safe.Do("session cleanup", func() {
+				if err := s.CleanExpiredSessions(); err != nil {
+					log.Printf("session cleanup error: %v", err)
+				}
+			})
 		}
 	}()
 
@@ -473,14 +479,16 @@ func main() {
 	// that is restarted more often than daily still expires things.
 	go func() {
 		purge := func() {
-			n, err := s.PurgeHeldOlderThan(time.Now().UTC().Add(-quarantineRetention))
-			if err != nil {
-				log.Printf("quarantine purge error: %v", err)
-				return
-			}
-			if n > 0 {
-				log.Printf("quarantine: purged %d submission(s) held longer than %s", n, quarantineRetention)
-			}
+			safe.Do("quarantine purge", func() {
+				n, err := s.PurgeHeldOlderThan(time.Now().UTC().Add(-quarantineRetention))
+				if err != nil {
+					log.Printf("quarantine purge error: %v", err)
+					return
+				}
+				if n > 0 {
+					log.Printf("quarantine: purged %d submission(s) held longer than %s", n, quarantineRetention)
+				}
+			})
 		}
 		purge()
 		ticker := time.NewTicker(24 * time.Hour)
