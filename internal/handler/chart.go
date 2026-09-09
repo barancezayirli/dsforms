@@ -192,8 +192,10 @@ const (
 // stored verbatim in spam_signals. An unknown rule — a row written by an older
 // or newer binary — must still render something, so both lookups fall back
 // rather than producing a blank icon and an empty label.
-// Keyed by spam.Rule, so adding a value to that type without giving it a label
-// is a compile-time prompt rather than a blank icon nobody notices.
+// Keyed by spam.Rule so the value set has one definition, but Go does not
+// exhaustiveness-check a map literal: adding a rule without a label here
+// compiles cleanly and go vet says nothing. TestRuleIconAndLabel is the guard,
+// and it ranges spam.AllRules so it cannot fall behind the constants either.
 var ruleIcons = map[spam.Rule]string{
 	spam.RuleMarkup:     "link",
 	spam.RuleKeyword:    "text-aa",

@@ -30,11 +30,21 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Compile-time checks that *mail.Mailer satisfies the consumer interfaces it is wired into.
+// Compile-time checks that the concrete types satisfy the interfaces their
+// consumers declare. Wiring below would catch a mismatch anyway, but only at the
+// point of use and with a worse message; pinning it here also documents which
+// interfaces each type is expected to serve.
+//
+// A new consumer interface belongs in this block.
 var (
 	_ handler.Notifier           = (*mail.Mailer)(nil)
 	_ handler.ConfirmationMailer = (*mail.Mailer)(nil)
+	_ handler.DigestMailer       = (*mail.Mailer)(nil)
 	_ broadcaster.Mailer         = (*mail.Mailer)(nil)
+
+	_ handler.WebhookSender     = (*webhook.Sender)(nil)
+	_ handler.BroadcastNotifier = (*broadcaster.Worker)(nil)
+	_ auth.SessionStore         = (*store.Store)(nil)
 )
 
 //go:embed templates/*
@@ -267,9 +277,10 @@ func errorPages(r *chi.Mux, templates map[string]*template.Template) {
 		render(w, "404.html", http.StatusNotFound, "Page not found")
 	})
 
-	// The recovery middleware in newRouter writes a plain string, because a
-	// panic may itself be a template failure and rendering one there could
-	// recurse. This gives handlers a styled 500 they can call deliberately.
+	// Swap the plain-text fallback for the styled page now that templates are
+	// parsed. The recovery middleware in newRouter is the only caller, and it
+	// guards this call with its own recover(): rendering a 500 can itself panic
+	// if the template is the thing that broke.
 	serverErrorPage = func(w http.ResponseWriter) {
 		render(w, "500.html", http.StatusInternalServerError, "Internal Server Error")
 	}
@@ -551,8 +562,8 @@ func main() {
 	loginGuard.StartCleanup(30*time.Minute, 30*time.Minute)
 
 	// Every admin handler shares the same store, secret, templates and shell
-	// state, so they share one Base rather than repeating five identical field
-	// lists that could drift apart.
+	// state, so they share one Base rather than repeating the same field list in
+	// every handler, where the copies could drift apart.
 	base := handler.Base{
 		Store:     s,
 		SecretKey: cfg.SecretKey,

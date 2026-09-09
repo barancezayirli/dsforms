@@ -17,7 +17,7 @@ Most of what follows is a rule with a scar behind it. Where a section explains
 ```bash
 cp .env.example .env        # set SECRET_KEY at minimum
 make dev-up                 # app on :8080, Mailpit on :8025
-make test                   # go test ./... -race
+make test                   # go test ./... -race -count=1
 ```
 
 Default login is `admin` / `admin`; the admin warns until it is changed.
@@ -74,14 +74,21 @@ Dependencies point one way. Nothing below imports anything above it, and there
 are no cycles.
 
 ```
-main.go            config, store, handler construction, routes, CLI — no logic
-  └── handler      HTTP: request → store/domain calls → template
-        ├── auth · backup · broadcaster · mail · webhook   (services → store)
-        └── store  every SQL statement in the project
-              └── filter · spam · ratelimit · flash        (leaves)
+main.go        config, store, handler construction, routes, CLI — no logic
+  │            also constructs broadcaster and webhook and wires them into
+  │            handler through the interfaces handler declares
+  └── handler  HTTP: request → store/domain calls → template
+        ├── auth · backup · mail        (imported directly)
+        ├── store                       every SQL statement in the project
+        └── filter · spam · ratelimit · flash · safe   (leaves, imported directly)
 ```
 
-`config` also imports `spam`, for `spam.DefaultThreshold`.
+`store` imports `filter` and `spam`; `config` imports `spam` for
+`spam.DefaultThreshold`; `broadcaster` imports `store` and `safe`.
+
+Note what `handler` does *not* import: `broadcaster` and `webhook`. It reaches
+both only through interfaces it declares itself, which is the rule below made
+concrete.
 
 **Rules that follow:**
 
@@ -91,11 +98,12 @@ main.go            config, store, handler construction, routes, CLI — no logic
 - **All SQL lives in `internal/store`.** Handlers never touch `db.Query`. A
   handler that needs data needs a store method.
 - **Interfaces are declared by the consumer**, never by the implementer.
-  `handler` declares one per service it calls (mail, webhooks, digests,
-  broadcasts); `auth` declares `SessionStore`; `broadcaster` declares its own
-  `Store` and `Mailer`. Satisfaction is checked by the compiler where `main.go`
-  wires the concrete type in — `broadcaster` additionally pins its with
-  `var _ Store = (*store.Store)(nil)`, which is the better habit.
+  `handler` declares an interface for each service capability it consumes;
+  `auth` declares `SessionStore`; `broadcaster` declares its own `Store` and
+  `Mailer`. Satisfaction is checked by the compiler where `main.go` wires the
+  concrete type in, and pinned explicitly in the `var _` block at the top of
+  `main.go` — a new consumer interface belongs there too. `broadcaster` pins its
+  own with `var _ Store = (*store.Store)(nil)`.
 - **`main.go` holds no business logic**, and there is no global state outside it.
 
 ### Adding a package
@@ -113,7 +121,7 @@ If it exists twice, consolidate before adding a third.
 This repo keeps relearning it. A JSON-decode-with-fallback was inlined at every
 call site that needed it; a session-cookie helper was copied into each handler
 test; `Title/Active/CurrentUser/Flash` was restated in every page struct until
-`Base` absorbed it; and `NavCounts` existed twice — once in `store`, once in
+`PageData` absorbed it (and `Base` absorbed the per-handler dependencies); and `NavCounts` existed twice — once in `store`, once in
 `handler` — with a hand-written field-by-field copy between them that would
 silently drop any field added later. That last one was committed one file away
 from a comment arguing against exactly it.
@@ -153,17 +161,22 @@ reported "could not be restored" for a submission that *was* restored, sending
 the operator to search the wrong screen. An inaccurate message is worse than a
 generic one.
 
-**Panics.** Only in `config.Load()`, for a missing required env var. Fail fast at
-startup, never during a request. A `recover()` only catches panics in its *own*
-goroutine.
+**Panics.** Only at startup, and only for something a running process cannot
+fix: `config.Load()` on a missing required env var, and the leaf constructors
+(`ratelimit.NewLimiter`, `ratelimit.NewLoginGuard`, `spam.NewTracker`) on a
+programmer-error argument. Never during a request.
 
-**Goroutines.** Anything outliving a request gets a deferred `recover()` inside
-it. Background loops (session cleanup, quarantine purge, digest) log and continue
-rather than dying on one iteration.
+**Goroutines.** Anything outliving a request runs through `safe.Do`, which
+recovers and logs — because a `recover()` only catches panics in its *own*
+goroutine, so an unguarded worker takes the whole process down with it. Wrap a
+background *loop* per iteration rather than per goroutine, so one bad tick costs
+one tick.
 
-**Time.** Inject the clock where behaviour depends on it — `func() time.Time`, or
-a `now` parameter as `ageSince` and `PurgeHeldOlderThan` do — so tests never
-sleep.
+**Time.** Inject the clock where behaviour depends on it — `func() time.Time` as
+`ratelimit.NewLimiter` takes, a `now` parameter as `ageSince` takes, or a
+precomputed cutoff as `PurgeHeldOlderThan` takes — so tests never sleep. Waiting
+on a timeout to prove an *absence* is a sleep in disguise and passes for the
+wrong reason under load.
 
 **Determinism.** Go randomises map iteration. Anything whose order is
 observable — rendered output, a returned slice, a test assertion — sorts first.
@@ -171,12 +184,20 @@ observable — rendered output, a returned slice, a test assertion — sorts fir
 
 **Prefer a defined type over a documented string set.** `spam.Rule` is a type
 because its documented list of valid values went stale inside the very PR that
-wrote it. A `map[spam.Rule]string` for display makes a missing entry a
-compile-time prompt instead of a blank icon nobody notices.
+wrote it.
+
+The type alone buys less than it looks. Go does not exhaustiveness-check a map
+literal keyed by a named type, or a switch over one, so a new constant with no
+display entry compiles cleanly and `go vet` is silent — the blank icon the type
+was supposed to prevent. What closes it is `spam.AllRules` next to the constants,
+ranged by the coverage test, plus a test that derives the constant list from the
+package's own AST so the slice cannot fall behind either. A guarantee like this
+has to be built; naming the type is only the first half.
 
 **Never hand-count in a comment.** "these five handlers", "thirteen structs",
-"sixteen call sites" — all four such counts in this repo were wrong on arrival.
-Say "every handler".
+"sixteen call sites" — every such count in this repo has been wrong on arrival,
+including one that survived the commit which fixed the others. Say "every
+handler".
 
 **Formatting.** `gofmt` and `go vet` must be clean. `gofmt` catches things the
 compiler will not: after the module rename, every import block needed regrouping
@@ -244,8 +265,31 @@ skeleton key — append one junk field and skip the blocklist and all scoring.
 Block rules still scan everything, because a spammer will not helpfully put
 their address in the field we check.
 
-**Never derive an authorization or bypass decision from `X-Forwarded-For`.** It
-is one header. Fine for rate-limiting and logging; never for "skip the checks".
+**And "canonical" has to be canonical.** The first fix restricted allow rules to
+fields *named* `email`, case-insensitively, which left the hole open: HTTP field
+names are case-sensitive, so `email` and `Email` are two fields one submission
+can carry at once. `filter.SenderAddress` is now the single definition, shared
+with the submit handler's validation, and it returns three states — none, one,
+ambiguous. Ambiguous stays unresolved: every tie-break has a side the attacker
+can land on, so two claimants means we do not know who sent this, and a
+permissive rule never fires on a guess.
+
+The general form, which is the part worth carrying to the next fix: **closing a
+hole means closing the mechanism, not the reported instance.** The report said
+"any junk field"; the mechanism was "what counts as the sender field", and only
+the first was fixed. The regression test enumerated the reported case, so it
+passed against code that was still wide open.
+
+**Treat `X-Forwarded-For` as attacker-controlled unless a proxy you control
+overwrites it.** `ExtractIP` trusts it unconditionally, which is correct only
+behind such a proxy — and dsforms is designed to sit behind one. Fine for
+rate-limiting and logging either way.
+
+The consequence to hold onto: an IP or CIDR **allow** rule turns that trust into
+a scoring bypass, since one header then skips the block list and all scoring.
+That is a recorded accepted risk in `SESSION_PROGRESS.md`, not an oversight —
+but do not add a *new* decision that reads this header, and prefer email or
+domain allow rules, which match the validated sender field instead.
 
 **Limits and headers.** `http.MaxBytesReader` 64KB, with the 100MB
 backup-import exception. The CSP is
@@ -258,10 +302,12 @@ whatever a path withholds, the path that reverses it must deliver *all* of —
 restoring a held submission sends the email *and* the webhook.
 
 **Templates.** `base.html` is parsed once and cloned per page; each page defines
-`{{define "content"}}`. New pages join `basePages` in `main.go` **and**
-`populatedPageData` in `internal/handler/templates_test.go` (which mirrors the
-list by hand, since a test cannot import `main`; the test fails on a page with no
-fixture). Icons come from the
+`{{define "content"}}`. A new page joins **three** lists: `basePages` in `main.go`, and both
+`basePageNames` and `populatedPageData` in
+`internal/handler/templates_test.go` — `basePageNames` mirrors `basePages` by
+hand because a test cannot import `main`. `TestRealTemplatesCoverEveryPage`
+walks the directory and catches a missing mirror entry; the execution test
+catches a missing fixture. Icons come from the
 `{{template "icons"}}` sprite — regenerate with `scripts/build-icons.sh`, never
 hand-write an inline `<svg>` path.
 
@@ -325,10 +371,11 @@ internal/
   spam/ filter/          scoring; operator block/allow rules
   ratelimit/             per-IP token bucket, in-process
   mail/ webhook/ backup/ broadcaster/
+  safe/                  run a func without letting a panic escape
   handler/               HTTP
 templates/               html/template, embedded
 static/                  app.css, app.js, fonts — embedded
-docs/                    index.html (GitHub Pages) + design/specs/
+docs/                    index.html (GitHub Pages), design/specs/, screenshots/
 scripts/                 build-icons.sh, changelog.sh
 ```
 

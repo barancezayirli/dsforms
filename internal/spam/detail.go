@@ -15,16 +15,21 @@ const maxMatchRunes = 200
 // Rule identifies the check that produced a Signal.
 //
 // A defined type rather than a bare string because the documented value set had
-// already gone stale: it listed the six rules this package emits and omitted
-// repeat_ip, which the submit handler stamps. The values are spread across three
-// packages — spam emits six, the submit handler adds two, and the admin owns the
-// display mapping — so one authoritative list is the only thing that keeps them
-// in step. It scans to and from SQL exactly like a string.
+// already gone stale on arrival: it omitted repeat_ip, which the submit handler
+// stamps rather than the scorer. The values are spread across three packages —
+// this one emits most of them, the submit handler stamps the rest, and the admin
+// owns the display mapping — so one authoritative list is the only thing that
+// keeps them in step. That list is AllRules; this comment deliberately does not
+// restate it or count it. It scans to and from SQL exactly like a string.
 type Rule string
 
 // The complete set. RuleRepeatIP and RuleBlocked are stamped by the submit
 // handler rather than by the scorer, but they are declared here so this list is
 // the whole truth.
+//
+// Anything that needs to walk every rule ranges AllRules below rather than
+// restating the values — a second copy of a value set, maintained by memory, is
+// the exact defect this type replaced.
 const (
 	RuleMarkup     Rule = "markup"
 	RuleSQL        Rule = "sql"
@@ -35,6 +40,24 @@ const (
 	RuleRepeatIP   Rule = "repeat_ip"
 	RuleBlocked    Rule = "rule"
 )
+
+// AllRules is every declared Rule.
+//
+// Go does not exhaustiveness-check anything here — not a map literal keyed by
+// Rule, not a switch — so nothing about the type alone makes a forgotten display
+// entry a compile error. This slice is what makes it checkable: the display
+// coverage test ranges it, and TestAllRulesIsComplete derives the constant list
+// from this package's source so the slice cannot fall behind the constants.
+var AllRules = []Rule{
+	RuleMarkup,
+	RuleSQL,
+	RuleKeyword,
+	RuleGibberish,
+	RuleURLInName,
+	RuleExtraLinks,
+	RuleRepeatIP,
+	RuleBlocked,
+}
 
 // Signal is one rule hit that contributed to a submission's score.
 //

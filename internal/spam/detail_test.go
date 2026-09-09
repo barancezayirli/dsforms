@@ -1,7 +1,11 @@
 package spam
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -312,5 +316,126 @@ func TestDetailWithNilKeywordsMatchesDetail(t *testing.T) {
 	if gotScore != wantScore || !reflect.DeepEqual(gotSignals, wantSignals) {
 		t.Errorf("DetailWith(data, nil) disagrees with Detail(data):\n  %d %+v\n  %d %+v",
 			gotScore, gotSignals, wantScore, wantSignals)
+	}
+}
+
+// TestAllRulesIsComplete keeps AllRules honest.
+//
+// AllRules exists so callers stop restating the rule set, but it is itself a
+// second copy of the const block — so a hand-written expected count here would
+// just move the staleness one line over. Go cannot enumerate a type's constants
+// at runtime, so this parses the package's own source and derives the list. A
+// new Rule constant that nobody adds to AllRules fails, with no number for
+// anyone to forget to bump.
+func TestAllRulesIsComplete(t *testing.T) {
+	t.Parallel()
+
+	declared := ruleConstantsInSource(t)
+	if len(declared) == 0 {
+		t.Fatal("found no Rule constants in the source; this test is asserting nothing")
+	}
+
+	listed := map[Rule]bool{}
+	for _, r := range AllRules {
+		if listed[r] {
+			t.Errorf("AllRules lists %q twice", r)
+		}
+		listed[r] = true
+	}
+
+	for name, value := range declared {
+		if !listed[value] {
+			t.Errorf("constant %s (%q) is missing from AllRules", name, value)
+		}
+	}
+	if len(AllRules) != len(declared) {
+		t.Errorf("AllRules has %d entries, source declares %d constants", len(AllRules), len(declared))
+	}
+}
+
+// ruleConstantsInSource returns every `X Rule = "y"` constant declared in this
+// package, by name and value.
+func ruleConstantsInSource(t *testing.T) map[string]Rule {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", nil, 0)
+	if err != nil {
+		t.Fatalf("parsing package source: %v", err)
+	}
+
+	out := map[string]Rule{}
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.CONST {
+					continue
+				}
+				var lastType string
+				for _, spec := range gen.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					// Within a const block the type carries down to entries that
+					// omit it, so remember the most recent one.
+					if id, ok := vs.Type.(*ast.Ident); ok {
+						lastType = id.Name
+					}
+					if lastType != "Rule" {
+						continue
+					}
+					for i, name := range vs.Names {
+						if i >= len(vs.Values) {
+							continue
+						}
+						lit, ok := vs.Values[i].(*ast.BasicLit)
+						if !ok || lit.Kind != token.STRING {
+							continue
+						}
+						value, err := strconv.Unquote(lit.Value)
+						if err != nil {
+							t.Fatalf("unquoting %s: %v", name.Name, err)
+						}
+						out[name.Name] = Rule(value)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// TestDetailEmitsOnlyDeclaredRules is the behavioural half: whatever the scorer
+// actually produces must be a declared rule, derived from running it rather
+// than from a literal.
+func TestDetailEmitsOnlyDeclaredRules(t *testing.T) {
+	t.Parallel()
+
+	listed := map[Rule]bool{}
+	for _, r := range AllRules {
+		listed[r] = true
+	}
+
+	emitted := map[Rule]bool{}
+	for _, data := range []map[string]string{
+		{"message": "<a href=x>casino</a> http://a.example http://b.example"},
+		{"message": "union select 1"},
+		{"name": "http://spam.example"},
+		{"comment": "xkcdqwrtplm zzzxqjvbn"},
+	} {
+		_, signals := Detail(data)
+		for _, sig := range signals {
+			emitted[sig.Rule] = true
+		}
+	}
+	if len(emitted) == 0 {
+		t.Fatal("the fixtures produced no signals; this test is asserting nothing")
+	}
+	for rule := range emitted {
+		if !listed[rule] {
+			t.Errorf("Detail emits %q but AllRules does not list it", rule)
+		}
 	}
 }

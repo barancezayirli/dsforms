@@ -11,8 +11,9 @@ import (
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
-// Mailer sends email over SMTP. It implements handler.Notifier (SendNotification)
-// as well as handler.ConfirmationMailer and broadcaster.Mailer (both via SendMail).
+// Mailer sends email over SMTP. It implements every consumer interface main.go
+// wires it into — see the var _ block there, which is the list that stays
+// correct.
 type Mailer struct {
 	Host    string
 	Port    int
