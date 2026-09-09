@@ -25,6 +25,18 @@ Handoff: `reference/design_handoff_dsforms_admin/`
   made `go get github.com/barancezayirli/dsforms` fail outright. It is one isolated
   commit on this branch, so it still reviews and reverts independently.
 
+## Working agreement moved to AGENT.md
+
+`CLAUDE.md` is now a pointer; the working agreement lives in **AGENT.md**. It was
+rewritten rather than moved: the development workflow is nine ordered steps with
+the PR review marked non-skippable, and it gained an architecture section and the
+rules this review actually produced — each stated with the bug behind it.
+
+The prompt for it was this branch: the review step existed in `CLAUDE.md` and was
+skipped anyway, and the branch came back with ~50 findings including a spam-filter
+bypass. Two claims in the first draft were removed for being false on inspection,
+which is the argument for keeping one copy rather than two.
+
 ## Accepted risks
 
 | Risk | Why accepted |
@@ -36,7 +48,7 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 | Item | Why deferred | Target |
 |---|---|---|
 | A "resend notification" action for restored submissions | `notified = 0` on a restored row records a notification that was never sent, but nothing reads the column — no sweep, no retry, no admin action — so a failed send is not retried. Needs UI design. The misleading comment claiming otherwise has been removed. | A follow-up PR |
-| Screenshots in `docs/screenshots/` for the landing page's Admin UI section | The admin section currently describes the four screens in cards rather than showing them. Real screenshots need a populated instance and a decision about what data to show publicly. | A follow-up PR |
+| Wiring `docs/screenshots/` into the landing page | The five captures (dashboard, reader, submission, form-edit, login) are committed, but `docs/index.html` references none of them — the Admin UI section still describes the screens in cards instead of showing them. Only the page markup is outstanding. | A follow-up PR |
 
 ## Open questions
 
