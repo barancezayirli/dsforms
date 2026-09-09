@@ -57,10 +57,12 @@ func setupUsers(t *testing.T) (*store.Store, *chi.Mux) {
 	templates["dashboard.html"] = dashTmpl
 
 	uh := &UsersHandler{
-		Store:     s,
-		SecretKey: "test-secret-key-32-chars-long!!",
-		BaseURL:   "https://example.com",
-		Templates: templates,
+		Base: Base{
+			Store:     s,
+			SecretKey: "test-secret-key-32-chars-long!!",
+			BaseURL:   "https://example.com",
+			Templates: templates,
+		},
 	}
 
 	r := chi.NewRouter()

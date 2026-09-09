@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"net/url"
@@ -15,18 +14,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/flash"
 	"github.com/youruser/dsforms/internal/store"
 )
 
 // AdminHandler handles admin dashboard and forms management pages.
 type AdminHandler struct {
-	Store     *store.Store
-	SecretKey string
-	BaseURL   string
-	Templates map[string]*template.Template
-	Webhook   WebhookSender
+	Base
+	Webhook WebhookSender
 }
 
 // FlashData holds a flash message for display in templates via .Flash.Type and .Flash.Message.
@@ -45,10 +39,7 @@ func newFlash(msgType, message string) *FlashData {
 
 // dashboardData holds the data passed to dashboard.html.
 type dashboardData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
+	PageData
 	Forms       []store.FormSummary
 	TotalForms  int
 	TotalUnread int
@@ -57,29 +48,21 @@ type dashboardData struct {
 
 // formNewData holds the data passed to form_new.html.
 type formNewData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Form        store.Form
-	Error       string
+	PageData
+	Form  store.Form
+	Error string
 }
 
 // formEditData holds the data passed to form_edit.html.
 type formEditData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Form        store.Form
-	BaseURL     string
-	Error       string
+	PageData
+	Form    store.Form
+	BaseURL string
+	Error   string
 }
 
 // Dashboard renders the admin dashboard with form list and stats.
 func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	forms, err := h.Store.ListForms()
 	if err != nil {
@@ -101,10 +84,7 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := dashboardData{
-		Title:       "Forms",
-		Active:      "forms",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
+		PageData:    h.Shell(w, r, "Forms", "forms"),
 		Forms:       forms,
 		TotalForms:  len(forms),
 		TotalUnread: totalUnread,
@@ -119,14 +99,9 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 
 // NewFormPage renders the new form creation page.
 func (h *AdminHandler) NewFormPage(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	data := formNewData{
-		Title:       "New Form",
-		Active:      "forms",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
+		PageData: h.Shell(w, r, "New Form", "forms"),
 	}
 
 	if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
@@ -137,7 +112,6 @@ func (h *AdminHandler) NewFormPage(w http.ResponseWriter, r *http.Request) {
 
 // CreateForm handles POST to create a new form.
 func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
 
 	name := r.FormValue("name")
 	emailTo := r.FormValue("email_to")
@@ -147,9 +121,7 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 
 	if name == "" {
 		data := formNewData{
-			Title:       "New Form",
-			Active:      "forms",
-			CurrentUser: user,
+			PageData: h.Shell(w, r, "New Form", "forms"),
 			Form: store.Form{
 				Name:          name,
 				EmailTo:       emailTo,
@@ -180,9 +152,7 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 		u, parseErr := url.Parse(webhookURL)
 		if parseErr != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			data := formNewData{
-				Title:       "New Form",
-				Active:      "forms",
-				CurrentUser: user,
+				PageData: h.Shell(w, r, "New Form", "forms"),
 				Form: store.Form{
 					Name: name, EmailTo: emailTo, Redirect: redirect,
 					WebhookURL: webhookURL, WebhookFormat: webhookFormat,
@@ -216,8 +186,6 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 
 // EditFormPage renders the form edit page.
 func (h *AdminHandler) EditFormPage(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 	id := chi.URLParam(r, "id")
 
 	f, err := h.Store.GetForm(id)
@@ -232,12 +200,9 @@ func (h *AdminHandler) EditFormPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := formEditData{
-		Title:       "Edit Form",
-		Active:      "forms",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
-		Form:        f,
-		BaseURL:     h.BaseURL,
+		PageData: h.Shell(w, r, "Edit Form", "forms"),
+		Form:     f,
+		BaseURL:  h.BaseURL,
 	}
 
 	if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
@@ -248,7 +213,6 @@ func (h *AdminHandler) EditFormPage(w http.ResponseWriter, r *http.Request) {
 
 // EditForm handles POST to update a form.
 func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
 	id := chi.URLParam(r, "id")
 
 	name := r.FormValue("name")
@@ -274,15 +238,11 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 		f.WebhookURL = webhookURL
 		f.WebhookFormat = webhookFormat
 
-		flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 		data := formEditData{
-			Title:       "Edit Form",
-			Active:      "forms",
-			CurrentUser: user,
-			Flash:       newFlash(flashType, flashMsg),
-			Form:        f,
-			BaseURL:     h.BaseURL,
-			Error:       "Form name is required.",
+			PageData: h.Shell(w, r, "Edit Form", "forms"),
+			Form:     f,
+			BaseURL:  h.BaseURL,
+			Error:    "Form name is required.",
 		}
 		if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
 			log.Printf("form_edit template error: %v", err)
@@ -319,15 +279,11 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 			ef.Redirect = redirect
 			ef.WebhookURL = webhookURL
 			ef.WebhookFormat = webhookFormat
-			flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 			data := formEditData{
-				Title:       "Edit Form",
-				Active:      "forms",
-				CurrentUser: user,
-				Flash:       newFlash(flashType, flashMsg),
-				Form:        ef,
-				BaseURL:     h.BaseURL,
-				Error:       "Webhook URL must use http or https.",
+				PageData: h.Shell(w, r, "Edit Form", "forms"),
+				Form:     ef,
+				BaseURL:  h.BaseURL,
+				Error:    "Webhook URL must use http or https.",
 			}
 			if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
 				log.Printf("form_edit template error: %v", err)
@@ -382,10 +338,7 @@ func (h *AdminHandler) Success(w http.ResponseWriter, r *http.Request) {
 
 // formDetailData holds the data passed to form_detail.html.
 type formDetailData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
+	PageData
 	Form        store.Form
 	Submissions []store.Submission
 	TotalCount  int
@@ -399,12 +352,9 @@ type formDetailData struct {
 
 // submissionDetailData holds the data passed to submission_detail.html.
 type submissionDetailData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Form        store.Form
-	Submission  store.Submission
+	PageData
+	Form       store.Form
+	Submission store.Submission
 }
 
 const pageSize = 20
@@ -431,18 +381,12 @@ func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * pageSize
 
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
-
 	subs, _ := h.Store.ListSubmissionsPaged(formID, pageSize, offset)
 	total, _ := h.Store.CountSubmissions(formID)
 	unread, _ := h.Store.UnreadCount(formID)
 
 	data := formDetailData{
-		Title:       form.Name,
-		Active:      "forms",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
+		PageData:    h.Shell(w, r, form.Name, "forms"),
 		Form:        form,
 		Submissions: subs,
 		TotalCount:  total,
@@ -485,16 +429,10 @@ func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) 
 		sub.Read = true
 	}
 
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
-
 	data := submissionDetailData{
-		Title:       form.Name,
-		Active:      "forms",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
-		Form:        form,
-		Submission:  sub,
+		PageData:   h.Shell(w, r, form.Name, "forms"),
+		Form:       form,
+		Submission: sub,
 	}
 
 	if err := h.Templates["submission_detail.html"].ExecuteTemplate(w, "base", data); err != nil {

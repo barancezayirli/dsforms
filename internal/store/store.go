@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 // Store wraps the SQLite database connection.
@@ -56,6 +56,14 @@ type Submission struct {
 	IP        string
 	Read      bool
 	CreatedAt time.Time
+
+	// Quarantine state. Zero on an accepted submission; populated only by the
+	// held-submission queries in quarantine.go, which is why the ordinary
+	// ListSubmissions path leaves these at their zero values.
+	IsHeld        bool
+	SpamScore     int
+	HeldThreshold int // the threshold actually applied when it was held
+	Notified      bool
 }
 
 // Waitlist represents an email-keyed signup list.
@@ -150,16 +158,61 @@ CREATE TABLE IF NOT EXISTS forms (
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
-    id          TEXT PRIMARY KEY,
-    form_id     TEXT NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
-    data        TEXT NOT NULL,
-    ip          TEXT NOT NULL DEFAULT '',
-    read        INTEGER NOT NULL DEFAULT 0,
-    created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+    id             TEXT PRIMARY KEY,
+    form_id        TEXT NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
+    data           TEXT NOT NULL,
+    ip             TEXT NOT NULL DEFAULT '',
+    read           INTEGER NOT NULL DEFAULT 0,
+    created_at     DATETIME NOT NULL DEFAULT (datetime('now')),
+    -- Quarantine. A held submission is stored but withheld from the form's
+    -- inbox until an operator restores or deletes it. notified stays 0 while
+    -- held so a restore can send the notification that was withheld.
+    is_held        INTEGER NOT NULL DEFAULT 0,
+    spam_score     INTEGER NOT NULL DEFAULT 0,
+    held_threshold INTEGER NOT NULL DEFAULT 0,
+    held_at        DATETIME NOT NULL DEFAULT '',
+    notified       INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_submissions_form_id ON submissions(form_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_read ON submissions(read);
+CREATE INDEX IF NOT EXISTS idx_submissions_created_at ON submissions(created_at);
+
+-- spam_signals records why one submission was held: which rule fired, on which
+-- field, on what text, and for how many points.
+--
+-- It is a stored record, not a re-computation. The weights and keyword list in
+-- internal/spam can be retuned and the threshold is operator-configurable, so
+-- re-scoring an old submission at review time would show a reviewer a reason
+-- that was never actually applied to it.
+--
+-- match_text is attacker-supplied: truncated on the way in and escaped on the
+-- way out by html/template. It is not named "match" because MATCH is a SQLite
+-- operator and the bare word would need quoting at every use site.
+CREATE TABLE IF NOT EXISTS spam_signals (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    rule          TEXT NOT NULL,
+    field         TEXT NOT NULL DEFAULT '',
+    match_text    TEXT NOT NULL DEFAULT '',
+    weight        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_spam_signals_submission_id ON spam_signals(submission_id);
+
+-- filter_rules are the operator's explicit overrides of the scoring filter:
+-- allow entries skip scoring entirely, block entries hold on arrival whatever
+-- the score, and keyword entries extend the built-in list at the usual weight.
+CREATE TABLE IF NOT EXISTS filter_rules (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK(kind IN ('block','allow')),
+    type       TEXT NOT NULL CHECK(type IN ('email','domain','ip','cidr','keyword')),
+    value      TEXT NOT NULL,
+    note       TEXT NOT NULL DEFAULT '',
+    hits       INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(kind, type, value)
+);
+CREATE INDEX IF NOT EXISTS idx_filter_rules_kind ON filter_rules(kind);
 
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -223,15 +276,43 @@ func runMigrations(db *sql.DB) error {
 
 // runAlterMigrations adds columns to existing tables. Only "duplicate column"
 // errors are ignored; all other errors are returned.
+//
+// Every column here is also declared in the CREATE TABLE above, so a fresh
+// database gets it from the schema and this pass is a no-op; an existing
+// database gets it from the ALTER. That double declaration is the established
+// pattern in this file (see forms.webhook_url) and is what keeps migrations
+// idempotent without a version table.
 func runAlterMigrations(db *sql.DB) error {
 	alters := []string{
 		"ALTER TABLE forms ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE forms ADD COLUMN webhook_format TEXT NOT NULL DEFAULT ''",
+		// Per-form spam sensitivity. 0 means inherit the instance default
+		// rather than NULL, matching the no-nullable-columns style of the rest
+		// of the schema.
+		"ALTER TABLE forms ADD COLUMN spam_threshold INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE submissions ADD COLUMN is_held INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE submissions ADD COLUMN spam_score INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE submissions ADD COLUMN held_threshold INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE submissions ADD COLUMN held_at DATETIME NOT NULL DEFAULT ''",
+		"ALTER TABLE submissions ADD COLUMN notified INTEGER NOT NULL DEFAULT 1",
 	}
 	for _, q := range alters {
 		_, err := db.Exec(q)
 		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("alter migration: %w", err)
+		}
+	}
+
+	// Indexes over columns the ALTERs above may have just introduced. They
+	// cannot live in the schema constant: that runs before this function, so on
+	// an upgrade from a pre-quarantine database the column would not yet exist.
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_submissions_form_held ON submissions(form_id, is_held)",
+		"CREATE INDEX IF NOT EXISTS idx_submissions_held ON submissions(is_held)",
+	}
+	for _, q := range indexes {
+		if _, err := db.Exec(q); err != nil {
+			return fmt.Errorf("index migration: %w", err)
 		}
 	}
 	return nil
@@ -496,7 +577,7 @@ func (s *Store) GetForm(id string) (Form, error) {
 func (s *Store) ListForms() ([]FormSummary, error) {
 	rows, err := s.db.Query(`
 		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at,
-		       COUNT(CASE WHEN s.read = 0 THEN 1 END) as unread_count
+		       COUNT(CASE WHEN s.read = 0 AND s.is_held = 0 THEN 1 END) as unread_count
 		FROM forms f
 		LEFT JOIN submissions s ON s.form_id = f.id
 		GROUP BY f.id
@@ -576,7 +657,7 @@ func (s *Store) CreateSubmission(sub Submission) error {
 // ListSubmissions returns all submissions for a form.
 func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
 	rows, err := s.db.Query(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? ORDER BY created_at DESC",
+		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC",
 		formID,
 	)
 	if err != nil {
@@ -618,7 +699,7 @@ func (s *Store) MarkRead(submissionID string) error {
 // CountAllSubmissions returns the total count of all submissions across all forms.
 func (s *Store) CountAllSubmissions() (int, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions").Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE is_held = 0").Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count all submissions: %w", err)
 	}
@@ -687,7 +768,7 @@ func (s *Store) GetSubmission(id string) (Submission, error) {
 // ListSubmissionsPaged returns a page of submissions for a form.
 func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submission, error) {
 	rows, err := s.db.Query(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?",
 		formID, limit, offset,
 	)
 	if err != nil {
@@ -720,7 +801,7 @@ func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submis
 // CountSubmissions returns the total number of submissions for a form.
 func (s *Store) CountSubmissions(formID string) (int, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ?", formID).Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ? AND is_held = 0", formID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count submissions: %w", err)
 	}
@@ -731,7 +812,7 @@ func (s *Store) CountSubmissions(formID string) (int, error) {
 func (s *Store) UnreadCount(formID string) (int, error) {
 	var count int
 	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM submissions WHERE form_id = ? AND read = 0",
+		"SELECT COUNT(*) FROM submissions WHERE form_id = ? AND read = 0 AND is_held = 0",
 		formID,
 	).Scan(&count)
 	if err != nil {
@@ -1204,4 +1285,23 @@ func (s *Store) MarkBroadcastDone(id string) error {
 		return fmt.Errorf("mark broadcast done: %w", err)
 	}
 	return nil
+}
+
+// Initials returns up to two uppercase letters for the avatar in the sidebar
+// and the submission reader. Falls back to "?" so the avatar circle is never
+// empty — an empty circle reads as a rendering bug rather than a person.
+func (u User) Initials() string {
+	fields := strings.Fields(strings.ReplaceAll(u.Username, ".", " "))
+	switch {
+	case len(fields) == 0:
+		return "?"
+	case len(fields) == 1:
+		r := []rune(fields[0])
+		if len(r) == 1 {
+			return strings.ToUpper(string(r[0]))
+		}
+		return strings.ToUpper(string(r[0:2]))
+	default:
+		return strings.ToUpper(string([]rune(fields[0])[0:1]) + string([]rune(fields[1])[0:1]))
+	}
 }

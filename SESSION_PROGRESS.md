@@ -8,8 +8,8 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 
 | Phase | Content | Status |
 |---|---|---|
-| 0 | Vendored assets (Inter, Phosphor), Nocturne tokens, `base.html` shell | not started |
-| 1 | `spam.Detail`/`Signal`/`DefaultThreshold`, `config.SpamThreshold`, schema, store methods | in progress |
+| 0 | Vendored assets (Inter, Phosphor), Nocturne tokens, `base.html` shell | **done** |
+| 1 | `spam.Detail`/`Signal`/`DefaultThreshold`, `config.SpamThreshold`, schema, store methods | spam + schema + store done; config next |
 | 2 | Submit-handler rewiring (allow → block → honeypot → score → hold) | not started |
 | 3 | Forms, form detail, reader drawer | not started |
 | 4 | Quarantine + breakdown, Filter rules | not started |

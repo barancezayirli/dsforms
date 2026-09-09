@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"html/template"
 	"log"
 	"net/http"
 	"strings"
@@ -15,10 +14,7 @@ import (
 
 // UsersHandler handles user management pages.
 type UsersHandler struct {
-	Store     *store.Store
-	SecretKey string
-	BaseURL   string
-	Templates map[string]*template.Template
+	Base
 }
 
 // UserWithYou embeds store.User and adds an IsYou flag for list display.
@@ -28,35 +24,25 @@ type UserWithYou struct {
 }
 
 type usersListData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Users       []UserWithYou
-	Error       string
+	PageData
+	Users []UserWithYou
+	Error string
 }
 
 type usersNewData struct {
-	Title        string
-	Active       string
-	CurrentUser  store.User
-	Flash        *FlashData
+	PageData
 	Error        string
 	FormUsername string
 }
 
 type accountData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Error       string
+	PageData
+	Error string
 }
 
 // ListUsers renders the user list page.
 func (h *UsersHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	currentUser, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	users, err := h.Store.ListUsers()
 	if err != nil {
@@ -74,11 +60,8 @@ func (h *UsersHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := usersListData{
-		Title:       "Users",
-		Active:      "users",
-		CurrentUser: currentUser,
-		Flash:       newFlash(flashType, flashMsg),
-		Users:       usersWithYou,
+		PageData: h.Shell(w, r, "Users", "users"),
+		Users:    usersWithYou,
 	}
 
 	if err := h.Templates["users.html"].ExecuteTemplate(w, "base", data); err != nil {
@@ -89,14 +72,9 @@ func (h *UsersHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 // NewUserPage renders the new user form page.
 func (h *UsersHandler) NewUserPage(w http.ResponseWriter, r *http.Request) {
-	currentUser, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	data := usersNewData{
-		Title:       "New User",
-		Active:      "users",
-		CurrentUser: currentUser,
-		Flash:       newFlash(flashType, flashMsg),
+		PageData: h.Shell(w, r, "New User", "users"),
 	}
 
 	if err := h.Templates["users_new.html"].ExecuteTemplate(w, "base", data); err != nil {
@@ -107,7 +85,6 @@ func (h *UsersHandler) NewUserPage(w http.ResponseWriter, r *http.Request) {
 
 // CreateUser handles POST to create a new user.
 func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	currentUser, _ := auth.UserFromContext(r.Context())
 
 	username := strings.TrimSpace(r.FormValue("username"))
 	password := r.FormValue("password")
@@ -115,9 +92,7 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	renderError := func(errMsg string) {
 		data := usersNewData{
-			Title:        "New User",
-			Active:       "users",
-			CurrentUser:  currentUser,
+			PageData:     h.Shell(w, r, "New User", "users"),
 			Error:        errMsg,
 			FormUsername: username,
 		}
@@ -187,14 +162,9 @@ func (h *UsersHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 // AccountPage renders the current user's account/password page.
 func (h *UsersHandler) AccountPage(w http.ResponseWriter, r *http.Request) {
-	currentUser, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	data := accountData{
-		Title:       "Account",
-		Active:      "account",
-		CurrentUser: currentUser,
-		Flash:       newFlash(flashType, flashMsg),
+		PageData: h.Shell(w, r, "Account", "account"),
 	}
 
 	if err := h.Templates["account.html"].ExecuteTemplate(w, "base", data); err != nil {
@@ -213,10 +183,8 @@ func (h *UsersHandler) UpdatePassword(w http.ResponseWriter, r *http.Request) {
 
 	renderError := func(errMsg string) {
 		data := accountData{
-			Title:       "Account",
-			Active:      "account",
-			CurrentUser: currentUser,
-			Error:       errMsg,
+			PageData: h.Shell(w, r, "Account", "account"),
+			Error:    errMsg,
 		}
 		if err := h.Templates["account.html"].ExecuteTemplate(w, "base", data); err != nil {
 			log.Printf("account template error: %v", err)

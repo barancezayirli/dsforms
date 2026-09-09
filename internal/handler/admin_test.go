@@ -76,20 +76,22 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 			`{{range $key, $val := .Submission.Data}}<span class="field-{{$key}}">{{$val}}</span>{{end}}`))
 
 	templates := map[string]*template.Template{
-		"dashboard.html":        dashTmpl,
-		"form_new.html":         newTmpl,
-		"form_edit.html":        editTmpl,
-		"success.html":          successTmpl,
-		"form_detail.html":      detailTmpl,
+		"dashboard.html":         dashTmpl,
+		"form_new.html":          newTmpl,
+		"form_edit.html":         editTmpl,
+		"success.html":           successTmpl,
+		"form_detail.html":       detailTmpl,
 		"submission_detail.html": subDetailTmpl,
 	}
 
 	ah := &AdminHandler{
-		Store:     s,
-		SecretKey: testSecretKey,
-		BaseURL:   "https://example.com",
-		Templates: templates,
-		Webhook:   &noopWebhookSender{},
+		Base: Base{
+			Store:     s,
+			SecretKey: testSecretKey,
+			BaseURL:   "https://example.com",
+			Templates: templates,
+		},
+		Webhook: &noopWebhookSender{},
 	}
 
 	r := chi.NewRouter()

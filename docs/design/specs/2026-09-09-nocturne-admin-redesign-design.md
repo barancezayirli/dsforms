@@ -110,19 +110,23 @@ Constraints:
 ### Schema (additive, `CREATE TABLE IF NOT EXISTS` on startup)
 
 ```sql
--- submissions: new columns
-ALTER TABLE submissions ADD COLUMN is_held      INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE submissions ADD COLUMN spam_score   INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE submissions ADD COLUMN held_at      TIMESTAMP NULL;
-ALTER TABLE submissions ADD COLUMN notified     INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE submissions ADD COLUMN held_threshold INTEGER NULL; -- threshold actually applied
+-- submissions: new columns. No column in this table is nullable, so "unset"
+-- is expressed as a zero value rather than NULL, matching the existing style.
+ALTER TABLE submissions ADD COLUMN is_held        INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE submissions ADD COLUMN spam_score     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE submissions ADD COLUMN held_threshold INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE submissions ADD COLUMN held_at        DATETIME NOT NULL DEFAULT '';
+ALTER TABLE submissions ADD COLUMN notified       INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS spam_signals (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  -- TEXT, not INTEGER: submissions.id is a UUID string. An INTEGER foreign key
+  -- here would parse fine and never match a row.
+  submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
   rule          TEXT NOT NULL,
   field         TEXT NOT NULL DEFAULT '',
-  match         TEXT NOT NULL DEFAULT '',
+  -- Not named "match": MATCH is a SQLite operator.
+  match_text    TEXT NOT NULL DEFAULT '',
   weight        INTEGER NOT NULL
 );
 
@@ -145,22 +149,43 @@ CREATE INDEX IF NOT EXISTS idx_submissions_read     ON submissions(read);
 CREATE INDEX IF NOT EXISTS idx_spam_signals_sub     ON spam_signals(submission_id);
 ```
 
-`ALTER TABLE ADD COLUMN` is not idempotent in SQLite, so each is guarded by a
-`PRAGMA table_info` check — the repo's existing `CREATE TABLE IF NOT EXISTS`
-style does not cover column additions.
+Column additions go into the existing `runAlterMigrations`
+(`internal/store/store.go`), which already runs `ALTER TABLE … ADD COLUMN` and
+swallows the `"duplicate column"` error on every startup. Each new column is
+*also* declared in the `CREATE TABLE` above, so a fresh database gets it from
+the schema and the ALTER is a no-op — the same double declaration the repo
+already uses for `forms.webhook_url`. No `PRAGMA table_info` guard is needed,
+and no version table exists.
+
+Indexes over the new columns cannot live in the schema constant: that runs
+before the ALTERs, so on an upgrade from a pre-quarantine database the column
+would not exist yet. They run after the column pass instead.
 
 `held_threshold` is stored per-submission (beyond the handoff's list) so the
 quarantine meter's "threshold N" label reflects what was applied at hold time,
 not today's setting.
 
+`notified` defaults to **1**, not 0: an ordinary accepted submission has already
+had its notification sent by the time the row settles, and only a held row is
+written with 0 to record that one is still owed.
+
 ### Submit-handler evaluation order
 
 ```
+honeypot filled   → drop (unchanged, and deliberately still first)
 allow rule match  → accept immediately, skip scoring
 block rule match  → hold; spam_score = effective threshold; one signal, rule='rule'
-honeypot filled   → drop (unchanged)
 Detail(data)      → score >= effectiveThreshold ? hold : accept
 ```
+
+The handoff specifies `allow → block → honeypot → score`. Honeypot stays first
+instead: the allow list matches on the attacker-supplied `email` field, so
+checking it before the honeypot would let a bot bypass the honeypot entirely by
+spoofing an allowlisted address.
+
+`spam.Tracker` repeat-IP hits also drop silently today
+(`contentSpam || repeated`). They become held submissions carrying a
+`repeat_ip` signal, or the quarantine still loses submissions invisibly.
 
 `effectiveThreshold = form.SpamThreshold ?? config.SpamThreshold ?? spam.DefaultThreshold`.
 

@@ -35,11 +35,13 @@ func setupBackup(t *testing.T) (*store.Store, *chi.Mux, string) {
 	templates["backups.html"] = backupTmpl
 
 	bh := &BackupHandler{
-		Store:     s,
-		SecretKey: testSecretKey,
-		BaseURL:   "https://example.com",
-		DBPath:    dbPath,
-		Templates: templates,
+		Base: Base{
+			Store:     s,
+			SecretKey: testSecretKey,
+			BaseURL:   "https://example.com",
+			DBPath:    dbPath,
+			Templates: templates,
+		},
 	}
 
 	r := chi.NewRouter()

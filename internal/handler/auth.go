@@ -1,23 +1,18 @@
 package handler
 
 import (
-	"html/template"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/youruser/dsforms/internal/auth"
 	"github.com/youruser/dsforms/internal/ratelimit"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 // AuthHandler handles login and logout.
 type AuthHandler struct {
-	Store      *store.Store
-	SecretKey  string
-	BaseURL    string
+	Base
 	LoginGuard *ratelimit.LoginGuard
-	Templates  map[string]*template.Template
 }
 
 // LoginData holds data passed to the login template.

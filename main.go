@@ -1,14 +1,18 @@
 package main
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +38,118 @@ var (
 
 //go:embed templates/*
 var templateFS embed.FS
+
+// staticFS carries the vendored stylesheet, the interaction script, and the
+// Inter variable font. They are embedded rather than fetched from a CDN for two
+// reasons: dsforms ships as a single binary with no runtime network dependency,
+// and the Content-Security-Policy set in newRouter is `default-src 'self'` with
+// no font-src, so a remote font would be blocked by our own header.
+//
+//go:embed static/*
+var staticFS embed.FS
+
+// version is stamped at build time with -ldflags "-X main.version=…" and shown
+// in the sidebar. It stays "dev" for a plain `go build`.
+var version = "dev"
+
+// basePages extend templates/base.html and are rendered with
+// ExecuteTemplate(w, "base", data). Each must define a "content" block.
+//
+// standalonePages are full documents that do not use the shell.
+//
+// Both lists are package-level so TestTemplatesParse can walk them: nothing
+// else in the repo parses the real template files, and a broken one would
+// otherwise surface only as a log.Fatalf at startup.
+var basePages = []string{
+	"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html",
+	"submission_detail.html", "users.html", "users_new.html", "account.html",
+	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
+	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
+}
+
+var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
+
+// parseTemplates parses base.html once and clones it per page.
+//
+// The clone is needed because every page defines a block named "content" and
+// html/template keeps one shared namespace per template set — parsing them all
+// into one set would leave the last page's "content" defined for every page.
+// The icon sprite is parsed into the base set so each clone inherits it.
+func parseTemplates() (map[string]*template.Template, error) {
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+	}
+
+	baseTmpl, err := template.New("base").Funcs(funcMap).ParseFS(templateFS,
+		"templates/base.html", "templates/icons.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse base template: %w", err)
+	}
+
+	templates := make(map[string]*template.Template, len(basePages)+len(standalonePages))
+	for _, name := range basePages {
+		t, err := baseTmpl.Clone()
+		if err != nil {
+			return nil, fmt.Errorf("clone base template for %s: %w", name, err)
+		}
+		if _, err := t.ParseFS(templateFS, "templates/"+name); err != nil {
+			return nil, fmt.Errorf("parse template %s: %w", name, err)
+		}
+		templates[name] = t
+	}
+
+	for _, name := range standalonePages {
+		t, err := template.New(name).Funcs(funcMap).ParseFS(templateFS, "templates/"+name)
+		if err != nil {
+			return nil, fmt.Errorf("parse template %s: %w", name, err)
+		}
+		templates[name] = t
+	}
+
+	return templates, nil
+}
+
+// assetVersion is a short content hash over every embedded static file. Pages
+// append it to their asset URLs as ?v=…, which is what makes the long
+// Cache-Control below safe: the URL changes whenever the bytes do, so an
+// upgraded binary is picked up immediately instead of serving a cached
+// stylesheet for the rest of the hour.
+func assetVersion() string {
+	h := sha256.New()
+	err := fs.WalkDir(staticFS, "static", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := staticFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		h.Write([]byte(path))
+		h.Write(b)
+		return nil
+	})
+	if err != nil {
+		// Not fatal: fall back to a per-process value, which still busts the
+		// cache on restart, just not deterministically across replicas.
+		log.Printf("asset version: %v", err)
+		return strconv.FormatInt(time.Now().Unix(), 36)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// staticHandler serves the embedded assets. Cached hard, because every URL
+// carries the content hash from assetVersion.
+func staticHandler() http.Handler {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		log.Fatalf("static assets: %v", err)
+	}
+	fileServer := http.FileServer(http.FS(sub))
+	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		fileServer.ServeHTTP(w, r)
+	}))
+}
 
 func newRouter() *chi.Mux {
 	r := chi.NewRouter()
@@ -281,34 +397,9 @@ func main() {
 		}
 	}()
 
-	// Parse base template once, then clone it for each page that extends it.
-	funcMap := template.FuncMap{
-		"add": func(a, b int) int { return a + b },
-	}
-	baseTmpl, err := template.New("base").Funcs(funcMap).ParseFS(templateFS, "templates/base.html")
+	templates, err := parseTemplates()
 	if err != nil {
-		log.Fatalf("failed to parse base template: %v", err)
-	}
-
-	templates := make(map[string]*template.Template)
-	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html", "users.html", "users_new.html", "account.html", "backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html", "waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html"} {
-		t, err := baseTmpl.Clone()
-		if err != nil {
-			log.Fatalf("failed to clone base template: %v", err)
-		}
-		_, err = t.ParseFS(templateFS, "templates/"+name)
-		if err != nil {
-			log.Fatalf("failed to parse template %s: %v", name, err)
-		}
-		templates[name] = t
-	}
-
-	for _, name := range []string{"login.html", "success.html"} {
-		t, err := template.ParseFS(templateFS, "templates/"+name)
-		if err != nil {
-			log.Fatalf("failed to parse template %s: %v", name, err)
-		}
-		templates[name] = t
+		log.Fatalf("failed to parse templates: %v", err)
 	}
 
 	var mailer handler.Notifier
@@ -358,36 +449,23 @@ func main() {
 	loginGuard := ratelimit.NewLoginGuard(5, 15*time.Minute, time.Now)
 	loginGuard.StartCleanup(30*time.Minute, 30*time.Minute)
 
-	authHandler := &handler.AuthHandler{
-		Store:      s,
-		SecretKey:  cfg.SecretKey,
-		BaseURL:    cfg.BaseURL,
-		LoginGuard: loginGuard,
-		Templates:  templates,
-	}
-
-	adminHandler := &handler.AdminHandler{
-		Store:     s,
-		SecretKey: cfg.SecretKey,
-		BaseURL:   cfg.BaseURL,
-		Templates: templates,
-		Webhook:   webhookSender,
-	}
-
-	usersHandler := &handler.UsersHandler{
-		Store:     s,
-		SecretKey: cfg.SecretKey,
-		BaseURL:   cfg.BaseURL,
-		Templates: templates,
-	}
-
-	backupHandler := &handler.BackupHandler{
+	// Every admin handler shares the same store, secret, templates and shell
+	// state, so they share one Base rather than repeating five identical field
+	// lists that could drift apart.
+	base := handler.Base{
 		Store:     s,
 		SecretKey: cfg.SecretKey,
 		BaseURL:   cfg.BaseURL,
 		DBPath:    cfg.DBPath,
+		Version:   version,
+		AssetVer:  assetVersion(),
 		Templates: templates,
 	}
+
+	authHandler := &handler.AuthHandler{Base: base, LoginGuard: loginGuard}
+	adminHandler := &handler.AdminHandler{Base: base, Webhook: webhookSender}
+	usersHandler := &handler.UsersHandler{Base: base}
+	backupHandler := &handler.BackupHandler{Base: base}
 
 	waitlistSubmitHandler := &handler.WaitlistSubmitHandler{
 		Store:   s,
@@ -397,20 +475,18 @@ func main() {
 		waitlistSubmitHandler.Mailer = sendMailer
 	}
 
-	waitlistHandler := &handler.WaitlistHandler{
-		Store:       s,
-		SecretKey:   cfg.SecretKey,
-		BaseURL:     cfg.BaseURL,
-		Templates:   templates,
-		Broadcaster: worker,
-	}
+	waitlistHandler := &handler.WaitlistHandler{Base: base, Broadcaster: worker}
 
 	r := newRouter()
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
 
+	// Embedded CSS, JS and the Inter woff2. Public and unauthenticated: the
+	// login page needs the stylesheet before anyone has a session.
+	r.Handle("/static/*", staticHandler())
+
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin/forms", http.StatusFound)
+		http.Redirect(w, r, "/admin", http.StatusFound)
 	})
 	r.Get("/admin/login", authHandler.LoginPage)
 	r.Post("/admin/login", authHandler.LoginSubmit)

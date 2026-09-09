@@ -38,11 +38,13 @@ func setupAuth(t *testing.T) (*store.Store, *chi.Mux) {
 	}
 
 	ah := &AuthHandler{
-		Store:      s,
-		SecretKey:  testSecretKey,
-		BaseURL:    "https://example.com",
+		Base: Base{
+			Store:     s,
+			SecretKey: testSecretKey,
+			BaseURL:   "https://example.com",
+			Templates: templates,
+		},
 		LoginGuard: guard,
-		Templates:  templates,
 	}
 
 	r := chi.NewRouter()
