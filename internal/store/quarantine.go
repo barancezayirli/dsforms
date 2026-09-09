@@ -32,6 +32,33 @@ type NavCounts struct {
 	Waitlist int
 }
 
+// ErrSubmissionGone means there is no such submission at all — deleted, purged
+// by the retention sweep, or never real.
+//
+// It exists because sql.ErrNoRows on the quarantine path answers two different
+// questions with one value: "this row is no longer held" and "this row does not
+// exist". A caller that cannot tell them apart has to guess, and guessing wrong
+// tells an operator their submission is safe in the inbox when it has been
+// permanently deleted.
+var ErrSubmissionGone = errors.New("submission does not exist")
+
+// classifyMissingHeld turns a missing held row into the specific reason, so the
+// caller can say something true. Called only once a held lookup has already come
+// back empty.
+func (s *Store) classifyMissingHeld(id string) error {
+	var isHeld int
+	switch err := s.db.QueryRow("SELECT is_held FROM submissions WHERE id = ?", id).Scan(&isHeld); {
+	case errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("submission %s: %w", id, ErrSubmissionGone)
+	case err != nil:
+		return fmt.Errorf("submission %s: classifying a missing held row: %w", id, err)
+	default:
+		// The row is there and accepted, which is what a second restore looks
+		// like. sql.ErrNoRows stays the sentinel for that case.
+		return fmt.Errorf("submission %s: not held: %w", id, sql.ErrNoRows)
+	}
+}
+
 // heldColumns is the shared select list for held submissions. Kept in one place
 // so the column order can never drift between the list and single-row scans.
 const heldColumns = `id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, notified`
@@ -159,10 +186,10 @@ func (s *Store) GetHeldSubmission(id string) (Submission, error) {
 		"SELECT "+heldColumns+" FROM submissions WHERE id = ? AND is_held = 1", id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			// Wrapped, not bare: a caller needs to tell "no longer held" — the
-			// ordinary result of a double-clicked restore — from a real fault,
-			// and the two produce very different messages to the operator.
-			return Submission{}, fmt.Errorf("get held submission %s: %w", id, sql.ErrNoRows)
+			// Which kind of missing? A double-clicked restore and a submission
+			// the retention sweep deleted both land here, and they need opposite
+			// messages.
+			return Submission{}, s.classifyMissingHeld(id)
 		}
 		return Submission{}, fmt.Errorf("get held submission: %w", err)
 	}
@@ -226,10 +253,9 @@ func (s *Store) RestoreSubmission(id string) (Submission, error) {
 			"RETURNING "+heldColumns, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			// %w so the handler can recognise this: the guard above makes a
-			// second restore a no-op, and "no rows" here means already
-			// restored, not broken.
-			return Submission{}, fmt.Errorf("restore submission %s: not held: %w", id, sql.ErrNoRows)
+			// The AND is_held = 1 guard makes a second restore affect no rows.
+			// Same question as above: already restored, or gone entirely?
+			return Submission{}, s.classifyMissingHeld(id)
 		}
 		return Submission{}, fmt.Errorf("restore submission: %w", err)
 	}
@@ -280,13 +306,18 @@ func (s *Store) DeleteHeld(ids []string) (int, error) {
 			args = append(args, id)
 		}
 		query := "DELETE FROM submissions WHERE is_held = 1 AND id IN (" + strings.Join(placeholders, ",") + ")"
+		// The running total is returned *with* the error, not discarded. Each
+		// batch autocommits on its own, so a failure in batch three leaves the
+		// first two permanently deleted — and returning 0 there tells the
+		// operator nothing went when a thousand rows did. That is the same
+		// untruth this function's count was added to prevent, inverted.
 		res, err := s.db.Exec(query, args...)
 		if err != nil {
-			return 0, fmt.Errorf("delete held: %w", err)
+			return total, fmt.Errorf("delete held: after %d rows: %w", total, err)
 		}
 		affected, err := res.RowsAffected()
 		if err != nil {
-			return 0, fmt.Errorf("delete held: %w", err)
+			return total, fmt.Errorf("delete held: after %d rows: %w", total, err)
 		}
 		total += int(affected)
 	}

@@ -206,6 +206,13 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	alreadyRestored := func() {
 		done("success", "Already restored — it is in the inbox.", "already restored")
 	}
+	// And the opposite case, which the first version of this fix reported as a
+	// success: the row is not merely un-held, it is gone. Retention purges after
+	// 30 days, so an operator working a stale queue hits this. Telling them it
+	// reached the inbox sends them looking for something that no longer exists.
+	gone := func() {
+		done("error", "That submission no longer exists — it was deleted or aged out of quarantine.", "gone")
+	}
 
 	// The held submission is read first so the form can be resolved *before*
 	// anything is mutated. Restoring and then discovering the form is
@@ -213,6 +220,10 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	// the operator looking at a green flash reading "Restored to  as unread."
 	sub, err := h.Store.GetHeldSubmission(id)
 	if err != nil {
+		if errors.Is(err, store.ErrSubmissionGone) {
+			gone()
+			return
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			alreadyRestored()
 			return
@@ -232,13 +243,17 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 
 	sub, err = h.Store.RestoreSubmission(id)
 	if err != nil {
-		// Same race, one step later: another request restored it between the
-		// read above and this UPDATE. Still not a failure.
+		// Same races, one step later: another request restored or deleted it
+		// between the read above and this UPDATE.
+		if errors.Is(err, store.ErrSubmissionGone) {
+			gone()
+			return
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			alreadyRestored()
 			return
 		}
-		done("error", "That submission could not be restored.", fmt.Sprintf("%v", err))
+		done("error", "That submission could not be restored.", err.Error())
 		return
 	}
 
@@ -284,10 +299,18 @@ func (h *QuarantineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// match nothing, and counting the request instead of the result overstates
 	// it — the same defect Empty was rewritten to fix.
 	n, err := h.Store.DeleteHeld(ids)
-	if err != nil {
+	switch {
+	case err != nil && n > 0:
+		// A partial delete is not a failure to report as "nothing happened":
+		// those rows are permanently gone, and an operator who re-selects and
+		// retries would otherwise reconcile against a count that never happened.
+		log.Printf("quarantine: delete: %v", err)
+		flash.Set(w, h.SecretKey, "error",
+			plural(n, "submission")+" deleted before the delete failed; the rest are still held.")
+	case err != nil:
 		log.Printf("quarantine: delete: %v", err)
 		flash.Set(w, h.SecretKey, "error", "Those submissions could not be deleted.")
-	} else {
+	default:
 		flash.Set(w, h.SecretKey, "success", plural(n, "submission")+" deleted.")
 	}
 	http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
@@ -321,7 +344,10 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 
 	sub, err := h.Store.GetHeldSubmission(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		// Both reasons a held row can be missing are a 404 here: there is
+		// nothing to report on either way. Restore has to tell them apart
+		// because its two messages differ; this one does not.
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, store.ErrSubmissionGone) {
 			http.Error(w, "submission not found", http.StatusNotFound)
 			return
 		}

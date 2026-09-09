@@ -595,3 +595,64 @@ func TestDeleteRuleUnknownIDDoesNotClaimSuccess(t *testing.T) {
 		t.Errorf("rules remaining = %d, want the real rule untouched", len(rules))
 	}
 }
+
+// TestQuarantineRestoreDistinguishesGoneFromAlreadyRestored is the regression
+// test for a fix that manufactured the opposite lie.
+//
+// Round 2 fixed a false negative — "could not be restored" for a submission that
+// *was* restored — by treating sql.ErrNoRows as "already restored". But
+// GetHeldSubmission returns ErrNoRows for two different facts: the row exists and
+// is no longer held, and there is no such row at all. Collapsing both into a
+// success flash means an operator clicking Restore on a row the 30-day retention
+// sweep deleted is told it is in their inbox. It is not, and never will be.
+//
+// The asymmetry is the lesson: fixing one direction of an error message without
+// asking what the opposite case now reports just moves the untruth.
+func TestQuarantineRestoreDistinguishesGoneFromAlreadyRestored(t *testing.T) {
+	t.Parallel()
+
+	t.Run("already restored says so", func(t *testing.T) {
+		t.Parallel()
+		s, _, r := setupQuarantine(t)
+		seedHeld(t, s, "h1", 6, nil)
+		doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", "")
+
+		w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", "")
+		typ, msg := flashFrom(t, w)
+		if typ == "error" {
+			t.Errorf("flashed an error (%q) for a submission that was restored", msg)
+		}
+		if !strings.Contains(strings.ToLower(msg), "already restored") {
+			t.Errorf("flash = %q, want it to say already restored", msg)
+		}
+	})
+
+	t.Run("a purged submission is not reported as delivered", func(t *testing.T) {
+		t.Parallel()
+		s, _, r := setupQuarantine(t)
+		seedHeld(t, s, "gone", 6, nil)
+		if _, err := s.DeleteAllHeld(); err != nil {
+			t.Fatalf("DeleteAllHeld: %v", err)
+		}
+
+		w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/gone/restore", "")
+		typ, msg := flashFrom(t, w)
+		if typ == "success" {
+			t.Errorf("flashed success (%q) for a submission that no longer exists — "+
+				"the operator will look for it in an inbox it will never reach", msg)
+		}
+		if strings.Contains(strings.ToLower(msg), "already restored") {
+			t.Errorf("flash = %q, want it to say the submission is gone, not restored", msg)
+		}
+	})
+
+	t.Run("an id that never existed is not reported as delivered", func(t *testing.T) {
+		t.Parallel()
+		s, _, r := setupQuarantine(t)
+		w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/never-existed/restore", "")
+		typ, msg := flashFrom(t, w)
+		if typ == "success" {
+			t.Errorf("flashed success (%q) for an id that never existed", msg)
+		}
+	})
+}

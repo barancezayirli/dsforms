@@ -908,20 +908,45 @@ func TestGetHeldSubmission(t *testing.T) {
 		t.Errorf("got score %d held %v, want 9 / true", got.SpamScore, got.IsHeld)
 	}
 
-	t.Run("unknown id wraps ErrNoRows", func(t *testing.T) {
+	// The two reasons a held row can be missing must be distinguishable, because
+	// the restore handler owes opposite messages for them: "already restored —
+	// it is in the inbox" versus "it no longer exists". Reporting the first for
+	// the second sends an operator looking for a permanently deleted submission.
+	t.Run("an id that never existed is ErrSubmissionGone", func(t *testing.T) {
 		_, err := s.GetHeldSubmission("nope")
-		if !errors.Is(err, sql.ErrNoRows) {
-			t.Errorf("err = %v, want it to wrap sql.ErrNoRows so callers can tell it apart", err)
+		if !errors.Is(err, ErrSubmissionGone) {
+			t.Errorf("err = %v, want ErrSubmissionGone", err)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			t.Errorf("err = %v must not also read as 'not held' — the two mean opposite things to the operator", err)
 		}
 	})
 
-	t.Run("an accepted submission is not held", func(t *testing.T) {
+	t.Run("a deleted submission is ErrSubmissionGone", func(t *testing.T) {
+		if err := s.CreateHeldSubmission(heldFixture("purged", "f1", 9, now), 9, 6, nil); err != nil {
+			t.Fatalf("CreateHeldSubmission: %v", err)
+		}
+		// Scoped to this subtest's own row. DeleteAllHeld would take h1 with it
+		// and break the sibling below — these subtests share one store, so a
+		// global mutation here is a landmine for whoever adds the next one.
+		if _, err := s.DeleteHeld([]string{"purged"}); err != nil {
+			t.Fatalf("DeleteHeld: %v", err)
+		}
+		if _, err := s.GetHeldSubmission("purged"); !errors.Is(err, ErrSubmissionGone) {
+			t.Errorf("err = %v, want ErrSubmissionGone for a purged submission", err)
+		}
+	})
+
+	t.Run("an accepted submission is not held, but still exists", func(t *testing.T) {
 		if _, err := s.RestoreSubmission("h1"); err != nil {
 			t.Fatalf("RestoreSubmission: %v", err)
 		}
 		_, err := s.GetHeldSubmission("h1")
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Errorf("err = %v, want ErrNoRows for a restored submission", err)
+		}
+		if errors.Is(err, ErrSubmissionGone) {
+			t.Errorf("err = %v must not read as gone — the submission is in the inbox", err)
 		}
 	})
 }
