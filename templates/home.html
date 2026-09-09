@@ -1,0 +1,197 @@
+{{template "base" .}}
+
+{{define "header-actions"}}
+<a class="btn btn-primary btn-34" href="/admin/forms/new">
+  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>New form
+</a>
+{{end}}
+
+{{define "content"}}
+<div class="page-head">
+  <div style="min-width:0">
+    <h3 style="font-size:25px">{{.Greeting}}</h3>
+    <div class="muted" style="font-size:13px;margin-top:4px">{{.Summary}}</div>
+  </div>
+  <div class="actions">
+    <form method="GET" class="seg" role="group" aria-label="Date range">
+      {{$r := .Range}}
+      <label class="seg-opt"><input type="radio" name="range" value="7"  data-autosubmit {{if eq $r 7}}checked{{end}}><span>7d</span></label>
+      <label class="seg-opt"><input type="radio" name="range" value="30" data-autosubmit {{if eq $r 30}}checked{{end}}><span>30d</span></label>
+      <label class="seg-opt"><input type="radio" name="range" value="90" data-autosubmit {{if eq $r 90}}checked{{end}}><span>90d</span></label>
+    </form>
+  </div>
+</div>
+
+<div class="grid-kpi">
+  {{range .KPIs}}
+  <div class="card elev-sm kpi">
+    <div class="kpi-head">
+      <svg class="i"><use href="#ph-{{.Icon}}"/></svg>
+      <span class="kpi-label">{{.Label}}</span>
+    </div>
+    <div class="kpi-row">
+      <span class="kpi-value">{{.Value}}</span>
+      {{if .Delta}}<span class="kpi-delta">{{.Delta}}</span>{{end}}
+    </div>
+    <div class="kpi-sub">{{.Sub}}</div>
+    {{if .Spark.Line}}
+    <svg class="spark" viewBox="{{SparkViewBox}}" preserveAspectRatio="none" aria-hidden="true">
+      <path d="{{.Spark.Fill}}" fill="var(--a-800)"/>
+      <path d="{{.Spark.Line}}" fill="none" stroke="var(--a-500)" stroke-width="1.5"/>
+    </svg>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+
+<div class="row">
+  <div class="col-main" style="flex:2 1 440px">
+    <div class="card elev-sm" style="height:100%">
+      <div class="card-head">
+        <span class="card-title">Submissions over time</span>
+        <div class="legend">
+          <span><span class="swatch" style="background:var(--a-500)"></span>Accepted</span>
+          <span><span class="swatch" style="background:var(--a-800)"></span>Quarantined</span>
+        </div>
+      </div>
+
+      <!-- Gridlines are absolutely-positioned HTML, not SVG. The chart below
+           uses preserveAspectRatio="none" so it can stretch to the card, which
+           would smear any stroke drawn inside it. The 34px gutter holds the
+           value labels; the SVG is inset by exactly that much so the two
+           layers line up. -->
+      <div class="chart">
+        {{range .Grid}}
+        <div class="gridline" style="top:{{.Top}}%">
+          <span>{{.Value}}</span><span></span>
+        </div>
+        {{end}}
+        <svg viewBox="{{ChartViewBox}}" preserveAspectRatio="none" role="img"
+             aria-label="Submissions per day, accepted and quarantined">
+          {{$w := .BarWidth}}
+          {{range .Bars}}
+          <g>
+            <rect x="{{.X}}" y="{{.HeldY}}" width="{{$w}}" height="{{.HeldH}}" rx="2" fill="var(--a-800)"/>
+            <rect x="{{.X}}" y="{{.Y}}" width="{{$w}}" height="{{.H}}" rx="2" fill="var(--a-500)"/>
+          </g>
+          {{end}}
+        </svg>
+      </div>
+      <div class="chart-ticks">
+        {{range .TickLabels}}<span>{{.}}</span>{{end}}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-side" style="flex:1 1 280px;display:flex;flex-direction:column;gap:12px">
+    <div class="card elev-sm">
+      <span class="card-title">Top spam signals</span>
+      <p class="card-meta">Weighted hits from the stored breakdowns, last {{.Range}} days</p>
+      {{if .Signals}}
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+        {{range .Signals}}
+        <div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:12px">
+            <svg class="i i-accent" style="font-size:13px"><use href="#ph-{{.Icon}}"/></svg>
+            <span style="flex:1;min-width:0" class="truncate">{{.Label}}</span>
+            <span class="dim nowrap">{{.Hits}} · w{{.Weight}}</span>
+          </div>
+          <div class="bar" style="margin-top:5px">
+            <i class="{{if .Hot}}hot{{end}}" style="width:{{.Percent}}%"></i>
+          </div>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="dim" style="font-size:12px">Nothing has been held in this period.</p>
+      {{end}}
+    </div>
+
+    <div class="card elev-sm">
+      <div class="card-head">
+        <span class="card-title">Rate limit</span>
+        <span class="tag tag-outline tag-sm">{{.RateLabel}}</span>
+      </div>
+      <!-- The limiter is in-process and resets on restart. Saying so is the
+           difference between a useful panel and one that implies a history it
+           does not keep. -->
+      <p class="card-meta">Per-IP activity since the last restart</p>
+      {{if .Activity}}
+      <div style="display:flex;flex-direction:column;gap:0;margin-top:4px">
+        {{range .Activity}}
+        <div class="rule-b" style="display:flex;align-items:center;gap:8px;padding:7px 0;font-size:12px">
+          <span class="mono truncate" style="flex:1;min-width:0">{{.IP}}</span>
+          <span class="dim nowrap">{{.Requests}}</span>
+          <span class="tag tag-sm {{if eq .State "throttled"}}tag-outline{{else}}tag-neutral{{end}}">{{.State}}</span>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="dim" style="font-size:12px">No form submissions since the last restart.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-main" style="flex:1.4 1 420px">
+    <div class="card elev-sm">
+      <span class="card-title">By form</span>
+      {{if .Forms}}
+      <div class="table-wrap" style="margin-top:4px">
+        <table class="table" style="min-width:460px">
+          <thead>
+            <tr><th>Form</th><th>Received</th><th>Held</th><th>Unread</th><th>Read rate</th></tr>
+          </thead>
+          <tbody>
+            {{range .Forms}}
+            <tr>
+              <td><a href="/admin/forms/{{.FormID}}">{{.Name}}</a></td>
+              <td class="muted">{{.Received}}</td>
+              <td>
+                {{if .Held}}<span class="tag tag-sm {{if .HeldHot}}tag-accent{{else}}tag-neutral{{end}}">{{.Held}}</span>
+                {{else}}<span class="dim">—</span>{{end}}
+              </td>
+              <td class="{{if .Unread}}stat-accent{{else}}dim{{end}}">{{.Unread}}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="bar bar-inline"><i style="width:{{.ReadRate}}%"></i></div>
+                  <span class="dim" style="font-size:11px">{{.ReadRate}}%</span>
+                </div>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <p class="dim" style="font-size:12px">No forms yet.</p>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="col-side" style="flex:1 1 300px">
+    <div class="card elev-sm">
+      <span class="card-title">Recent</span>
+      {{if .Recent}}
+      <div style="display:flex;flex-direction:column;margin-top:4px">
+        {{range .Recent}}
+        <a class="rule-b" style="display:block;padding:9px 0"
+           href="/admin/forms/{{.FormID}}/submissions/{{.ID}}" data-drawer>
+          <div style="display:flex;align-items:center;gap:9px">
+            <span class="avatar {{if not .Read}}avatar-unread{{end}}" aria-hidden="true">{{.Initial}}</span>
+            <span class="truncate" style="flex:1;min-width:0;font-size:13px;{{if not .Read}}font-weight:500{{end}}">{{.Name}}</span>
+            <span class="dim nowrap" style="font-size:11px">{{.Age}}</span>
+          </div>
+          {{if .Preview}}<div class="muted truncate" style="font-size:12px;margin-top:3px">{{.Preview}}</div>{{end}}
+          <div class="dim" style="font-size:11px;margin-top:2px">{{.FormName}}</div>
+        </a>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="dim" style="font-size:12px">Nothing has arrived yet.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

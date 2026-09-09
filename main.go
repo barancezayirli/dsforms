@@ -70,7 +70,7 @@ var basePages = []string{
 	"submission_detail.html", "users.html", "users_new.html", "account.html",
 	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
 	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
-	"quarantine.html", "rules.html",
+	"quarantine.html", "rules.html", "home.html",
 }
 
 var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
@@ -504,6 +504,13 @@ func main() {
 	}
 
 	authHandler := &handler.AuthHandler{Base: base, LoginGuard: loginGuard}
+	overviewHandler := &handler.OverviewHandler{
+		Base:          base,
+		Limiter:       limiter,
+		RateBurst:     cfg.RateBurst,
+		RatePerMinute: cfg.RatePerMinute,
+		RetentionDays: int(quarantineRetention / (24 * time.Hour)),
+	}
 	quarantineHandler := &handler.QuarantineHandler{
 		Base:             base,
 		Notifier:         mailer,
@@ -542,9 +549,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth(s))
 		r.Post("/admin/logout", authHandler.Logout)
-		r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/admin/forms", http.StatusFound)
-		})
+		r.Get("/admin", overviewHandler.Page)
 		r.Get("/admin/forms", adminHandler.Dashboard)
 		r.Get("/admin/forms/new", adminHandler.NewFormPage)
 		r.Post("/admin/forms/new", adminHandler.CreateForm)

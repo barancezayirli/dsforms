@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -8,6 +9,22 @@ import (
 type bucket struct {
 	tokens   float64
 	lastSeen time.Time
+
+	// requests and throttled are counters for the admin overview only; they
+	// take no part in the limiting decision. They are in-process and reset on
+	// restart, which is why the panel that shows them says "since last
+	// restart" — persisting a row per request would put a database write on
+	// the hot path this limiter exists to avoid.
+	requests  int
+	throttled int
+}
+
+// Activity is one IP's traffic, for the admin overview.
+type Activity struct {
+	IP        string
+	Requests  int
+	Throttled int
+	State     string // "ok" | "throttled"
 }
 
 // Limiter implements a per-IP token bucket rate limiter.
@@ -57,11 +74,52 @@ func (l *Limiter) Allow(ip string) bool {
 		b.lastSeen = t
 	}
 
+	b.requests++
+
 	if b.tokens >= 1 {
 		b.tokens--
 		return true
 	}
+	b.throttled++
 	return false
+}
+
+// Snapshot returns the busiest IPs seen since the process started, newest
+// counters first, capped at n.
+//
+// Read-only by construction: it iterates the buckets under the same mutex Allow
+// uses but never touches tokens or lastSeen. Implementing it in terms of Allow
+// would be much shorter and would hand out a token on every page render —
+// Allow refills lazily and then decrements, so reading through it would change
+// what it reports.
+func (l *Limiter) Snapshot(n int) []Activity {
+	if n <= 0 {
+		return nil
+	}
+
+	l.mu.Lock()
+	out := make([]Activity, 0, len(l.buckets))
+	for ip, b := range l.buckets {
+		state := "ok"
+		if b.throttled > 0 {
+			state = "throttled"
+		}
+		out = append(out, Activity{IP: ip, Requests: b.requests, Throttled: b.throttled, State: state})
+	}
+	l.mu.Unlock()
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Requests != out[j].Requests {
+			return out[i].Requests > out[j].Requests
+		}
+		// Ties broken by IP so the panel does not reshuffle on every refresh —
+		// map iteration order would otherwise make it flicker.
+		return out[i].IP < out[j].IP
+	})
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
 }
 
 func (l *Limiter) cleanup(maxAge time.Duration) {
