@@ -74,6 +74,53 @@ including a `spam.Rule` "compile-time prompt" guarantee that Go does not
 provide. `spam.AllRules` plus an AST-derived completeness test now builds the
 guarantee that was previously only asserted.
 
+## Third review pass
+
+Six agents again, ~50 findings. **The filter bypass was open for the third
+consecutive round**, each time one layer beneath the previous fix: round 1 fixed
+"scan every field" and left the field *name*; round 2 fixed the name and left the
+*value*. The value had three incompatible definitions —
+`mail.ParseAddress` for rule storage, a shape test for matching, and
+`strings.ToLower` for folding on both sides.
+
+Two live bypasses, both reproduced, both closed:
+
+- `MİKE@works.com` (U+0130) and the Kelvin sign U+212A lower into ASCII, so any
+  allowlisted address containing i, k or s was reachable by one the operator
+  never allowlisted.
+- `Bot <bot@example.com>` validated, stored and displayed as the sender while
+  being invisible to every block rule, because the shape test rejected any value
+  containing a space.
+
+`canonicalAddress` is now the single definition, folding ASCII-only. The
+regression test is a property — no byte-distinct value may canonicalise onto an
+honest address — rather than the list of confusables known today, which is what
+left it open twice.
+
+Round 2's own fixes had also created three symmetrical bugs, each fixing one
+direction of an asymmetry without asking what the opposite case then reported:
+"Already restored — it is in the inbox" for a submission the retention sweep had
+permanently deleted; `DeleteHeld` reporting 0 for a thousand rows it had already
+committed; and a panic making the broadcaster read its queue as empty and retry
+a poisoned row forever without ever incrementing its attempts.
+
+Four invariants that were enforced by comments are now enforced by tests, each
+verified against the real bug: no hand-written submissions SELECT (AST scan, 8
+reads), no shadowed embedded field (catches `overviewData.Degraded` at
+`71ced73`), every `Shell(…, active)` names a `navGroups` key (28 sites), and
+`pageMarkers` covers every base page. The first version of the SELECT scan passed
+while inspecting *zero* queries, so each of these now has a count floor — a
+guarantee test that asserts nothing is worse than no test.
+
+Nine documentation claims corrected, six of them written during round 2's own
+correction pass — including a dependency diagram that still said `handler`
+imports `mail` (it does not; `go list -deps` is the check) and two new
+hand-counts written inside the comments forbidding hand-counts.
+
+Two rules added to AGENT.md §4: **in a switch over a closed value set the safe
+outcome is never `default`** (three instances on this branch), and **close the
+mechanism, not the reported instance**.
+
 ## Accepted risks
 
 | Risk | Why accepted |
