@@ -276,6 +276,43 @@ func TestSubmitInvalidEmailCaseInsensitiveField(t *testing.T) {
 	}
 }
 
+// TestSubmitTwoEmailFieldsAlwaysRejected pins the ambiguous-sender rejection,
+// and pins it as *deterministic*.
+//
+// The previous implementation ranged the data map and returned on the first key
+// that case-insensitively matched "email", so which of two such fields decided
+// the request came down to Go's randomised map iteration: the same submission
+// was a 400 or a 200 depending on the run. That nondeterminism was the visible
+// half of a security bug — the same two-field trick unlocked an allow rule and
+// skipped the spam filter entirely.
+//
+// One iteration proves nothing here, so this repeats: a "first key wins"
+// regression would show up as an occasional 201, not a consistent one.
+func TestSubmitTwoEmailFieldsAlwaysRejected(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+
+	for i := 0; i < 50; i++ {
+		form := url.Values{
+			"email":   {"mallory@spam.example"},
+			"Email":   {"vip@customer.com"},
+			"message": {"hi"},
+		}
+		req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("run %d: status = %d, want 400 for two email fields", i, w.Code)
+		}
+	}
+
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 0 {
+		t.Errorf("submissions = %d, want 0 (an ambiguous sender must not be stored)", len(subs))
+	}
+}
+
 func TestSubmitNoEmailFieldUnaffected(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)

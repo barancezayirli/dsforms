@@ -62,19 +62,27 @@ var internalFields = map[string]bool{
 	"_subject":  true,
 }
 
-// emailFieldValid reports whether a submitted field named "email"
-// (case-insensitive) is a well-formed address. A missing email field is
-// valid — not every form has one. This is a hard rejection distinct from
-// the spam filter: a malformed email is a form-usage error, not a signal to
-// silently drop.
+// emailFieldValid reports whether the submission's sender field is a well-formed
+// address. A missing email field is valid — not every form has one. This is a
+// hard rejection distinct from the spam filter: a malformed email is a
+// form-usage error, not a signal to silently drop.
+//
+// Two fields named "email" is also a rejection. It is a broken form rather than
+// a real submission, and resolving it by picking one would put the choice of
+// which address we read in the submitter's hands — see filter.SenderAddress,
+// which this shares so the validator and the allow-rule matcher cannot disagree
+// about who the sender is.
 func emailFieldValid(data map[string]string) bool {
-	for key, value := range data {
-		if strings.EqualFold(key, "email") {
-			_, err := mail.ParseAddress(value)
-			return err == nil
-		}
+	value, state := filter.SenderAddress(data)
+	switch state {
+	case filter.SenderNone:
+		return true
+	case filter.SenderAmbiguous:
+		return false
+	default:
+		_, err := mail.ParseAddress(value)
+		return err == nil
 	}
-	return true
 }
 
 // Handle processes a form submission.

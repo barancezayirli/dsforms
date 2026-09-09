@@ -143,10 +143,14 @@
       </p>
       <!-- Allow rules deliberately match only the sender's own email field.
            Matching any field would let anyone bypass the filter by mentioning an
-           allowlisted address in a junk field. -->
+           allowlisted address in a junk field. Field names are case-sensitive
+           over HTTP, so a submission carrying both "email" and "Email" has no
+           single sender — filter.SenderAddress calls that ambiguous and no allow
+           rule matches, rather than picking a winner the submitter chose. -->
       <p class="dim" style="font-size:11px;margin-top:-2px">
         Matched against the submission's <code>email</code> field only — not any
-        field that happens to contain the address.
+        field that happens to contain the address. A form sending two different
+        <code>email</code> fields is rejected outright.
       </p>
 
       <form method="POST" action="/admin/rules" style="display:flex;gap:8px">

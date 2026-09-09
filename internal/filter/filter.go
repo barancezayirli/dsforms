@@ -212,28 +212,74 @@ func allAddresses(data map[string]string) []string {
 	return out
 }
 
-// senderAddresses collects only the canonical sender field.
+// SenderState describes how well a submission identifies who sent it.
+type SenderState int
+
+const (
+	// SenderNone means no field named "email". Legal: not every form has one.
+	SenderNone SenderState = iota
+	// SenderOne means exactly one, and its value is the sender.
+	SenderOne
+	// SenderAmbiguous means two or more fields claim to be the sender.
+	SenderAmbiguous
+)
+
+// SenderAddress resolves the single field that identifies the submitter,
+// returning its raw value. It is the one definition of "the sender" in this
+// codebase; both the allow-rule matcher here and the submit handler's email
+// validation call it, so the two cannot drift.
 //
-// Used for *allow* rules, and the asymmetry with allAddresses is the whole
-// point. Submitters choose their own field names, so scanning every field for an
-// allow rule turns any mention of an allowlisted address into a skeleton key:
-// appending one junk field bypasses the block list and all content scoring at
-// once. The allowlisted address is usually the operator's own or a known
-// customer's — guessable, not secret.
+// Ambiguity is unresolved, not resolved-arbitrarily. HTTP field names are
+// case-sensitive, so "email" and "Email" are two distinct fields that one
+// submission can carry at once. Picking a winner between them — by case, by sort
+// order, by map iteration — hands an attacker the choice of which value we read,
+// and every tie-break has a side they can land on. Two claimants therefore means
+// we do not know who sent this.
 //
-// "email" matched case-insensitively is the same field emailFieldValid in the
-// submit handler treats as the sender, so the two agree on what a sender is.
-func senderAddresses(data map[string]string) []string {
-	var out []string
+// That matters because of what the caller does next. An allow rule is
+// permissive: it skips the block list and all content scoring. A permissive rule
+// must never fire on a guess, so SenderAmbiguous denies the match. A block rule
+// is restrictive and keeps scanning every field via allAddresses — a spammer
+// will not helpfully put their address in the field we check.
+func SenderAddress(data map[string]string) (string, SenderState) {
+	var (
+		addr  string
+		found int
+	)
 	for k, v := range data {
-		if !strings.EqualFold(k, "email") {
-			continue
-		}
-		if addr, ok := emailShaped(v); ok {
-			out = append(out, addr)
+		if strings.EqualFold(k, "email") {
+			found++
+			addr = v
 		}
 	}
-	return out
+	switch found {
+	case 0:
+		return "", SenderNone
+	case 1:
+		return addr, SenderOne
+	default:
+		return "", SenderAmbiguous
+	}
+}
+
+// senderAddresses returns the sender's address for *allow* rule matching, or
+// nothing when the sender is absent or ambiguous.
+//
+// The asymmetry with allAddresses is the whole point. Submitters choose their
+// own field names, so scanning every field for an allow rule turns any mention
+// of an allowlisted address into a skeleton key: appending one junk field
+// bypasses the block list and all content scoring at once. The allowlisted
+// address is usually the operator's own or a known customer's — guessable, not
+// secret.
+func senderAddresses(data map[string]string) []string {
+	raw, state := SenderAddress(data)
+	if state != SenderOne {
+		return nil
+	}
+	if addr, ok := emailShaped(raw); ok {
+		return []string{addr}
+	}
+	return nil
 }
 
 // emailShaped reports whether a value looks like an address, returning it

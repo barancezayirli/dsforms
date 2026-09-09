@@ -275,6 +275,70 @@ func TestMatchAllowRulesOnlyConsiderTheSenderField(t *testing.T) {
 			data:    map[string]string{"message": "please cc vip@customer.com"},
 			wantHit: false,
 		},
+
+		// HTTP field names are case-sensitive, so "email" and "Email" are two
+		// distinct fields that a single submission can carry at once. Matching
+		// every field whose name case-insensitively equals "email" therefore left
+		// the bypass open: the first fix narrowed the skeleton key from any field
+		// name to a case variant, which is one keystroke, not a closed hole.
+		//
+		// Ambiguity is the resolution. Two fields both claiming to be the sender
+		// means the sender is unknown, and a permissive rule must never fire on a
+		// guess.
+		{
+			name:  "a second email-cased field does NOT unlock the allow rule",
+			rules: allow,
+			data: map[string]string{
+				"email": "mallory@spam.example",
+				"Email": "vip@customer.com",
+			},
+			wantHit: false,
+		},
+		{
+			name:  "nor does an upper-cased one",
+			rules: allow,
+			data: map[string]string{
+				"email": "mallory@spam.example",
+				"EMAIL": "vip@customer.com",
+			},
+			wantHit: false,
+		},
+		{
+			name:  "nor a mixed-cased one",
+			rules: allow,
+			data: map[string]string{
+				"email": "mallory@spam.example",
+				"eMaIl": "vip@customer.com",
+			},
+			wantHit: false,
+		},
+		{
+			name:  "nor two variants with no exact-case sender at all",
+			rules: allow,
+			data: map[string]string{
+				"Email": "mallory@spam.example",
+				"EMAIL": "vip@customer.com",
+			},
+			wantHit: false,
+		},
+		{
+			name:  "the same trick with a domain rule does not work either",
+			rules: allowDomain,
+			data: map[string]string{
+				"email": "mallory@spam.example",
+				"Email": "vip@customer.com",
+			},
+			wantHit: false,
+		},
+		{
+			name:  "an ambiguous sender does not suppress a block rule",
+			rules: []Rule{rule(KindBlock, TypeEmail, "mallory@spam.example")},
+			data: map[string]string{
+				"email": "mallory@spam.example",
+				"Email": "vip@customer.com",
+			},
+			wantHit: true,
+		},
 	}
 
 	for _, tt := range tests {
