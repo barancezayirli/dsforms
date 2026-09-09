@@ -107,11 +107,7 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 	if _, err := tx.Exec(`
 		INSERT INTO submissions (id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, held_at, notified)
 		VALUES (?, ?, ?, ?, 0, ?, 1, ?, ?, ?, 0)`,
-		// Formatted, not handed over as a time.Time: the driver would stringify
-		// it as "2026-09-09 19:53:04 +0000 UTC", which SQLite's date()/datetime()
-		// cannot parse and which sorts differently from every other timestamp in
-		// this table. CreateSubmission has always used sqliteTime; so must this.
-		sub.ID, sub.FormID, raw, sub.IP, createdAt.Format(sqliteTime), score, threshold, createdAt.Format(sqliteTime),
+		sub.ID, sub.FormID, raw, sub.IP, sqliteTimestamp(createdAt), score, threshold, sqliteTimestamp(createdAt),
 	); err != nil {
 		return fmt.Errorf("create held submission: %w", err)
 	}
@@ -320,7 +316,7 @@ func (s *Store) DeleteAllHeld() (int, error) {
 // how many went. The caller supplies the cutoff rather than a duration so the
 // sweep is testable without sleeping.
 func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
-	res, err := s.db.Exec("DELETE FROM submissions WHERE is_held = 1 AND created_at < ?", cutoff.UTC().Format(sqliteTime))
+	res, err := s.db.Exec("DELETE FROM submissions WHERE is_held = 1 AND created_at < ?", sqliteTimestamp(cutoff))
 	if err != nil {
 		return 0, fmt.Errorf("purge held: %w", err)
 	}

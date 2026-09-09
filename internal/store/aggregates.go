@@ -36,7 +36,7 @@ func (s *Store) SubmissionsPerDay(days int) ([]DayCounts, error) {
 		       COUNT(CASE WHEN is_held = 1 THEN 1 END)
 		FROM submissions
 		WHERE created_at >= ?
-		GROUP BY day`, start.Format(sqliteTime))
+		GROUP BY day`, sqliteTimestamp(start))
 	if err != nil {
 		return nil, fmt.Errorf("submissions per day: %w", err)
 	}
@@ -80,7 +80,7 @@ func (s *Store) SubmissionsPerFormPerDay(days int) (map[string][]int, error) {
 		SELECT form_id, date(created_at) AS day, COUNT(*)
 		FROM submissions
 		WHERE created_at >= ? AND is_held = 0
-		GROUP BY form_id, day`, start.Format(sqliteTime))
+		GROUP BY form_id, day`, sqliteTimestamp(start))
 	if err != nil {
 		return nil, fmt.Errorf("submissions per form per day: %w", err)
 	}
@@ -210,7 +210,7 @@ func (s *Store) TopSpamSignals(days int) ([]SignalTally, error) {
 		JOIN submissions s ON s.id = g.submission_id
 		WHERE s.created_at >= ?
 		GROUP BY g.rule
-		ORDER BY 2 DESC`, start.Format(sqliteTime))
+		ORDER BY 2 DESC`, sqliteTimestamp(start))
 	if err != nil {
 		return nil, fmt.Errorf("top spam signals: %w", err)
 	}
@@ -236,7 +236,7 @@ func (s *Store) HeldSince(days int) (held, total int, err error) {
 	start := time.Now().UTC().AddDate(0, 0, -days)
 	row := s.db.QueryRow(`
 		SELECT COUNT(CASE WHEN is_held = 1 THEN 1 END), COUNT(*)
-		FROM submissions WHERE created_at >= ?`, start.Format(sqliteTime))
+		FROM submissions WHERE created_at >= ?`, sqliteTimestamp(start))
 	if err := row.Scan(&held, &total); err != nil {
 		return 0, 0, fmt.Errorf("held since: %w", err)
 	}

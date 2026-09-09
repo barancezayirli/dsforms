@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -190,33 +191,42 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
+	// Every exit from here is a flash plus a redirect to the queue; only the
+	// wording differs, and the wording is the whole user-visible result of a
+	// restore. Keeping them in one closure keeps the differences legible.
+	done := func(kind, msg, logLine string) {
+		log.Printf("quarantine: restore %s: %s", id, logLine)
+		flash.Set(w, h.SecretKey, kind, msg)
+		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+	}
+	// A row that is no longer held is the ordinary result of a double-click or a
+	// resubmitted POST, not a failure — the first request restored it. Saying
+	// "could not be restored" sends the operator back to the queue to hunt for a
+	// submission now sitting unread in the inbox.
+	alreadyRestored := func() {
+		done("success", "Already restored — it is in the inbox.", "already restored")
+	}
+
 	// The held submission is read first so the form can be resolved *before*
 	// anything is mutated. Restoring and then discovering the form is
 	// unreadable left the row out of the queue, its notification unsent, and
 	// the operator looking at a green flash reading "Restored to  as unread."
 	sub, err := h.Store.GetHeldSubmission(id)
 	if err != nil {
-		// A row that is no longer held is the ordinary result of a double-click
-		// or a resubmitted POST, not a failure — the first request restored it.
-		// Saying "could not be restored" here sends the operator back to the
-		// queue to hunt for a submission now sitting unread in the inbox.
 		if errors.Is(err, sql.ErrNoRows) {
-			log.Printf("quarantine: restore %s: already restored", id)
-			flash.Set(w, h.SecretKey, "success", "Already restored — it is in the inbox.")
-			http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+			alreadyRestored()
 			return
 		}
-		log.Printf("quarantine: restore %s: load: %v", id, err)
-		flash.Set(w, h.SecretKey, "error", "That submission could not be restored.")
-		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+		done("error", "That submission could not be restored.", fmt.Sprintf("load: %v", err))
 		return
 	}
 	form, err := h.Store.GetForm(sub.FormID)
 	if err != nil {
-		log.Printf("quarantine: restore %s: get form %s: %v", id, sub.FormID, err)
-		flash.Set(w, h.SecretKey, "error",
-			"That submission could not be restored — its form could not be read.")
-		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+		// Names the actual cause. A generic message here would point the
+		// operator at the submission, which is fine, rather than at the form,
+		// which is not.
+		done("error", "That submission could not be restored — its form could not be read.",
+			fmt.Sprintf("get form %s: %v", sub.FormID, err))
 		return
 	}
 
@@ -225,14 +235,10 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// Same race, one step later: another request restored it between the
 		// read above and this UPDATE. Still not a failure.
 		if errors.Is(err, sql.ErrNoRows) {
-			log.Printf("quarantine: restore %s: already restored", id)
-			flash.Set(w, h.SecretKey, "success", "Already restored — it is in the inbox.")
-			http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+			alreadyRestored()
 			return
 		}
-		log.Printf("quarantine: restore %s: %v", id, err)
-		flash.Set(w, h.SecretKey, "error", "That submission could not be restored.")
-		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+		done("error", "That submission could not be restored.", fmt.Sprintf("%v", err))
 		return
 	}
 

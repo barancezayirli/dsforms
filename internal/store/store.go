@@ -694,6 +694,22 @@ func (s *Store) DeleteForm(id string) error {
 // sort inconsistently against rows written by the column default.
 const sqliteTime = "2006-01-02 15:04:05"
 
+// sqliteTimestamp renders t in the layout SQLite's own datetime('now') produces.
+//
+// Every timestamp written from Go goes through this. Handing the driver a
+// time.Time instead stringifies it with an offset ("2026-09-09T17:22:49.9-07:00"
+// or "… +0000 UTC" depending on the value), which date() and datetime() cannot
+// parse — and since these columns are TEXT, a range comparison against a
+// differently-formatted value is a string comparison that is silently
+// meaningless. That has been the cause of three separate bugs here.
+//
+// The .UTC() is unconditional rather than left to the caller. Several call sites
+// were correct only because the value could be traced back to a time.Now().UTC()
+// a few lines up, which is not a property anyone should have to re-derive.
+func sqliteTimestamp(t time.Time) string {
+	return t.UTC().Format(sqliteTime)
+}
+
 // CreateSubmission creates a new submission. created_at is written explicitly so
 // the caller's Submission carries the same timestamp as the stored row — the
 // notification email formats its Date header from the in-memory struct, which
@@ -706,7 +722,7 @@ func (s *Store) CreateSubmission(sub Submission) error {
 	}
 	_, err := s.db.Exec(
 		"INSERT INTO submissions (id, form_id, data, ip, created_at) VALUES (?, ?, ?, ?, ?)",
-		sub.ID, sub.FormID, sub.RawData, sub.IP, createdAt.UTC().Format(sqliteTime),
+		sub.ID, sub.FormID, sub.RawData, sub.IP, sqliteTimestamp(createdAt),
 	)
 	if err != nil {
 		return fmt.Errorf("create submission: %w", err)
@@ -885,7 +901,7 @@ func (s *Store) CreateSession(userID string, expiry time.Duration) (string, erro
 	// offset ("2026-09-09T17:22:21.69-07:00"), which datetime('now') — UTC, no
 	// offset — neither parses nor compares against correctly, so expires_at is
 	// read as a plain string that sorts by the wrong digits.
-	expiresAt := time.Now().Add(expiry).UTC().Format(sqliteTime)
+	expiresAt := sqliteTimestamp(time.Now().Add(expiry))
 	_, err := s.db.Exec(
 		"INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
 		tokenHash, userID, expiresAt,
