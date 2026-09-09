@@ -1,36 +1,36 @@
 {{template "base" .}}
-{{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">New Waitlist</h1>
-</div>
 
-<div class="card" style="max-width:600px">
-  <div class="card-body">
-    {{if .Error}}<div class="form-error-banner">{{.Error}}</div>{{end}}
-    <form method="POST" action="/admin/waitlists/new">
-      <div class="form-group">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" value="{{.Waitlist.Name}}" required placeholder="e.g. Launch List">
-      </div>
-      <div class="form-group">
-        <label for="redirect">Redirect URL</label>
-        <input type="text" id="redirect" name="redirect" value="{{.Waitlist.Redirect}}" placeholder="https://yoursite.com/joined (optional)">
-        <div class="form-hint">Where to send users after signup. A ?position=N query param is appended.</div>
-      </div>
-      <div class="form-group">
-        <label for="confirm_subject">Confirmation Email Subject</label>
-        <input type="text" id="confirm_subject" name="confirm_subject" value="{{.Waitlist.ConfirmSubject}}" placeholder="Leave blank to send no confirmation">
-      </div>
-      <div class="form-group">
-        <label for="confirm_body">Confirmation Email Body</label>
-        <textarea id="confirm_body" name="confirm_body" placeholder="Hi {{`{{name}}`}}, you're #{{`{{position}}`}} on the list!">{{.Waitlist.ConfirmBody}}</textarea>
-        <div class="form-hint">Variables: {{`{{email}}`}}, {{`{{name}}`}}, {{`{{position}}`}}</div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:20px">
-        <button type="submit" class="btn btn-mint">Create Waitlist</button>
-        <a href="/admin/waitlists" class="btn">Cancel</a>
-      </div>
-    </form>
+{{define "content"}}
+<div class="page-head"><h4>New waitlist</h4></div>
+
+{{if .Error}}
+<div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
+{{end}}
+
+<form method="POST" action="/admin/waitlists/new" style="max-width:560px">
+  <div class="card elev-sm">
+    <label class="field">
+      <span>Name</span>
+      <input class="input" name="name" value="{{.Waitlist.Name}}" required autofocus placeholder="Launch list">
+    </label>
+    <label class="field">
+      <span>Redirect after signup</span>
+      <input class="input" name="redirect" value="{{.Waitlist.Redirect}}" placeholder="https://yoursite.com/joined">
+    </label>
+    <label class="field">
+      <span>Confirmation subject</span>
+      <input class="input" name="confirm_subject" value="{{.Waitlist.ConfirmSubject}}"
+             placeholder="Leave blank to send no confirmation">
+    </label>
+    <label class="field" style="margin-bottom:0">
+      <span>Confirmation body</span>
+      <textarea class="input" name="confirm_body" placeholder="Hi {{`{{name}}`}}, you're #{{`{{position}}`}}!">{{.Waitlist.ConfirmBody}}</textarea>
+      <span class="form-hint">Variables: <code>{{`{{email}}`}}</code> <code>{{`{{name}}`}}</code> <code>{{`{{position}}`}}</code></span>
+    </label>
   </div>
-</div>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="btn btn-primary" type="submit">Create waitlist</button>
+    <a class="btn btn-secondary" href="/admin/waitlists">Cancel</a>
+  </div>
+</form>
 {{end}}

@@ -1,30 +1,72 @@
 {{template "base" .}}
+
 {{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">Backups</h1>
+<div class="page-head">
+  <h4>Backups</h4>
+  <span class="muted" style="font-size:13px">Everything lives in one SQLite file.</span>
 </div>
 
-<div class="card" style="max-width:600px">
-  <div class="card-head">Export Database</div>
-  <div class="card-body">
-    <p class="text-muted" style="margin-bottom:12px">Download a complete snapshot of all your data: forms, submissions, and users.</p>
-    <a href="/admin/backups/export" class="btn btn-mint">Download backup</a>
-  </div>
-</div>
-
-<div class="card" style="max-width:600px;margin-top:20px">
-  <div class="card-head">Restore Database</div>
-  <div class="card-body">
-    <div class="form-error-banner" style="margin-bottom:12px">
-      This will replace ALL current data with the contents of the uploaded file. This cannot be undone.
-    </div>
-    <form method="POST" action="/admin/backups/import" enctype="multipart/form-data" onsubmit="return confirm('This will replace ALL current data. Are you sure?')">
-      <div class="form-group">
-        <label for="file">Choose .db file</label>
-        <input type="file" id="file" name="file" accept=".db" required>
+<div class="row" style="max-width:1000px">
+  <div class="col-main">
+    <div class="card elev-sm">
+      <div class="card-head">
+        <svg class="i i-accent" style="font-size:16px"><use href="#ph-database"/></svg>
+        <span class="card-title">{{.DB.Name}}</span>
+        <span class="tag tag-outline tag-sm">healthy</span>
       </div>
-      <button type="submit" class="btn btn-danger">Restore</button>
-    </form>
+
+      <div style="display:flex;gap:22px;margin:6px 0 4px">
+        <div>
+          <div class="stat-value sm">{{if .DB.Size}}{{.DB.Size}}{{else}}—{{end}}</div>
+          <div class="stat-label">size</div>
+        </div>
+        <div>
+          <div class="stat-value sm">{{.Nav.Unread}}</div>
+          <div class="stat-label">unread</div>
+        </div>
+        <div>
+          <div class="stat-value sm">{{.DB.Journal}}</div>
+          <div class="stat-label">journal</div>
+        </div>
+      </div>
+
+      <a class="btn btn-primary btn-block" href="/admin/backups/export">
+        <svg class="i" style="font-size:15px"><use href="#ph-download-simple"/></svg>Download snapshot
+      </a>
+      <p class="dim" style="font-size:11px;margin-top:8px">
+        <code>VACUUM INTO</code> a temp file, then streamed — safe while the server is running.
+      </p>
+    </div>
+  </div>
+
+  <div class="col-side">
+    <div class="card elev-sm">
+      <div class="card-head">
+        <svg class="i i-accent" style="font-size:16px"><use href="#ph-upload-simple"/></svg>
+        <span class="card-title">Restore</span>
+      </div>
+
+      <div class="notice">
+        <svg class="i"><use href="#ph-warning"/></svg>
+        <span>This replaces every form, submission and user with the uploaded
+              file's contents. It cannot be undone.</span>
+      </div>
+
+      <form method="POST" action="/admin/backups/import" enctype="multipart/form-data"
+            data-confirm="Replace the entire database with the uploaded file? This cannot be undone.">
+        <div class="dropzone" data-dropzone data-dropzone-submit="#restore-btn">
+          <svg class="i"><use href="#ph-cloud-arrow-up"/></svg>
+          <span style="font-size:13px" data-dropzone-name>Drop a <code>.db</code> file, or browse</span>
+          <span class="dim" style="font-size:11px">up to 100 MB</span>
+          <input type="file" name="backup" accept=".db" required style="display:none">
+        </div>
+        <!-- Disabled until a file is actually chosen: a restore is the single
+             most destructive action in the admin. -->
+        <button class="btn btn-danger btn-block" type="submit" id="restore-btn" style="margin-top:10px" disabled>
+          <svg class="i" style="font-size:15px"><use href="#ph-arrow-u-up-left"/></svg>Restore database
+        </button>
+      </form>
+    </div>
   </div>
 </div>
 {{end}}

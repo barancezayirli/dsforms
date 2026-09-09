@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -251,6 +252,13 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 	redirect := r.FormValue("redirect")
 	webhookURL := r.FormValue("webhook_url")
 	webhookFormat := r.FormValue("webhook_format")
+	// 0 means "inherit the instance default", which is also what an unparseable
+	// or out-of-range value falls back to — never a literal threshold of zero,
+	// which would hold every submission the form ever received.
+	spamThreshold := 0
+	if v, err := strconv.Atoi(r.FormValue("spam_threshold")); err == nil && v > 0 && v <= 20 {
+		spamThreshold = v
+	}
 
 	if name == "" {
 		f, err := h.Store.GetForm(id)
@@ -327,6 +335,7 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 	f := store.Form{
 		ID:            id,
 		Name:          name,
+		SpamThreshold: spamThreshold,
 		EmailTo:       emailTo,
 		Redirect:      redirect,
 		WebhookURL:    webhookURL,

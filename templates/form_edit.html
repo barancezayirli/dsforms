@@ -1,91 +1,168 @@
 {{template "base" .}}
+
+{{define "header-actions"}}
+<a class="btn btn-secondary btn-34" href="/admin/forms/{{.Form.ID}}">
+  <svg class="i" style="font-size:15px"><use href="#ph-tray"/></svg>Submissions
+</a>
+{{end}}
+
 {{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">Edit Form</h1>
+<div class="page-head">
+  <h4>{{.Form.Name}}</h4>
+  <span class="tag tag-neutral mono">/f/{{.Form.ID}}</span>
 </div>
 
-<div class="card" style="max-width:600px">
-  <div class="card-body">
-    {{if .Error}}
-    <div class="form-error-banner">{{.Error}}</div>
-    {{end}}
+{{if .Error}}
+<div class="notice">
+  <svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span>
+</div>
+{{end}}
+
+<div class="row" style="max-width:1080px">
+  <div class="col-main">
     <form method="POST" action="/admin/forms/{{.Form.ID}}/edit">
-      <div class="form-group">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" value="{{.Form.Name}}" required>
+      <div class="card elev-sm">
+        <span class="card-title">Form</span>
+
+        <label class="field">
+          <span>Name</span>
+          <input class="input" name="name" value="{{.Form.Name}}" required>
+        </label>
+        <label class="field">
+          <span>Notify address</span>
+          <input class="input" type="email" name="email_to" value="{{.Form.EmailTo}}"
+                 placeholder="you@example.com">
+          <span class="form-hint">Leave empty to store submissions without emailing anyone.</span>
+        </label>
+        <label class="field">
+          <span>Redirect after submit</span>
+          <input class="input" name="redirect" value="{{.Form.Redirect}}"
+                 placeholder="https://yoursite.com/thanks">
+          <span class="form-hint">Defaults to the built-in success page.</span>
+        </label>
+        <label class="field">
+          <span>Webhook URL</span>
+          <input class="input" name="webhook_url" value="{{.Form.WebhookURL}}"
+                 placeholder="https://hooks.slack.com/services/…">
+        </label>
+        <label class="field" style="margin-bottom:0">
+          <span>Webhook format</span>
+          <select class="input" name="webhook_format">
+            <option value=""        {{if eq .Form.WebhookFormat ""}}selected{{end}}>None</option>
+            <option value="generic" {{if eq .Form.WebhookFormat "generic"}}selected{{end}}>Generic JSON</option>
+            <option value="slack"   {{if eq .Form.WebhookFormat "slack"}}selected{{end}}>Slack</option>
+            <option value="discord" {{if eq .Form.WebhookFormat "discord"}}selected{{end}}>Discord</option>
+          </select>
+        </label>
       </div>
-      <div class="form-group">
-        <label for="email_to">Email To</label>
-        <input type="email" id="email_to" name="email_to" value="{{.Form.EmailTo}}" placeholder="(optional)">
+
+      <div class="card elev-sm" style="margin-top:12px">
+        <span class="card-title">Spam &amp; abuse</span>
+        <p class="card-body" style="flex:none">
+          Submissions scoring at or above this form's threshold are held for
+          review rather than delivered. They stay recoverable in
+          <a class="link" href="/admin/quarantine">Quarantine</a>.
+        </p>
+
+        <div class="seg" role="group" aria-label="Spam sensitivity">
+          {{$t := .Form.SpamThreshold}}
+          <label class="seg-opt"><input type="radio" name="spam_threshold" value="0" {{if eq $t 0}}checked{{end}}><span>Instance default</span></label>
+          <label class="seg-opt"><input type="radio" name="spam_threshold" value="9" {{if eq $t 9}}checked{{end}}><span>Lenient · 9</span></label>
+          <label class="seg-opt"><input type="radio" name="spam_threshold" value="6" {{if eq $t 6}}checked{{end}}><span>Balanced · 6</span></label>
+          <label class="seg-opt"><input type="radio" name="spam_threshold" value="4" {{if eq $t 4}}checked{{end}}><span>Strict · 4</span></label>
+        </div>
+
+        <!-- The weights are absolute constants, so moving the threshold changes
+             which single signals are enough on their own. Naming that here is
+             the tradeoff the operator is actually choosing between. -->
+        <div class="panel-box" style="font-size:11.5px;line-height:1.6;margin-top:4px">
+          <div><strong>Lenient · 9</strong> <span class="dim">— a lone link-markup hit (+6) no longer holds.</span></div>
+          <div style="margin-top:5px"><strong>Balanced · 6</strong> <span class="dim">— one markup link holds; one keyword never does.</span></div>
+          <div style="margin-top:5px"><strong>Strict · 4</strong> <span class="dim">— a lone keyword hit (+5) now holds on its own.</span></div>
+        </div>
       </div>
-      <div class="form-group">
-        <label for="redirect">Redirect URL</label>
-        <input type="text" id="redirect" name="redirect" value="{{.Form.Redirect}}" placeholder="https://yoursite.com/thanks (optional)">
-        <div class="form-hint">Where to send users after submission. Leave empty for default.</div>
-      </div>
-      <div class="form-group">
-        <label for="webhook_url">Webhook URL</label>
-        <input type="text" id="webhook_url" name="webhook_url" value="{{.Form.WebhookURL}}" placeholder="https://hooks.slack.com/services/...">
-        <div class="form-hint">Optional. POST submission data to an external service.</div>
-      </div>
-      <div class="form-group">
-        <label for="webhook_format">Webhook Format</label>
-        <select id="webhook_format" name="webhook_format">
-          <option value=""{{if eq .Form.WebhookFormat ""}} selected{{end}}>None</option>
-          <option value="generic"{{if eq .Form.WebhookFormat "generic"}} selected{{end}}>Generic JSON</option>
-          <option value="slack"{{if eq .Form.WebhookFormat "slack"}} selected{{end}}>Slack</option>
-          <option value="discord"{{if eq .Form.WebhookFormat "discord"}} selected{{end}}>Discord</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:20px">
-        <button type="submit" class="btn btn-mint">Save Changes</button>
-        <a href="/admin/forms" class="btn">Cancel</a>
-      </div>
-      <div style="margin-top:12px">
-        <button type="button" id="test-webhook-btn" class="btn" onclick="testWebhook()">Test Webhook</button>
-        <span id="test-webhook-result" style="margin-left:8px"></span>
+
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn btn-primary" type="submit">
+          <svg class="i" style="font-size:15px"><use href="#ph-check"/></svg>Save changes
+        </button>
+        <a class="btn btn-secondary" href="/admin/forms">Cancel</a>
       </div>
     </form>
   </div>
-</div>
 
-<div class="card" style="max-width:600px;margin-top:20px">
-  <div class="card-head">HTML Snippet</div>
-  <div class="card-body">
-    <p class="text-muted" style="margin-bottom:12px;font-size:13px">Paste this into your static site:</p>
-    <div class="snippet-wrap">
-      <pre class="snippet"><code>&lt;form action="{{.BaseURL}}/f/{{.Form.ID}}" method="POST"&gt;
+  <div class="col-side">
+    <div class="card elev-sm">
+      <span class="card-title">Endpoint</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="code" id="endpoint-url" style="flex:1;min-width:0">POST {{.BaseURL}}/f/{{.Form.ID}}</div>
+        <button class="btn btn-ghost" type="button" data-copy="#endpoint-url">
+          <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">Copy</span>
+        </button>
+      </div>
+
+      <div class="card-meta" style="margin-top:10px">Paste-ready HTML</div>
+      <div class="codecard" style="box-shadow:none;background:transparent">
+        <pre class="code" id="form-snippet" style="font-size:11.5px;line-height:1.7">&lt;form method="POST" action="{{.BaseURL}}/f/{{.Form.ID}}"&gt;
+  &lt;input type="text"  name="name"    required&gt;
+  &lt;input type="email" name="email"   required&gt;
+  &lt;textarea name="message" required&gt;&lt;/textarea&gt;
+
+  &lt;!-- left empty by people, filled by bots --&gt;
+  &lt;input type="text" name="_honeypot" style="display:none" tabindex="-1"&gt;
   &lt;input type="hidden" name="_redirect" value="https://yoursite.com/thanks"&gt;
-  &lt;!-- your fields here --&gt;
+
   &lt;button type="submit"&gt;Send&lt;/button&gt;
-&lt;/form&gt;</code></pre>
-      <button class="btn-ghost snippet-copy" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)})">Copy</button>
+&lt;/form&gt;</pre>
+        <button class="btn btn-ghost" type="button" data-copy="#form-snippet" style="margin-top:4px">
+          <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">Copy snippet</span>
+        </button>
+      </div>
+
+      {{if .Form.WebhookURL}}
+      <hr class="hr">
+      <button class="btn btn-secondary" type="button" id="test-webhook-btn">
+        <svg class="i" style="font-size:15px"><use href="#ph-webhooks-logo"/></svg>Test webhook
+      </button>
+      <div id="test-webhook-result" class="dim" style="font-size:11.5px;margin-top:6px"></div>
+      {{end}}
+    </div>
+
+    <div class="card elev-sm" style="margin-top:12px">
+      <span class="card-title">Danger zone</span>
+      <p class="card-body" style="flex:none">
+        Deleting this form deletes every submission it has ever received, and
+        the endpoint stops accepting new ones.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn btn-secondary" href="/admin/forms/{{.Form.ID}}/export">
+          <svg class="i" style="font-size:15px"><use href="#ph-file-csv"/></svg>Export CSV
+        </a>
+        <form method="POST" action="/admin/forms/{{.Form.ID}}/delete"
+              data-confirm="Delete this form and every submission it has received? This cannot be undone.">
+          <button class="btn btn-danger" type="submit">
+            <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>Delete form
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 </div>
+
+{{if .Form.WebhookURL}}
 <script>
-function testWebhook() {
-  var btn = document.getElementById('test-webhook-btn');
-  var result = document.getElementById('test-webhook-result');
-  btn.disabled = true;
-  result.textContent = 'Sending...';
-  fetch('/admin/forms/{{.Form.ID}}/test-webhook', {method: 'POST'})
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.success) {
-        result.textContent = 'Success!';
-        result.style.color = 'var(--color-success, green)';
-      } else {
-        result.textContent = 'Failed: ' + (data.error || 'unknown error');
-        result.style.color = 'var(--color-danger, red)';
-      }
-      btn.disabled = false;
-    })
-    .catch(function(err) {
-      result.textContent = 'Error: ' + err.message;
-      result.style.color = 'var(--color-danger, red)';
-      btn.disabled = false;
-    });
-}
+  // Webhook testing is the one place the admin talks to a third party, so the
+  // result is reported inline rather than as a flash after a reload.
+  document.getElementById('test-webhook-btn').addEventListener('click', function () {
+    var btn = this, out = document.getElementById('test-webhook-result');
+    btn.disabled = true;
+    out.textContent = 'Sending…';
+    fetch('/admin/forms/{{.Form.ID}}/test-webhook', { method: 'POST', credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { out.textContent = d.success ? 'Delivered.' : 'Failed: ' + (d.error || 'unknown error'); })
+      .catch(function (e) { out.textContent = 'Failed: ' + e.message; })
+      .finally(function () { btn.disabled = false; });
+  });
 </script>
+{{end}}
 {{end}}

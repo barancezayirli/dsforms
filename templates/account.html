@@ -1,32 +1,41 @@
 {{template "base" .}}
+
 {{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">Account Settings</h1>
+<div class="page-head">
+  <h4>Your account</h4>
+  <span class="muted" style="font-size:13px">Signed in as <strong>{{.CurrentUser.Username}}</strong></span>
 </div>
 
-<p class="text-muted" style="margin-bottom:20px">Logged in as <strong>{{.CurrentUser.Username}}</strong></p>
+{{if .Error}}
+<div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
+{{end}}
 
-<div class="card" style="max-width:500px">
-  <div class="card-head">Change Password</div>
-  <div class="card-body">
-    {{if .Error}}
-    <div class="form-error-banner">{{.Error}}</div>
-    {{end}}
-    <form method="POST" action="/admin/account/password">
-      <div class="form-group">
-        <label for="current_password">Current Password</label>
-        <input type="password" id="current_password" name="current_password" required>
-      </div>
-      <div class="form-group">
-        <label for="new_password">New Password</label>
-        <input type="password" id="new_password" name="new_password" required>
-      </div>
-      <div class="form-group">
-        <label for="confirm_password">Confirm New Password</label>
-        <input type="password" id="confirm_password" name="confirm_password" required>
-      </div>
-      <button type="submit" class="btn btn-mint" style="margin-top:8px">Update Password</button>
-    </form>
+<form method="POST" action="/admin/account/password" style="max-width:420px">
+  <div class="card elev-sm">
+    <span class="card-title">Change password</span>
+    <p class="card-body" style="flex:none">
+      This signs out every session on every device, including this one.
+    </p>
+
+    <label class="field">
+      <span>Current password</span>
+      <input class="input" type="password" name="current_password" required autocomplete="current-password">
+    </label>
+    <label class="field">
+      <span>New password</span>
+      <input class="input" type="password" name="new_password" required autocomplete="new-password"
+             data-strength="#pw-strength">
+      <span class="strength" id="pw-strength" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </span>
+      <span class="form-hint">bcrypt cost 12 · minimum 12 characters</span>
+    </label>
+    <label class="field" style="margin-bottom:0">
+      <span>Confirm new password</span>
+      <input class="input" type="password" name="confirm_password" required autocomplete="new-password">
+    </label>
+
+    <button class="btn btn-primary btn-block" type="submit" style="margin-top:12px">Update password</button>
   </div>
-</div>
+</form>
 {{end}}

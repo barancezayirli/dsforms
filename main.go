@@ -117,7 +117,11 @@ func parseTemplates() (map[string]*template.Template, error) {
 	}
 
 	for _, name := range standalonePages {
-		t, err := template.New(name).Funcs(funcMap).ParseFS(templateFS, "templates/"+name)
+		// The icon sprite comes along: these pages do not extend base.html but
+		// they still render icons, and a missing "icons" template is an
+		// execution-time failure that template parsing alone will not catch.
+		t, err := template.New(name).Funcs(funcMap).ParseFS(templateFS,
+			"templates/"+name, "templates/icons.html")
 		if err != nil {
 			return nil, fmt.Errorf("parse template %s: %w", name, err)
 		}
@@ -219,6 +223,8 @@ func newRouter() *chi.Mux {
 		}
 	})
 
+	// Plain-text fallback so a router built without templates still answers
+	// correctly; errorPages upgrades this to the styled page in main().
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		if _, err := w.Write([]byte("Page not found")); err != nil {
@@ -227,6 +233,28 @@ func newRouter() *chi.Mux {
 	})
 
 	return r
+}
+
+// errorPages wires the styled 404 and 500 templates into the router. They have
+// existed in templates/ since before this redesign but were never parsed or
+// routed — the recovery middleware and NotFound handler wrote plain strings.
+func errorPages(r *chi.Mux, templates map[string]*template.Template) {
+	render := func(w http.ResponseWriter, name string, status int, fallback string) {
+		tmpl, ok := templates[name]
+		if !ok {
+			http.Error(w, fallback, status)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		if err := tmpl.ExecuteTemplate(w, name, nil); err != nil {
+			log.Printf("%s template error: %v", name, err)
+		}
+	}
+
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		render(w, "404.html", http.StatusNotFound, "Page not found")
+	})
 }
 
 func rateLimitMiddleware(l *ratelimit.Limiter) func(http.Handler) http.Handler {
@@ -532,6 +560,7 @@ func main() {
 	waitlistHandler := &handler.WaitlistHandler{Base: base, Broadcaster: worker}
 
 	r := newRouter()
+	errorPages(r, templates)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
 

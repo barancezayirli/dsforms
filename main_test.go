@@ -326,3 +326,65 @@ func TestFontPreloadMatchesFontFace(t *testing.T) {
 		t.Errorf("@font-face points at %s, which is not embedded: %v", face[1], err)
 	}
 }
+
+// TestStandalonePagesExecute catches what TestTemplatesParse cannot: a template
+// call to a definition that does not exist. Parsing accepts {{template "icons"}}
+// happily and only fails when executed, so these pages have to actually render.
+func TestStandalonePagesExecute(t *testing.T) {
+	t.Parallel()
+
+	templates, err := parseTemplates()
+	if err != nil {
+		t.Fatalf("parseTemplates() failed: %v", err)
+	}
+
+	for _, name := range standalonePages {
+		tmpl := templates[name]
+		if tmpl == nil {
+			t.Errorf("template %q was not registered", name)
+			continue
+		}
+		// login.html needs data; the error pages take none. Executing with a
+		// permissive map keeps this a structural check rather than a fixture.
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, name, map[string]any{}); err != nil {
+			t.Errorf("executing %s: %v", name, err)
+			continue
+		}
+		if buf.Len() == 0 {
+			t.Errorf("%s rendered nothing", name)
+		}
+	}
+}
+
+// TestErrorPagesRenderStyled404 covers the upgrade errorPages performs over the
+// plain-text fallback in newRouter. templates/404.html and 500.html existed in
+// the repo before this redesign but were never parsed or routed.
+func TestErrorPagesRenderStyled404(t *testing.T) {
+	t.Parallel()
+
+	templates, err := parseTemplates()
+	if err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	r := newRouter()
+	errorPages(r, templates)
+
+	req := httptest.NewRequest("GET", "/nonexistent-route", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Nothing here") {
+		t.Errorf("styled 404 not rendered; got %.200q", body)
+	}
+	if !strings.Contains(body, "/static/app.css") {
+		t.Error("404 page does not link the stylesheet")
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}

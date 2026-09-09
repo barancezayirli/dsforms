@@ -16,8 +16,15 @@ type AuthHandler struct {
 }
 
 // LoginData holds data passed to the login template.
+//
+// AssetVer is carried here too: login.html does not extend base.html, but it
+// links the same content-hashed stylesheet, and an unversioned URL would be
+// cached for a year and go stale on the next upgrade.
 type LoginData struct {
 	LoginError bool
+	AssetVer   string
+	Version    string
+	Host       string
 }
 
 // LoginPage renders the login form.
@@ -25,6 +32,9 @@ type LoginData struct {
 func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	data := LoginData{
 		LoginError: r.URL.Query().Get("error") == "1",
+		AssetVer:   h.AssetVer,
+		Version:    h.Version,
+		Host:       r.Host,
 	}
 	if err := h.Templates["login.html"].Execute(w, data); err != nil {
 		log.Printf("login template error: %v", err)

@@ -1,32 +1,61 @@
 {{template "base" .}}
+
+{{define "header-actions"}}
+<a class="btn btn-primary btn-34" href="/admin/waitlists/new">
+  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>New waitlist
+</a>
+{{end}}
+
 {{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">Waitlists</h1>
-  <a href="/admin/waitlists/new" class="btn btn-mint">New Waitlist</a>
+{{if .Waitlists}}
+<div class="page-head">
+  <h4>Waitlists</h4>
+  <span class="muted" style="font-size:13px">Email-keyed signup lists with positions and broadcasts.</span>
 </div>
 
-{{if .Waitlists}}
-<div class="card">
-  <table class="table">
-    <thead>
-      <tr><th>Name</th><th>Signups</th><th>Created</th><th></th></tr>
-    </thead>
-    <tbody>
-      {{range .Waitlists}}
-      <tr>
-        <td><a href="/admin/waitlists/{{.ID}}">{{.Name}}</a></td>
-        <td>{{.EntryCount}}</td>
-        <td class="text-muted">{{.CreatedAt.Format "2006-01-02"}}</td>
-        <td class="actions"><a href="/admin/waitlists/{{.ID}}/edit">Edit</a></td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+<div class="grid">
+  {{range .Waitlists}}
+  <div class="card elev-sm" style="padding:15px 16px;gap:0">
+    <div class="card-head">
+      <span class="card-kicker" style="margin-right:auto">waitlist</span>
+      <span class="tag tag-outline tag-sm">open</span>
+    </div>
+    <a href="/admin/waitlists/{{.ID}}" style="font-size:17px;font-weight:500;display:block;margin-top:2px">{{.Name}}</a>
+    <div class="dim mono truncate" style="font-size:12px;margin-top:2px">/w/{{.ID}}</div>
+
+    <div style="margin-top:14px">
+      <div class="stat-value">{{.EntryCount}}</div>
+      <div class="stat-label">signups</div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <a class="btn btn-secondary" href="/admin/waitlists/{{.ID}}" style="flex:1">
+        <svg class="i" style="font-size:15px"><use href="#ph-list-numbers"/></svg>Signups
+      </a>
+      <a class="btn btn-secondary btn-icon" href="/admin/waitlists/{{.ID}}/edit"
+         title="Settings" aria-label="Waitlist settings">
+        <svg class="i" style="font-size:15px"><use href="#ph-gear-six"/></svg>
+      </a>
+    </div>
+  </div>
+  {{end}}
+
+  <a class="tile-new" href="/admin/waitlists/new">
+    <svg class="i"><use href="#ph-plus"/></svg>
+    <span style="font-size:13px;font-weight:500">New waitlist</span>
+    <span class="dim" style="font-size:11px;max-width:24ch">Dedups by email and hands out positions from #1</span>
+  </a>
 </div>
+
 {{else}}
-<div class="empty-state">
-  <p>No waitlists yet.</p>
-  <p class="text-muted">Create one to start collecting signups.</p>
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-users-three"/></svg></span>
+  <h3>No waitlists yet</h3>
+  <p>A waitlist dedups by email, hands out positions from #1, and can broadcast
+     to everyone on it.</p>
+  <a class="btn btn-primary" href="/admin/waitlists/new">
+    <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Create a waitlist
+  </a>
 </div>
 {{end}}
 {{end}}

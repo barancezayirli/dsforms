@@ -14,7 +14,7 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 | 3 | Forms, form detail, reader drawer | **done** |
 | 4 | Quarantine + breakdown, Filter rules | **done** |
 | 5 | Home aggregates, inline-SVG charts, rate-limit snapshot | **done** |
-| 6 | Form settings, Waitlists, Users, Backups, Login, empty states | not started |
+| 6 | Form settings, Waitlists, Users, Backups, Login, empty states | **done** |
 | 7 | FTS5 search (⌘K), digest email, false-positive reporting | not started |
 | 8 | Landing page (`docs/index.html`) | not started |
 
