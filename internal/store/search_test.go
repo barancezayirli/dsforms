@@ -168,3 +168,70 @@ func TestSearchLimit(t *testing.T) {
 		t.Errorf("limit not honoured: got %d results, want 1", len(got))
 	}
 }
+
+// TestFTSQuery pins the sanitiser directly. The hostile-input test only asserts
+// "no error", so it cannot catch ftsQuery becoming *over*-aggressive: strip
+// apostrophes, hyphens or underscores from the character allowlist and every
+// one of those cases still passes while search quietly stops finding O'Brien
+// and order_id.
+func TestFTSQuery(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "single word", in: "static", want: `"static"`},
+		{name: "two words are ANDed", in: "static hosting", want: `"static" AND "hosting"`},
+		{name: "an apostrophe survives", in: "O'Brien", want: `"O'Brien"`},
+		{name: "a hyphen survives", in: "re-order", want: `"re-order"`},
+		{name: "an underscore survives", in: "order_id", want: `"order_id"`},
+		{name: "an address survives intact", in: "jane@example.com", want: `"jane@example.com"`},
+		{name: "operators are quoted, not interpreted", in: "AND", want: `"AND"`},
+		{name: "punctuation is stripped", in: "budget?", want: `"budget"`},
+		{name: "a quote splits the token rather than escaping into it", in: `a"b`, want: `"a" AND "b"`},
+		{name: "parens are stripped", in: "(unbalanced", want: `"unbalanced"`},
+		{name: "empty input yields nothing", in: "   ", want: ""},
+		{name: "punctuation-only yields nothing", in: `"""`, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ftsQuery(tt.in); got != tt.want {
+				t.Errorf("ftsQuery(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// And end to end, against rows containing exactly the characters most likely to
+// be over-sanitised.
+func TestSearchFindsPunctuatedTerms(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+
+	now := time.Now().UTC()
+	rows := []struct{ id, msg string }{
+		{"s1", "Please contact O'Brien about the re-order"},
+		{"s2", "Reference order_id 88213 for the invoice"},
+	}
+	for _, r := range rows {
+		if err := s.CreateSubmission(Submission{
+			ID: r.id, FormID: "f1", Data: map[string]string{"message": r.msg},
+			RawData: `{"message":"` + r.msg + `"}`, CreatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateSubmission(%s): %v", r.id, err)
+		}
+	}
+
+	for _, q := range []string{"O'Brien", "re-order", "order_id"} {
+		got, err := s.SearchSubmissions(q, 25)
+		if err != nil {
+			t.Fatalf("SearchSubmissions(%q): %v", q, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("SearchSubmissions(%q) found %d rows, want 1 — over-sanitised?", q, len(got))
+		}
+	}
+}

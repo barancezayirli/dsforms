@@ -2,9 +2,13 @@ package handler
 
 import (
 	"math"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/barancezayirli/dsforms/internal/spam"
 )
 
 // coords pulls the numeric pairs out of an SVG path so tests can assert on
@@ -167,5 +171,140 @@ func TestGridLines(t *testing.T) {
 	}
 	if lines[3].Value != 0 || lines[3].Top != 100 {
 		t.Errorf("bottom line = %+v, want value 0 at 100%%", lines[3])
+	}
+}
+
+func TestAgeSince(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		when time.Time
+		want string
+	}{
+		{name: "seconds ago", when: now.Add(-20 * time.Second), want: "just now"},
+		{name: "under a minute", when: now.Add(-59 * time.Second), want: "just now"},
+		{name: "minutes", when: now.Add(-5 * time.Minute), want: "5m"},
+		{name: "just under an hour", when: now.Add(-59 * time.Minute), want: "59m"},
+		{name: "hours", when: now.Add(-3 * time.Hour), want: "3h"},
+		{name: "just under a day", when: now.Add(-23 * time.Hour), want: "23h"},
+		{name: "days", when: now.AddDate(0, 0, -6), want: "6d"},
+		{name: "the retention edge", when: now.AddDate(0, 0, -30), want: "30d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ageSince(tt.when, now); got != tt.want {
+				t.Errorf("ageSince(%v) = %q, want %q", tt.when, got, tt.want)
+			}
+		})
+	}
+}
+
+// RuleIcon and RuleLabel both fall back rather than rendering nothing, because a
+// spam_signals row written by a newer binary carries a value this one has never
+// heard of — and a blank icon has no error, no console message and no
+// broken-image glyph to notice.
+func TestRuleIconAndLabelFallBack(t *testing.T) {
+	t.Parallel()
+
+	if got := RuleIcon(spam.RuleMarkup); got != "link" {
+		t.Errorf("RuleIcon(markup) = %q, want %q", got, "link")
+	}
+	if got := RuleLabel(spam.RuleMarkup); got != "Link markup" {
+		t.Errorf("RuleLabel(markup) = %q", got)
+	}
+
+	const unknown = spam.Rule("invented_by_a_newer_binary")
+	if got := RuleIcon(unknown); got != "shield-warning" {
+		t.Errorf("RuleIcon(unknown) = %q, want the fallback glyph", got)
+	}
+	if got := RuleLabel(unknown); got != string(unknown) {
+		t.Errorf("RuleLabel(unknown) = %q, want the raw value", got)
+	}
+
+	// Every declared rule must have both, or the quarantine panel renders a
+	// nameless row with a blank icon.
+	for _, rule := range []spam.Rule{
+		spam.RuleMarkup, spam.RuleSQL, spam.RuleKeyword, spam.RuleGibberish,
+		spam.RuleURLInName, spam.RuleExtraLinks, spam.RuleRepeatIP, spam.RuleBlocked,
+	} {
+		if _, ok := ruleIcons[rule]; !ok {
+			t.Errorf("rule %q has no icon", rule)
+		}
+		if _, ok := ruleLabels[rule]; !ok {
+			t.Errorf("rule %q has no label", rule)
+		}
+	}
+}
+
+// Initial backs the avatar. An empty circle reads as a rendering bug rather than
+// as a person, which is why it falls back to "?".
+func TestInitial(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ in, want string }{
+		{"Jane Doe", "J"},
+		{"  padded", "P"},
+		{"", "?"},
+		{"   ", "?"},
+		{"éclair", "É"},
+		{"日本", "日"},
+	}
+	for _, tt := range tests {
+		if got := Initial(tt.in); got != tt.want {
+			t.Errorf("Initial(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// Offset feeds every paged query in the admin. Off by one page and the first
+// rows of every list are silently skipped, which no other assertion would catch.
+func TestPaginationOffset(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		page, size, total, want int
+	}{
+		{page: 1, size: 25, total: 612, want: 0},
+		{page: 2, size: 25, total: 612, want: 25},
+		{page: 3, size: 25, total: 612, want: 50},
+		{page: 1, size: 50, total: 612, want: 0},
+		{page: 4, size: 50, total: 612, want: 150},
+		{page: 1, size: 25, total: 0, want: 0},
+		{page: 999, size: 25, total: 612, want: 600}, // clamped to the last page
+	}
+	for _, tt := range tests {
+		got := NewPagination(tt.page, tt.size, tt.total).Offset()
+		if got != tt.want {
+			t.Errorf("NewPagination(%d,%d,%d).Offset() = %d, want %d",
+				tt.page, tt.size, tt.total, got, tt.want)
+		}
+	}
+}
+
+func TestPaginationFromQuery(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		query    string
+		wantPage int
+		wantSize int
+	}{
+		{query: "", wantPage: 1, wantSize: 25},
+		{query: "?page=3&size=50", wantPage: 3, wantSize: 50},
+		{query: "?page=2", wantPage: 2, wantSize: 25},
+		{query: "?size=100", wantPage: 1, wantSize: 100},
+		{query: "?page=abc&size=xyz", wantPage: 1, wantSize: 25},
+		{query: "?page=-4&size=7", wantPage: 1, wantSize: 25},
+		{query: "?size=100000", wantPage: 1, wantSize: 25}, // not an offered option
+	}
+	for _, tt := range tests {
+		req := httptest.NewRequest("GET", "/admin/forms/f1"+tt.query, nil)
+		p := PaginationFrom(req, 1000)
+		if p.Page != tt.wantPage || p.PageSize != tt.wantSize {
+			t.Errorf("PaginationFrom(%q) = page %d size %d, want page %d size %d",
+				tt.query, p.Page, p.PageSize, tt.wantPage, tt.wantSize)
+		}
+	}
+	if got := NewPagination(1, 25, 10).Sizes(); len(got) == 0 {
+		t.Error("Sizes() returned nothing; the rows-per-page selector would be empty")
 	}
 }

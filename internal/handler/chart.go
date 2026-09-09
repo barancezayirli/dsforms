@@ -250,7 +250,13 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // Age renders how long ago something happened, at the coarseness an operator
 // triaging a queue actually reads: "6d", "3h", "just now".
 func Age(t time.Time) string {
-	d := time.Since(t)
+	return ageSince(t, time.Now())
+}
+
+// ageSince is Age with the clock injected, so every branch is reachable in a
+// test without sleeping — the same discipline PurgeHeldOlderThan uses.
+func ageSince(t, now time.Time) string {
+	d := now.Sub(t)
 	switch {
 	case d < time.Minute:
 		return "just now"

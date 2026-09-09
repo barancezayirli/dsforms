@@ -223,8 +223,18 @@ func TestSubmitBlockRuleHoldsImmediately(t *testing.T) {
 	}
 
 	signals, _ := s.SubmissionSignals(held[0].ID)
-	if len(signals) != 1 || signals[0].Rule != "rule" {
+	if len(signals) != 1 || signals[0].Rule != spam.RuleBlocked {
 		t.Fatalf("signals = %+v, want a single 'rule' signal naming the blocklist entry", signals)
+	}
+	// The weights-sum-to-score invariant applies here too. The scored path
+	// asserts it; the two handler-stamped paths are where it is easiest to break,
+	// because the score and the signal are set by separate statements.
+	if signals[0].Weight != held[0].SpamScore {
+		t.Errorf("signal weight %d does not match the stored score %d", signals[0].Weight, held[0].SpamScore)
+	}
+	if held[0].SpamScore != spam.DefaultThreshold {
+		t.Errorf("SpamScore = %d, want the threshold %d — a zero here renders the meter empty",
+			held[0].SpamScore, spam.DefaultThreshold)
 	}
 	if signals[0].Match != "spam.example" {
 		t.Errorf("signal Match = %q, want the rule value", signals[0].Match)
@@ -268,6 +278,74 @@ func TestSubmitRepeatIPIsHeldWithItsOwnSignal(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("held submission has no repeat_ip signal: %+v", signals)
+	}
+
+	sum := 0
+	for _, sig := range signals {
+		sum += sig.Weight
+	}
+	if sum != held[0].SpamScore {
+		t.Errorf("signals sum to %d but the stored score is %d — the breakdown would not add up",
+			sum, held[0].SpamScore)
+	}
+}
+
+// An allowlisted sender must skip the repeat-IP check too. The allow branch sits
+// before the scoring branch precisely so a busy office NAT is not held, and that
+// ordering is invisible to a test that submits once from one IP.
+func TestSubmitAllowRuleSkipsRepeatIP(t *testing.T) {
+	t.Parallel()
+	h, s, _ := quarantineHandler(t)
+
+	if _, err := s.AddFilterRule(filter.KindAllow, filter.TypeEmail, "vip@example.com", "office"); err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+
+	const ip = "203.0.113.50"
+	for i := 0; i < 4; i++ {
+		submitTo(t, h, "f1", map[string]string{
+			"email": "vip@example.com", "message": "a normal enquiry",
+		}, ip)
+	}
+
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 0 {
+		t.Errorf("an allowlisted sender was held for repeat IP: %v", held)
+	}
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 4 {
+		t.Errorf("accepted %d of 4 submissions from an allowlisted sender", len(subs))
+	}
+}
+
+// The signal for a blocked submission must not put a rule *type* in Field —
+// Field means "the form field whose value matched", and the quarantine panel
+// renders it as "field <x> · matched", so a CIDR rule read "field cidr".
+func TestSubmitBlockRuleLeavesFieldEmpty(t *testing.T) {
+	t.Parallel()
+	h, s, _ := quarantineHandler(t)
+
+	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeCIDR, "203.0.113.0/24", ""); err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+	submitTo(t, h, "f1", map[string]string{"message": "ordinary"}, "203.0.113.9")
+
+	held, _ := s.HeldSubmissions(10, 0)
+	if len(held) != 1 {
+		t.Fatalf("got %d held, want 1", len(held))
+	}
+	signals, _ := s.SubmissionSignals(held[0].ID)
+	if len(signals) != 1 {
+		t.Fatalf("signals = %+v, want 1", signals)
+	}
+	if signals[0].Field != "" {
+		t.Errorf("Field = %q, want empty — it names a form field, not a rule type", signals[0].Field)
+	}
+	if signals[0].Match != "203.0.113.0/24" {
+		t.Errorf("Match = %q, want the rule value", signals[0].Match)
 	}
 }
 

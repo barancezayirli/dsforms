@@ -87,6 +87,17 @@ func TestSubmitHoneypotIgnored(t *testing.T) {
 	if len(subs) != 0 {
 		t.Errorf("submissions = %d, want 0 (honeypot)", len(subs))
 	}
+	// The honeypot is the one path that still drops rather than holds. Asserting
+	// only an empty inbox would pass just as happily if it started quarantining
+	// instead — which would bury the review queue under the highest-volume bot
+	// traffic on the instance.
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 0 {
+		t.Errorf("honeypot hits must be dropped, not held: %v", held)
+	}
 }
 
 func TestSubmitValidStoresSubmission(t *testing.T) {
@@ -522,6 +533,15 @@ func TestSubmitSpamHeldJSON(t *testing.T) {
 	if len(subs) != 0 {
 		t.Errorf("submissions = %d, want 0 (spam kept out of the inbox)", len(subs))
 	}
+	// As with the non-JSON twin: an empty inbox alone would also hold if
+	// quarantine were reverted to a silent drop.
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 {
+		t.Errorf("held = %d, want 1 — spam must be recoverable, not discarded", len(held))
+	}
 }
 
 func TestSubmitHamWithOneLinkStored(t *testing.T) {
@@ -636,6 +656,13 @@ func TestSubmitContentSpamStillCountsTowardIPRepeat(t *testing.T) {
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 0 {
 		t.Errorf("submissions = %d, want 0 (2 spam held, 3rd held as IP repeat)", len(subs))
+	}
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 3 {
+		t.Errorf("held = %d, want all 3 recoverable", len(held))
 	}
 }
 
