@@ -146,8 +146,11 @@ func (s *Store) GetHeldSubmission(id string) (Submission, error) {
 	sub, err := scanHeld(s.db.QueryRow(
 		"SELECT "+heldColumns+" FROM submissions WHERE id = ? AND is_held = 1", id))
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return Submission{}, err
+		if errors.Is(err, sql.ErrNoRows) {
+			// Wrapped, not bare: a caller needs to tell "no longer held" — the
+			// ordinary result of a double-clicked restore — from a real fault,
+			// and the two produce very different messages to the operator.
+			return Submission{}, fmt.Errorf("get held submission %s: %w", id, sql.ErrNoRows)
 		}
 		return Submission{}, fmt.Errorf("get held submission: %w", err)
 	}
@@ -211,7 +214,10 @@ func (s *Store) RestoreSubmission(id string) (Submission, error) {
 			"RETURNING "+heldColumns, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Submission{}, fmt.Errorf("restore submission %s: not held", id)
+			// %w so the handler can recognise this: the guard above makes a
+			// second restore a no-op, and "no rows" here means already
+			// restored, not broken.
+			return Submission{}, fmt.Errorf("restore submission %s: not held: %w", id, sql.ErrNoRows)
 		}
 		return Submission{}, fmt.Errorf("restore submission: %w", err)
 	}
@@ -227,11 +233,17 @@ func (s *Store) MarkNotified(id string) error {
 	return nil
 }
 
-// DeleteHeld permanently removes held submissions. The is_held = 1 guard scopes
-// the delete to the quarantine queue: an accepted submission's id arriving on
-// this path is either a bug or someone probing, and either way it must not take
-// a real submission with it. spam_signals follow via ON DELETE CASCADE.
-func (s *Store) DeleteHeld(ids []string) error {
+// DeleteHeld permanently removes held submissions and reports how many rows
+// actually went. The is_held = 1 guard scopes the delete to the quarantine
+// queue: an accepted submission's id arriving on this path is either a bug or
+// someone probing, and either way it must not take a real submission with it.
+// spam_signals follow via ON DELETE CASCADE.
+//
+// The count is returned rather than left to the caller because that guard makes
+// len(ids) a different number: ids the retention sweep already purged, or that
+// another admin acted on, match nothing. Reporting the length of the request
+// tells the operator "20 deleted" when 12 went.
+func (s *Store) DeleteHeld(ids []string) (int, error) {
 	// Batched because SQLite caps bound parameters at 32766 (SQLITE_MAX_VARIABLE_NUMBER).
 	// One IN (?,?,…) over an unbounded list fails outright with "too many SQL
 	// variables" — which is how "Empty quarantine" used to break on exactly the
@@ -240,6 +252,7 @@ func (s *Store) DeleteHeld(ids []string) error {
 	// To clear the whole queue use DeleteAllHeld, which binds nothing.
 	const batch = 500
 
+	total := 0
 	for len(ids) > 0 {
 		n := batch
 		if len(ids) < n {
@@ -255,11 +268,17 @@ func (s *Store) DeleteHeld(ids []string) error {
 			args = append(args, id)
 		}
 		query := "DELETE FROM submissions WHERE is_held = 1 AND id IN (" + strings.Join(placeholders, ",") + ")"
-		if _, err := s.db.Exec(query, args...); err != nil {
-			return fmt.Errorf("delete held: %w", err)
+		res, err := s.db.Exec(query, args...)
+		if err != nil {
+			return 0, fmt.Errorf("delete held: %w", err)
 		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("delete held: %w", err)
+		}
+		total += int(affected)
 	}
-	return nil
+	return total, nil
 }
 
 // DeleteAllHeld empties the quarantine in one statement and reports how many

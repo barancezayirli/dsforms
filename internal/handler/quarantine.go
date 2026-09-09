@@ -192,6 +192,16 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	// the operator looking at a green flash reading "Restored to  as unread."
 	sub, err := h.Store.GetHeldSubmission(id)
 	if err != nil {
+		// A row that is no longer held is the ordinary result of a double-click
+		// or a resubmitted POST, not a failure — the first request restored it.
+		// Saying "could not be restored" here sends the operator back to the
+		// queue to hunt for a submission now sitting unread in the inbox.
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("quarantine: restore %s: already restored", id)
+			flash.Set(w, h.SecretKey, "success", "Already restored — it is in the inbox.")
+			http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+			return
+		}
 		log.Printf("quarantine: restore %s: load: %v", id, err)
 		flash.Set(w, h.SecretKey, "error", "That submission could not be restored.")
 		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
@@ -208,6 +218,14 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 
 	sub, err = h.Store.RestoreSubmission(id)
 	if err != nil {
+		// Same race, one step later: another request restored it between the
+		// read above and this UPDATE. Still not a failure.
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("quarantine: restore %s: already restored", id)
+			flash.Set(w, h.SecretKey, "success", "Already restored — it is in the inbox.")
+			http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+			return
+		}
 		log.Printf("quarantine: restore %s: %v", id, err)
 		flash.Set(w, h.SecretKey, "error", "That submission could not be restored.")
 		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
@@ -228,12 +246,15 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 					log.Printf("quarantine: panic notifying for restored %s: %v", sub.ID, rec)
 				}
 			}()
+			// The two deliveries are independent. A failed email must not skip
+			// the webhook: the hold withheld both, so the restore owes both, and
+			// a dead SMTP server would otherwise silently cost the operator the
+			// CRM delivery as well. Only MarkNotified is gated on the send, since
+			// that flag records delivery rather than intent.
 			if form.EmailTo != "" && h.Notifier != nil {
 				if err := h.Notifier.SendNotification(form, sub); err != nil {
 					log.Printf("quarantine: withheld notification for %s failed: %v", sub.ID, err)
-					return
-				}
-				if err := h.Store.MarkNotified(sub.ID); err != nil {
+				} else if err := h.Store.MarkNotified(sub.ID); err != nil {
 					log.Printf("quarantine: mark notified %s: %v", sub.ID, err)
 				}
 			}
@@ -260,11 +281,16 @@ func (h *QuarantineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
 		return
 	}
-	if err := h.Store.DeleteHeld(ids); err != nil {
+	// Report what went, not what was asked for. A stale page can carry ids the
+	// retention sweep already purged or another admin already deleted; those
+	// match nothing, and counting the request instead of the result overstates
+	// it — the same defect Empty was rewritten to fix.
+	n, err := h.Store.DeleteHeld(ids)
+	if err != nil {
 		log.Printf("quarantine: delete: %v", err)
 		flash.Set(w, h.SecretKey, "error", "Those submissions could not be deleted.")
 	} else {
-		flash.Set(w, h.SecretKey, "success", plural(len(ids), "submission")+" deleted.")
+		flash.Set(w, h.SecretKey, "success", plural(n, "submission")+" deleted.")
 	}
 	http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
 }

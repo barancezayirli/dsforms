@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/barancezayirli/dsforms/internal/auth"
 	"github.com/barancezayirli/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/flash"
 	"github.com/barancezayirli/dsforms/internal/mail"
 	"github.com/barancezayirli/dsforms/internal/spam"
 	"github.com/barancezayirli/dsforms/internal/store"
@@ -25,6 +27,21 @@ func setupQuarantine(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {
 // setupQuarantineWithWebhook also exposes the webhook recorder, for the tests
 // that care that a restore makes good on *both* withheld notifications.
 func setupQuarantineWithWebhook(t *testing.T) (*store.Store, *mail.MockMailer, *mockWebhookSender, *chi.Mux) {
+	t.Helper()
+	m := mail.NewMockMailer()
+	s, wh, r := setupQuarantineWithMailer(t, m)
+	return s, m, wh, r
+}
+
+// setupQuarantineWithFailingMailer wires a mailer whose sends all fail, for the
+// assertions about what still has to happen when the email does not.
+func setupQuarantineWithFailingMailer(t *testing.T) (*store.Store, *chi.Mux, *mockWebhookSender) {
+	t.Helper()
+	s, wh, r := setupQuarantineWithMailer(t, mail.NewFailingMockMailer(errors.New("smtp: connection refused")))
+	return s, r, wh
+}
+
+func setupQuarantineWithMailer(t *testing.T, m *mail.MockMailer) (*store.Store, *mockWebhookSender, *chi.Mux) {
 	t.Helper()
 	s, err := store.New(":memory:")
 	if err != nil {
@@ -45,7 +62,6 @@ func setupQuarantineWithWebhook(t *testing.T) (*store.Store, *mail.MockMailer, *
 			`{{range .Allow}}<span class="allow">{{.Value}}</span>{{end}}` +
 			`{{if .Error}}<span class="err">{{.Error}}</span>{{end}}{{end}}`))
 
-	m := mail.NewMockMailer()
 	wh := newMockWebhookSender()
 	h := &QuarantineHandler{
 		Base: Base{
@@ -71,7 +87,24 @@ func setupQuarantineWithWebhook(t *testing.T) (*store.Store, *mail.MockMailer, *
 		r.Get("/admin/rules", h.RulesPage)
 		r.Post("/admin/rules", h.AddRule)
 	})
-	return s, m, wh, r
+	return s, wh, r
+}
+
+// flashFrom decodes the flash a response set, so a test can assert what the
+// operator was actually told rather than only which status code came back. A
+// redirect carries no body, so the message is the only user-visible output of
+// most mutations here.
+func flashFrom(t *testing.T, w *httptest.ResponseRecorder) (msgType, message string) {
+	t.Helper()
+	for _, c := range w.Result().Cookies() {
+		if c.Name != flash.CookieName {
+			continue
+		}
+		req := httptest.NewRequest("GET", "/", nil)
+		req.AddCookie(c)
+		return flash.Get(req, httptest.NewRecorder(), testSecretKey)
+	}
+	return "", ""
 }
 
 func seedHeld(t *testing.T, s *store.Store, id string, score int, signals []store.SpamSignal) {
@@ -354,7 +387,67 @@ func TestQuarantineRestoreAlsoFiresTheWebhook(t *testing.T) {
 		t.Error("the withheld email was not sent")
 	}
 	if !wh.wait(2 * time.Second) {
-		t.Error("the withheld webhook was not sent")
+		t.Fatal("the withheld webhook was not sent")
+	}
+
+	// Asserting only that a webhook fired would pass if the wrong form's hook
+	// fired, or if the payload carried the wrong submission.
+	call, ok := wh.lastCall()
+	if !ok {
+		t.Fatal("no webhook call recorded")
+	}
+	if call.Form.ID != "f1" {
+		t.Errorf("webhook form = %q, want f1", call.Form.ID)
+	}
+	if call.Sub.ID != "h1" {
+		t.Errorf("webhook submission = %q, want the restored h1", call.Sub.ID)
+	}
+	if call.Sub.IsHeld {
+		t.Error("webhook carried a submission still marked held")
+	}
+}
+
+// A restore owes both deliveries the hold withheld. It used to owe them
+// sequentially: the notifier's error returned out of the goroutine before the
+// webhook block, so a dead SMTP server silently cost the operator the CRM
+// delivery too — while the flash still read "Restored to Contact as unread."
+//
+// submit.go, the path this was modelled on, attempts both independently. The two
+// copies had drifted, and the existing webhook test could not see it because
+// MockMailer's sends always succeeded.
+func TestQuarantineRestoreFiresTheWebhookEvenWhenEmailFails(t *testing.T) {
+	t.Parallel()
+	s, r, wh := setupQuarantineWithFailingMailer(t)
+
+	f, err := s.GetForm("f1")
+	if err != nil {
+		t.Fatalf("GetForm: %v", err)
+	}
+	f.WebhookURL = "https://hooks.example.com/abc"
+	f.WebhookFormat = "generic"
+	if err := s.UpdateForm(f); err != nil {
+		t.Fatalf("UpdateForm: %v", err)
+	}
+	seedHeld(t, s, "h1", 6, nil)
+
+	if w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", ""); w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", w.Code)
+	}
+	if !wh.wait(2 * time.Second) {
+		t.Fatal("email failed and the webhook was never attempted")
+	}
+
+	// The email genuinely did not go, so notified must stay 0 — the flag records
+	// delivery, and a restore that could not notify has not notified.
+	sub, err := s.GetSubmission("h1")
+	if err != nil {
+		t.Fatalf("GetSubmission: %v", err)
+	}
+	if sub.Notified {
+		t.Error("notified = true after the notification failed")
+	}
+	if sub.IsHeld {
+		t.Error("the submission is still held; the restore itself must succeed")
 	}
 }
 
@@ -408,13 +501,27 @@ func TestQuarantineRestoreIsIdempotent(t *testing.T) {
 	if !m.Wait(2 * time.Second) {
 		t.Fatal("first restore sent no notification")
 	}
-	if w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", ""); w.Code != http.StatusSeeOther {
+	w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", "")
+	if w.Code != http.StatusSeeOther {
 		t.Fatalf("second restore: status = %d", w.Code)
 	}
-	if m.Wait(300 * time.Millisecond) {
-		t.Error("the second restore sent the withheld notification again")
-	}
+
+	// No Wait here. Waiting on a timeout to prove an *absence* is a sleep in
+	// disguise: it passes for the wrong reason under load, and it cannot fail
+	// fast. The second restore returns before it can spawn a goroutine, so the
+	// count is settled by the time the response is written.
 	if n := m.CallCount(); n != 1 {
 		t.Errorf("notifications sent = %d, want exactly 1", n)
+	}
+
+	// The message the operator sees has to be true. Reporting failure for a
+	// submission that *is* restored sends them back to the queue to look for
+	// something now sitting in the inbox — the original scar, one layer up.
+	typ, msg := flashFrom(t, w)
+	if typ == "error" {
+		t.Errorf("second restore flashed an error (%q); the submission was already restored", msg)
+	}
+	if !strings.Contains(strings.ToLower(msg), "already restored") {
+		t.Errorf("flash = %q, want it to say the submission was already restored", msg)
 	}
 }

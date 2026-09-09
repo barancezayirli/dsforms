@@ -16,9 +16,17 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// webhookCall is one recorded Send. Both halves are kept because asserting only
+// that *a* webhook fired passes when the wrong form's webhook fires, or when the
+// payload carries the wrong submission.
+type webhookCall struct {
+	Form store.Form
+	Sub  store.Submission
+}
+
 type mockWebhookSender struct {
 	mu    sync.Mutex
-	calls []store.Form
+	calls []webhookCall
 	ch    chan struct{}
 }
 
@@ -28,7 +36,7 @@ func newMockWebhookSender() *mockWebhookSender {
 
 func (m *mockWebhookSender) Send(form store.Form, sub store.Submission) error {
 	m.mu.Lock()
-	m.calls = append(m.calls, form)
+	m.calls = append(m.calls, webhookCall{Form: form, Sub: sub})
 	m.mu.Unlock()
 	m.ch <- struct{}{}
 	return nil
@@ -38,6 +46,16 @@ func (m *mockWebhookSender) callCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.calls)
+}
+
+// lastCall returns the most recent recorded Send, and whether there was one.
+func (m *mockWebhookSender) lastCall() (webhookCall, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.calls) == 0 {
+		return webhookCall{}, false
+	}
+	return m.calls[len(m.calls)-1], true
 }
 
 func (m *mockWebhookSender) wait(timeout time.Duration) bool {

@@ -185,8 +185,12 @@ func TestDeleteHeldCascadesSignals(t *testing.T) {
 		}
 	}
 
-	if err := s.DeleteHeld([]string{"a", "b"}); err != nil {
+	n, err := s.DeleteHeld([]string{"a", "b"})
+	if err != nil {
 		t.Fatalf("DeleteHeld: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("DeleteHeld reported %d rows, want 2", n)
 	}
 
 	held, err := s.HeldSubmissions(10, 0)
@@ -220,8 +224,15 @@ func TestDeleteHeldIgnoresAcceptedSubmissions(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateSubmission: %v", err)
 	}
-	if err := s.DeleteHeld([]string{"clean"}); err != nil {
+	// The reported count is now the direct evidence the is_held guard held: an
+	// accepted submission's id matches nothing, so nothing is deleted and
+	// nothing is claimed.
+	n, err := s.DeleteHeld([]string{"clean"})
+	if err != nil {
 		t.Fatalf("DeleteHeld: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("DeleteHeld reported %d rows for an accepted submission, want 0", n)
 	}
 	subs, err := s.ListSubmissions("f1")
 	if err != nil {
@@ -235,8 +246,12 @@ func TestDeleteHeldIgnoresAcceptedSubmissions(t *testing.T) {
 func TestDeleteHeldEmptyIsNoOp(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	if err := s.DeleteHeld(nil); err != nil {
+	n, err := s.DeleteHeld(nil)
+	if err != nil {
 		t.Errorf("DeleteHeld(nil) = %v, want nil", err)
+	}
+	if n != 0 {
+		t.Errorf("DeleteHeld(nil) reported %d rows, want 0", n)
 	}
 }
 
@@ -604,8 +619,14 @@ func TestDeleteHeldExceedsSQLiteVariableLimit(t *testing.T) {
 		ids = append(ids, fmt.Sprintf("absent%06d", i))
 	}
 
-	if err := s.DeleteHeld(ids); err != nil {
+	n, err := s.DeleteHeld(ids)
+	if err != nil {
 		t.Fatalf("DeleteHeld with %d ids: %v", len(ids), err)
+	}
+	// 40 000 of the ids are absent, so a count of len(ids) would be a lie the
+	// operator sees. Only the real rows may be counted.
+	if n != len(real) {
+		t.Errorf("DeleteHeld reported %d rows, want %d (absent ids must not count)", n, len(real))
 	}
 	left, err := s.HeldCount()
 	if err != nil {

@@ -131,10 +131,16 @@ type SentMail struct {
 }
 
 // MockMailer records calls for testing. Use NewMockMailer() to create.
+//
+// SendErr makes every send fail. Without it a mock mailer that always succeeds
+// silently makes any "and then the other delivery still happened" assertion
+// vacuous — which is exactly how a restore that skipped its webhook whenever
+// email failed stayed green.
 type MockMailer struct {
 	mu        sync.Mutex
 	Calls     []MockCall
 	SentMails []SentMail
+	SendErr   error
 	ch        chan struct{}
 }
 
@@ -143,13 +149,19 @@ func NewMockMailer() *MockMailer {
 	return &MockMailer{ch: make(chan struct{}, 10)}
 }
 
+// NewFailingMockMailer creates a MockMailer whose sends all return err.
+func NewFailingMockMailer(err error) *MockMailer {
+	return &MockMailer{ch: make(chan struct{}, 10), SendErr: err}
+}
+
 // SendNotification records the call and signals waiters.
 func (m *MockMailer) SendNotification(form store.Form, sub store.Submission) error {
 	m.mu.Lock()
 	m.Calls = append(m.Calls, MockCall{Form: form, Sub: sub})
+	err := m.SendErr
 	m.mu.Unlock()
 	m.ch <- struct{}{}
-	return nil
+	return err
 }
 
 // CallCount returns the number of times SendNotification was called.
