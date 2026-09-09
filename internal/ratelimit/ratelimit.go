@@ -4,6 +4,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/barancezayirli/dsforms/internal/safe"
 )
 
 type bucket struct {
@@ -136,11 +138,14 @@ func (l *Limiter) cleanup(maxAge time.Duration) {
 }
 
 // StartCleanup runs a background goroutine that removes stale entries.
+//
+// Guarded per tick: an unrecovered panic in a goroutine takes the whole process
+// down, and the rate limiter dying should not take the HTTP server with it.
 func (l *Limiter) StartCleanup(interval, maxAge time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		for range ticker.C {
-			l.cleanup(maxAge)
+			safe.Do("ratelimit: limiter cleanup", func() { l.cleanup(maxAge) })
 		}
 	}()
 }
@@ -226,12 +231,13 @@ func (g *LoginGuard) cleanup(maxAge time.Duration) {
 	}
 }
 
-// StartCleanup runs a background goroutine that removes stale entries.
+// StartCleanup runs a background goroutine that removes stale entries. Guarded
+// per tick, for the same reason as Limiter.StartCleanup.
 func (g *LoginGuard) StartCleanup(interval, maxAge time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		for range ticker.C {
-			g.cleanup(maxAge)
+			safe.Do("ratelimit: login guard cleanup", func() { g.cleanup(maxAge) })
 		}
 	}()
 }

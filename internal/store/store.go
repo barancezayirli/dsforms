@@ -68,9 +68,16 @@ type Submission struct {
 	Read      bool
 	CreatedAt time.Time
 
-	// Quarantine state. Always populated: every read path selects heldColumns
-	// and scans through scanHeld, so these mean the same thing whichever
-	// function returned the value.
+	// Quarantine state. Always populated *on a read*: every read path selects
+	// heldColumns and scans through scanHeld, so these mean the same thing
+	// whichever function returned the value. Guarded by
+	// TestEverySubmissionReadUsesTheSharedColumnList rather than by this comment.
+	//
+	// Write paths are the other direction and legitimately pass zeros here —
+	// CreateSubmission ignores these columns and CreateHeldSubmission takes the
+	// score and threshold as parameters. A value built for a write therefore does
+	// not satisfy the invariant, and one is handed to the mailer and webhook on
+	// the accept path; neither reads these fields, and neither should start.
 	//
 	// That is deliberate, and it is the alternative to splitting this into
 	// separate held and accepted types. The two are one row and one lifecycle —
@@ -732,27 +739,9 @@ func (s *Store) CreateSubmission(sub Submission) error {
 
 // ListSubmissions returns all submissions for a form.
 func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
-	rows, err := s.db.Query(
+	return s.querySubmissions("list submissions",
 		"SELECT "+heldColumns+" FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id",
-		formID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list submissions: %w", err)
-	}
-	defer rows.Close()
-
-	var subs []Submission
-	for rows.Next() {
-		sub, err := scanHeld(rows)
-		if err != nil {
-			return nil, fmt.Errorf("list submissions: %w", err)
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list submissions: %w", err)
-	}
-	return subs, nil
+		formID)
 }
 
 // MarkRead marks a submission as read.
@@ -834,27 +823,9 @@ func (s *Store) GetSubmission(id string) (Submission, error) {
 
 // ListSubmissionsPaged returns a page of submissions for a form.
 func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submission, error) {
-	rows, err := s.db.Query(
+	return s.querySubmissions("list submissions paged",
 		"SELECT "+heldColumns+" FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
-		formID, limit, offset,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list submissions paged: %w", err)
-	}
-	defer rows.Close()
-
-	var subs []Submission
-	for rows.Next() {
-		sub, err := scanHeld(rows)
-		if err != nil {
-			return nil, fmt.Errorf("list submissions paged: %w", err)
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list submissions paged: %w", err)
-	}
-	return subs, nil
+		formID, limit, offset)
 }
 
 // CountSubmissions returns the total number of submissions for a form.

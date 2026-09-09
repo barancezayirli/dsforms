@@ -73,13 +73,37 @@ func heldColumnsFor(alias string) string {
 	return strings.Join(cols, ", ")
 }
 
-// scanHeld reads one row of heldColumns. rows may be *sql.Row or *sql.Rows.
+// rowScanner is *sql.Row or *sql.Rows.
+type rowScanner interface{ Scan(...any) error }
+
+// scanHeld reads one row of heldColumns.
+func scanHeld(sc rowScanner) (Submission, error) {
+	return scanHeldExtra(sc)
+}
+
+// scanHeldWithFormName reads heldColumns plus a joined form name.
 //
-// extra takes scan destinations for any columns a caller appended *after*
-// heldColumns — the joined form name, in practice. Keeping the shared list
-// first is what lets every read path use this rather than hand-writing a subset
-// and silently returning zeroed quarantine fields.
-func scanHeld(sc interface{ Scan(...any) error }, extra ...any) (Submission, error) {
+// A concrete function rather than a variadic: the destinations after
+// heldColumns are positional, so a JOIN that put f.name *before* the shared list
+// would shift every destination by one with no error at all — database/sql
+// scans the TEXT form name into ID quite happily, and you get a list where
+// every id is a form name. There is exactly one extra column in this codebase,
+// so owning both the column and its destination here removes the hazard rather
+// than documenting it.
+func scanHeldWithFormName(sc rowScanner) (Submission, string, error) {
+	var formName string
+	sub, err := scanHeldExtra(sc, &formName)
+	return sub, formName, err
+}
+
+// heldColumnsWithFormName is the select list scanHeldWithFormName expects, with
+// the extra column last. Built here so the list and the destinations cannot
+// drift apart.
+func heldColumnsWithFormName(alias string) string {
+	return heldColumnsFor(alias) + ", f.name"
+}
+
+func scanHeldExtra(sc rowScanner, extra ...any) (Submission, error) {
 	var (
 		sub      Submission
 		rawData  string
@@ -100,6 +124,33 @@ func scanHeld(sc interface{ Scan(...any) error }, extra ...any) (Submission, err
 	return sub, nil
 }
 
+// querySubmissions runs a heldColumns query and scans every row.
+//
+// Routing the four read paths through scanHeld left three byte-identical loop
+// bodies around it, differing only in the query, the args and the error string —
+// the third copy of a shape the modularity rule says to consolidate at the
+// second. what prefixes the wrapped error, so each caller keeps its own context.
+func (s *Store) querySubmissions(what, query string, args ...any) ([]Submission, error) {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	defer rows.Close()
+
+	var subs []Submission
+	for rows.Next() {
+		sub, err := scanHeld(rows)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", what, err)
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	return subs, nil
+}
+
 // CreateHeldSubmission stores a submission that crossed the spam threshold,
 // together with the breakdown that put it there.
 //
@@ -109,6 +160,13 @@ func scanHeld(sc interface{ Scan(...any) error }, extra ...any) (Submission, err
 //
 // The row is written with notified = 0 so RestoreSubmission can tell that the
 // notification was withheld and still owes sending.
+//
+// score and threshold come from the parameters, and sub.SpamScore /
+// sub.HeldThreshold are ignored. That asymmetry exists because Submission is
+// both a read result and a write argument: reads populate every column, writes
+// legitimately pass zeros. Passing a populated Submission here and expecting
+// its own fields to win would silently store the parameters instead — so the
+// parameters are the only input, and this comment is the warning.
 func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signals []SpamSignal) error {
 	raw := sub.RawData
 	if raw == "" {
@@ -157,27 +215,9 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 
 // HeldSubmissions returns a page of the quarantine queue, newest first.
 func (s *Store) HeldSubmissions(limit, offset int) ([]Submission, error) {
-	rows, err := s.db.Query(
+	return s.querySubmissions("held submissions",
 		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
-		limit, offset,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("held submissions: %w", err)
-	}
-	defer rows.Close()
-
-	var out []Submission
-	for rows.Next() {
-		sub, err := scanHeld(rows)
-		if err != nil {
-			return nil, fmt.Errorf("held submissions: %w", err)
-		}
-		out = append(out, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("held submissions: %w", err)
-	}
-	return out, nil
+		limit, offset)
 }
 
 // GetHeldSubmission returns one held submission by id.

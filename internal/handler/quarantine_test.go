@@ -587,6 +587,14 @@ func TestDeleteRuleUnknownIDDoesNotClaimSuccess(t *testing.T) {
 		t.Fatalf("status = %d, want 303", w.Code)
 	}
 
+	// The point of the test, and what it did not previously check: the flash.
+	// It passed against a handler that said "Rule removed." for a no-op, which
+	// is the whole failure it is named for.
+	typ, msg := flashFrom(t, w)
+	if typ == "success" {
+		t.Errorf("flashed success (%q) for a rule that does not exist", msg)
+	}
+
 	rules, err := s.ListFilterRules()
 	if err != nil {
 		t.Fatalf("ListFilterRules: %v", err)
@@ -655,4 +663,28 @@ func TestQuarantineRestoreDistinguishesGoneFromAlreadyRestored(t *testing.T) {
 			t.Errorf("flashed success (%q) for an id that never existed", msg)
 		}
 	})
+}
+
+// senderLabel must name the same person on every render. It used to range the
+// data map twice, so a submission carrying both "name" and "Name" — legal,
+// since only ambiguity in the email field is rejected — showed a different
+// sender each time the queue was refreshed, and a submission with none of the
+// preferred keys showed a wholly arbitrary field value.
+func TestSenderLabelIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	cases := []map[string]string{
+		{"name": "Alpha", "Name": "Beta", "message": "hi"},
+		{"From": "a@x.com", "from": "b@y.com"},
+		{"zz": "last", "aa": "first", "mm": "middle"},
+		{"Subject": "S", "subject": "T", "SUBJECT": "U"},
+	}
+	for _, data := range cases {
+		first := senderLabel(data)
+		for i := 0; i < 200; i++ {
+			if got := senderLabel(data); got != first {
+				t.Fatalf("senderLabel(%v) returned %q then %q — the queue would reshuffle per render", data, first, got)
+			}
+		}
+	}
 }

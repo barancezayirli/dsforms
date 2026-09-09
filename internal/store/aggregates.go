@@ -163,7 +163,7 @@ type RecentSubmission struct {
 // RecentSubmissions returns the newest accepted submissions across every form.
 func (s *Store) RecentSubmissions(n int) ([]RecentSubmission, error) {
 	rows, err := s.db.Query(`
-		SELECT `+heldColumnsFor("s")+`, f.name
+		SELECT `+heldColumnsWithFormName("s")+`
 		FROM submissions s
 		JOIN forms f ON f.id = s.form_id
 		WHERE s.is_held = 0
@@ -176,12 +176,11 @@ func (s *Store) RecentSubmissions(n int) ([]RecentSubmission, error) {
 
 	var out []RecentSubmission
 	for rows.Next() {
-		var rs RecentSubmission
-		sub, err := scanHeld(rows, &rs.FormName)
+		sub, formName, err := scanHeldWithFormName(rows)
 		if err != nil {
 			return nil, fmt.Errorf("recent submissions: %w", err)
 		}
-		rs.Submission = sub
+		rs := RecentSubmission{Submission: sub, FormName: formName}
 		out = append(out, rs)
 	}
 	if err := rows.Err(); err != nil {

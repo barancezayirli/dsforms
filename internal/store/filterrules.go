@@ -74,12 +74,23 @@ func (s *Store) ListFilterRules() ([]filter.Rule, error) {
 	return out, nil
 }
 
-// DeleteFilterRule removes one rule.
-func (s *Store) DeleteFilterRule(id string) error {
-	if _, err := s.db.Exec("DELETE FROM filter_rules WHERE id = ?", id); err != nil {
-		return fmt.Errorf("delete filter rule: %w", err)
+// DeleteFilterRule removes one rule and reports whether a row actually went.
+//
+// The count matters because the handler flashes a confirmation: telling an
+// operator "Rule removed" when nothing was removed leaves them believing a
+// blocked sender is still blocked, or an allowlisted one is no longer exempt.
+// Same defect DeleteHeld was fixed for, on the screen where the consequence is
+// about what gets through the filter.
+func (s *Store) DeleteFilterRule(id string) (bool, error) {
+	res, err := s.db.Exec("DELETE FROM filter_rules WHERE id = ?", id)
+	if err != nil {
+		return false, fmt.Errorf("delete filter rule: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete filter rule: %w", err)
+	}
+	return n > 0, nil
 }
 
 // IncrementRuleHits records that a rule matched a submission, so the operator

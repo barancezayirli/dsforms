@@ -105,8 +105,12 @@ func TestDeleteFilterRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
-	if err := s.DeleteFilterRule(r.ID); err != nil {
+	removed, err := s.DeleteFilterRule(r.ID)
+	if err != nil {
 		t.Fatalf("DeleteFilterRule: %v", err)
+	}
+	if !removed {
+		t.Error("DeleteFilterRule reported no row removed for a rule that existed")
 	}
 	rules, err := s.ListFilterRules()
 	if err != nil {
@@ -166,5 +170,19 @@ func TestAddFilterRuleStoresQueryableTimestamps(t *testing.T) {
 	}
 	if want := time.Now().UTC().Format("2006-01-02"); *day != want {
 		t.Errorf("date(created_at) = %q, want %q", *day, want)
+	}
+}
+
+// An id that does not exist must report that nothing went, so the handler can
+// avoid confirming a removal that did not happen.
+func TestDeleteFilterRuleUnknownID(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	removed, err := s.DeleteFilterRule("no-such-rule")
+	if err != nil {
+		t.Fatalf("DeleteFilterRule: %v", err)
+	}
+	if removed {
+		t.Error("DeleteFilterRule reported a removal for an id that does not exist")
 	}
 }

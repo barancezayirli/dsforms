@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/barancezayirli/dsforms/internal/filter"
@@ -402,16 +403,28 @@ func (h *QuarantineHandler) formNames() (map[string]string, bool) {
 // senderLabel picks the best available identity for a held submission. The
 // queue spans every form, so the field names vary.
 func senderLabel(data map[string]string) string {
-	for _, key := range []string{"name", "email", "from", "subject"} {
-		for k, v := range data {
-			if strings.EqualFold(k, key) && strings.TrimSpace(v) != "" {
-				return v
+	// Both loops below iterate sorted keys rather than the map. Ranging a map
+	// meant a submission carrying both "name" and "Name" — legal, since only
+	// ambiguity in the *email* field is rejected — displayed a different sender
+	// on every render, and the final fallback returned a wholly arbitrary field.
+	// So the quarantine queue, the search results and the digest could each name
+	// a different person for the same submission.
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, want := range []string{"name", "email", "from", "subject"} {
+		for _, k := range keys {
+			if strings.EqualFold(k, want) && strings.TrimSpace(data[k]) != "" {
+				return data[k]
 			}
 		}
 	}
-	for _, v := range data {
-		if strings.TrimSpace(v) != "" {
-			return v
+	for _, k := range keys {
+		if strings.TrimSpace(data[k]) != "" {
+			return data[k]
 		}
 	}
 	return "Submission"
@@ -495,10 +508,18 @@ func (h *QuarantineHandler) AddRule(w http.ResponseWriter, r *http.Request) {
 
 // DeleteRule removes a rule.
 func (h *QuarantineHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	if err := h.Store.DeleteFilterRule(chi.URLParam(r, "id")); err != nil {
-		log.Printf("rules: delete: %v", err)
+	id := chi.URLParam(r, "id")
+	removed, err := h.Store.DeleteFilterRule(id)
+	switch {
+	case err != nil:
+		log.Printf("rules: delete %s: %v", id, err)
 		flash.Set(w, h.SecretKey, "error", "That rule could not be removed.")
-	} else {
+	case !removed:
+		// Confirming a removal that did not happen leaves the operator believing
+		// the filter is configured differently than it is.
+		log.Printf("rules: delete %s: no such rule", id)
+		flash.Set(w, h.SecretKey, "error", "That rule no longer exists.")
+	default:
 		flash.Set(w, h.SecretKey, "success", "Rule removed.")
 	}
 	http.Redirect(w, r, "/admin/rules", http.StatusSeeOther)
