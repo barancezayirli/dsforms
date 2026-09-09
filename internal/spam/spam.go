@@ -14,7 +14,7 @@ const threshold = 6
 // threshold so a single markup link drops on its own: a plain static-site form
 // never legitimately contains <a href> or [url] markup, so it is a near-certain
 // bot signature. Real captured spam relies on it (see the 2026-06-25 revision in
-// docs/superpowers/specs/2026-06-25-spam-filter-design.md).
+// docs/design/specs/2026-06-25-spam-filter-design.md).
 const markupWeight = threshold
 
 // keywordWeight is the score for each spamKeywords hit. It is below the
