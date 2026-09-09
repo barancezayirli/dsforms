@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go stdlib (`net/http`, `encoding/json`, `net/http/httptest`), no new dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-03-26-webhook-notifications-design.md`
+**Spec:** `docs/design/specs/2026-03-26-webhook-notifications-design.md`
 
 ---
 
