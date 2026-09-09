@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -837,4 +838,119 @@ func TestAcceptedReadsCarryEveryColumn(t *testing.T) {
 		}
 		t.Fatal("restored submission missing from SearchSubmissions")
 	})
+}
+
+// TestMarkNotifiedRecordsDelivery covers the column directly.
+//
+// It was reachable only through the restore handler, and not really even there:
+// RestoreSubmission carries AND is_held = 1, so a second restore returns
+// ErrNoRows and the handler bails before the !sub.Notified guard. The
+// idempotency test therefore proved the is_held guard, not the notified column,
+// and would have passed identically with MarkNotified as a no-op.
+//
+// The flag means "the withheld notification was actually delivered", which is
+// why the restore path sets it only after a successful send.
+func TestMarkNotifiedRecordsDelivery(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := s.CreateHeldSubmission(heldFixture("h1", "f1", 8, now), 8, 6, nil); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	// A held submission has notified = 0: that is the whole point of holding it.
+	held, err := s.GetHeldSubmission("h1")
+	if err != nil {
+		t.Fatalf("GetHeldSubmission: %v", err)
+	}
+	if held.Notified {
+		t.Fatal("a held submission must not be marked notified")
+	}
+
+	if _, err := s.RestoreSubmission("h1"); err != nil {
+		t.Fatalf("RestoreSubmission: %v", err)
+	}
+	if err := s.MarkNotified("h1"); err != nil {
+		t.Fatalf("MarkNotified: %v", err)
+	}
+
+	got, err := s.GetSubmission("h1")
+	if err != nil {
+		t.Fatalf("GetSubmission: %v", err)
+	}
+	if !got.Notified {
+		t.Error("MarkNotified did not set the column")
+	}
+}
+
+// GetHeldSubmission had no direct test, and its ErrNoRows path is what the
+// restore handler now uses to tell "already restored" from a real fault.
+func TestGetHeldSubmission(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := s.CreateHeldSubmission(heldFixture("h1", "f1", 9, now), 9, 6, nil); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	got, err := s.GetHeldSubmission("h1")
+	if err != nil {
+		t.Fatalf("GetHeldSubmission: %v", err)
+	}
+	if got.SpamScore != 9 || !got.IsHeld {
+		t.Errorf("got score %d held %v, want 9 / true", got.SpamScore, got.IsHeld)
+	}
+
+	t.Run("unknown id wraps ErrNoRows", func(t *testing.T) {
+		_, err := s.GetHeldSubmission("nope")
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Errorf("err = %v, want it to wrap sql.ErrNoRows so callers can tell it apart", err)
+		}
+	})
+
+	t.Run("an accepted submission is not held", func(t *testing.T) {
+		if _, err := s.RestoreSubmission("h1"); err != nil {
+			t.Fatalf("RestoreSubmission: %v", err)
+		}
+		_, err := s.GetHeldSubmission("h1")
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Errorf("err = %v, want ErrNoRows for a restored submission", err)
+		}
+	})
+}
+
+// HeldCountForForm drives the "—" vs "0" distinction on the form detail page.
+func TestHeldCountForForm(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	for _, id := range []string{"f1", "f2"} {
+		if err := s.CreateForm(Form{ID: id, Name: id}); err != nil {
+			t.Fatalf("CreateForm: %v", err)
+		}
+	}
+	now := time.Now().UTC()
+	for _, id := range []string{"a", "b"} {
+		if err := s.CreateHeldSubmission(heldFixture(id, "f1", 8, now), 8, 6, nil); err != nil {
+			t.Fatalf("CreateHeldSubmission: %v", err)
+		}
+	}
+
+	n, err := s.HeldCountForForm("f1")
+	if err != nil {
+		t.Fatalf("HeldCountForForm: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("f1 held = %d, want 2", n)
+	}
+	// Scoped per form, not global — the stat sits on one form's page.
+	if n, err := s.HeldCountForForm("f2"); err != nil || n != 0 {
+		t.Errorf("f2 held = %d (%v), want 0", n, err)
+	}
 }

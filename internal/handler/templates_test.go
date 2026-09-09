@@ -102,6 +102,14 @@ func TestBasePagesExecuteWithTheirRealData(t *testing.T) {
 			if strings.Contains(buf.String(), "<no value>") {
 				t.Errorf("%s rendered \"<no value>\", which means a field did not resolve", name)
 			}
+			// Reaching </html> only proves the template ran, not that it ran the
+			// branches that matter. Each marker appears solely inside a populated
+			// branch, so a fixture that quietly stops taking one fails here.
+			for _, marker := range pageMarkers[name] {
+				if !strings.Contains(buf.String(), marker) {
+					t.Errorf("%s did not render %q — the fixture is not taking the populated branch", name, marker)
+				}
+			}
 		})
 	}
 }
@@ -121,8 +129,15 @@ func populatedPageData() map[string]any {
 		{Rule: spam.RuleKeyword, Field: "message", Match: "backlinks", Weight: 5},
 	}
 	wl := store.Waitlist{ID: "w1", Name: "Launch", ConfirmSubject: "Welcome"}
+	// Every field the shell can carry is set. Leaving one at its zero value
+	// silently skips a {{if}} in base.html, which is the failure this whole test
+	// exists to catch: Query unset meant search.html rendered its empty state and
+	// the entire results branch never executed.
 	shell := PageData{Title: "T", Active: "forms", CurrentUser: store.User{Username: "admin"},
-		Flash: &FlashData{Type: "success", Message: "done"}, Version: "v1", Degraded: true}
+		Flash: &FlashData{Type: "success", Message: "done"}, Version: "v1", Degraded: true,
+		Query: "jane",
+		Nav:   store.NavCounts{Unread: 3, Held: 12, Waitlist: 2},
+		DB:    DBStatus{Name: "dsforms.db", Size: "1.2 MB", Journal: "wal"}}
 	pager := NewPagination(2, 25, 612)
 
 	held := heldRow{Submission: sub, FormName: "Contact", Signals: signals,
@@ -181,6 +196,22 @@ func populatedPageData() map[string]any {
 			Rows: []searchRow{{SearchResult: store.SearchResult{Submission: sub, FormName: "Contact"},
 				Name: "Jane", Initial: "J", Preview: "Hello", Age: "2h"}}},
 	}
+}
+
+// pageMarkers are strings that appear only when a page's populated branch runs.
+// Without them a fixture can drift back to zero values and the execution test
+// still passes on a page that rendered nothing but its empty state.
+//
+// Only pages with a meaningful populated/empty split need an entry.
+var pageMarkers = map[string][]string{
+	"search.html":      {"/admin/forms/f1/submissions/s1"},
+	"quarantine.html":  {"/admin/quarantine/s1/restore"},
+	"dashboard.html":   {"/admin/forms/f1"},
+	"form_detail.html": {"/admin/forms/f1/submissions/s1"},
+	"home.html":        {"203.0.113.5"},
+	"rules.html":       {"spam.example"},
+	"backups.html":     {"dsforms.db"},
+	"waitlists.html":   {"/admin/waitlists/w1"},
 }
 
 // The quarantine panel is executed on its own for the fragment response, so it

@@ -86,6 +86,7 @@ func setupQuarantineWithMailer(t *testing.T, m *mail.MockMailer) (*store.Store, 
 		r.Post("/admin/quarantine/empty", h.Empty)
 		r.Get("/admin/rules", h.RulesPage)
 		r.Post("/admin/rules", h.AddRule)
+		r.Post("/admin/rules/{id}/delete", h.DeleteRule)
 	})
 	return s, wh, r
 }
@@ -343,8 +344,17 @@ func TestSubmissionReaderRejectsHeldSubmissions(t *testing.T) {
 	})
 
 	w := doAdminRequest(t, s, r, "GET", "/admin/forms/f1/submissions/h1", "")
-	if w.Code == http.StatusOK {
-		t.Errorf("held submission rendered in the ordinary reader (status %d)", w.Code)
+	// Pinned to the exact status rather than "not 200": a nil-map panic, a
+	// template parse failure or a mis-wired route all produce a non-200 too, so
+	// the loose assertion would let a crash masquerade as the guard working.
+	//
+	// 303 to the quarantine screen, not 404 — the submission exists and the
+	// operator should land where the breakdown and the restore control are.
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 to the quarantine screen", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/admin/quarantine?sel=h1" {
+		t.Errorf("Location = %q, want the quarantine screen with h1 selected", loc)
 	}
 
 	// And it must not have been marked read as a side effect.
@@ -523,5 +533,65 @@ func TestQuarantineRestoreIsIdempotent(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(msg), "already restored") {
 		t.Errorf("flash = %q, want it to say the submission was already restored", msg)
+	}
+}
+
+// DeleteRule is a security-relevant mutation — it removes a block rule — and had
+// no test, while its inverse AddRule was well covered. A rule that silently
+// fails to delete, or deletes the wrong one, changes what gets through the
+// filter.
+func TestDeleteRuleRemovesOnlyTheNamedRule(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupQuarantine(t)
+
+	keep, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", "")
+	if err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+	drop, err := s.AddFilterRule(filter.KindBlock, filter.TypeEmail, "bot@spam.example", "")
+	if err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+
+	w := doAdminRequest(t, s, r, "POST", "/admin/rules/"+drop.ID+"/delete", "")
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", w.Code)
+	}
+	if typ, msg := flashFrom(t, w); typ != "success" {
+		t.Errorf("flash = (%q, %q), want a success", typ, msg)
+	}
+
+	rules, err := s.ListFilterRules()
+	if err != nil {
+		t.Fatalf("ListFilterRules: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("rules remaining = %d, want 1", len(rules))
+	}
+	if rules[0].ID != keep.ID {
+		t.Errorf("the wrong rule was deleted: %q remains, expected %q", rules[0].ID, keep.ID)
+	}
+}
+
+// An unknown id must not report success. Deleting a rule the operator believes
+// is gone, when it is not, is the direction that lets spam through.
+func TestDeleteRuleUnknownIDDoesNotClaimSuccess(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupQuarantine(t)
+	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", ""); err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+
+	w := doAdminRequest(t, s, r, "POST", "/admin/rules/no-such-rule/delete", "")
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", w.Code)
+	}
+
+	rules, err := s.ListFilterRules()
+	if err != nil {
+		t.Fatalf("ListFilterRules: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Errorf("rules remaining = %d, want the real rule untouched", len(rules))
 	}
 }
