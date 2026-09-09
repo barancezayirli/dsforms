@@ -1042,7 +1042,15 @@ func (s *Store) CreateEntry(e WaitlistEntry) (position int, alreadyJoined bool, 
 	if err != nil {
 		return 0, false, fmt.Errorf("create entry: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	// Not discarded. This is the one RowsAffected in this file whose zero value
+	// is a *claim* rather than an error: n == 0 means the ON CONFLICT fired, and
+	// the caller turns that into "you are already on the list". A swallowed
+	// error would tell a first-time signup they had already joined, which is
+	// both wrong and unarguable from their side.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, false, fmt.Errorf("create entry: rows affected: %w", err)
+	}
 	alreadyJoined = n == 0
 
 	position, err = s.entryPosition(e.WaitlistID, e.Email)
