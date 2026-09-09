@@ -22,10 +22,12 @@ import (
 type QuarantineHandler struct {
 	Base
 
-	// Notifier sends the notification that was withheld while a submission sat
-	// in quarantine. Restoring without it would silently lose the email the
-	// sender was entitled to trigger.
+	// Notifier and Webhook send what was withheld while a submission sat in
+	// quarantine. The hold path withholds *both*, so restoring must make good on
+	// both — sending only the email leaves a restored lead in the inbox and
+	// never in the CRM, with nothing anywhere to say so.
 	Notifier Notifier
+	Webhook  WebhookSender
 
 	// Retention is how long held submissions are kept, for the UI copy. It must
 	// match the sweep interval in main.go.
@@ -169,7 +171,27 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	sub, err := h.Store.RestoreSubmission(id)
+	// The held submission is read first so the form can be resolved *before*
+	// anything is mutated. Restoring and then discovering the form is
+	// unreadable left the row out of the queue, its notification unsent, and
+	// the operator looking at a green flash reading "Restored to  as unread."
+	sub, err := h.Store.GetHeldSubmission(id)
+	if err != nil {
+		log.Printf("quarantine: restore %s: load: %v", id, err)
+		flash.Set(w, h.SecretKey, "error", "That submission could not be restored.")
+		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+		return
+	}
+	form, err := h.Store.GetForm(sub.FormID)
+	if err != nil {
+		log.Printf("quarantine: restore %s: get form %s: %v", id, sub.FormID, err)
+		flash.Set(w, h.SecretKey, "error",
+			"That submission could not be restored — its form could not be read.")
+		http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
+		return
+	}
+
+	sub, err = h.Store.RestoreSubmission(id)
 	if err != nil {
 		log.Printf("quarantine: restore %s: %v", id, err)
 		flash.Set(w, h.SecretKey, "error", "That submission could not be restored.")
@@ -177,25 +199,33 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	form, err := h.Store.GetForm(sub.FormID)
-	if err != nil {
-		log.Printf("quarantine: restore %s: get form: %v", id, err)
-	} else if !sub.Notified && form.EmailTo != "" && h.Notifier != nil {
-		// Async and panic-guarded, matching the submit path. MarkNotified runs
-		// only after a successful send, so a failure here leaves the row owing
-		// a notification rather than silently marking it delivered.
+	if !sub.Notified {
+		// Async and panic-guarded, matching the submit path — and sending the
+		// same pair the hold withheld. MarkNotified runs only after the email
+		// succeeds, so a failure leaves notified = 0.
+		//
+		// Nothing currently re-drives a notified = 0 row: there is no sweep and
+		// no admin action that reads the column, so in practice a failed send
+		// here is not retried. Tracked as a follow-up rather than papered over.
 		go func() {
 			defer func() {
 				if rec := recover(); rec != nil {
 					log.Printf("quarantine: panic notifying for restored %s: %v", sub.ID, rec)
 				}
 			}()
-			if err := h.Notifier.SendNotification(form, sub); err != nil {
-				log.Printf("quarantine: withheld notification for %s failed: %v", sub.ID, err)
-				return
+			if form.EmailTo != "" && h.Notifier != nil {
+				if err := h.Notifier.SendNotification(form, sub); err != nil {
+					log.Printf("quarantine: withheld notification for %s failed: %v", sub.ID, err)
+					return
+				}
+				if err := h.Store.MarkNotified(sub.ID); err != nil {
+					log.Printf("quarantine: mark notified %s: %v", sub.ID, err)
+				}
 			}
-			if err := h.Store.MarkNotified(sub.ID); err != nil {
-				log.Printf("quarantine: mark notified %s: %v", sub.ID, err)
+			if form.WebhookURL != "" && h.Webhook != nil {
+				if err := h.Webhook.Send(form, sub); err != nil {
+					log.Printf("quarantine: withheld webhook for %s failed: %v", sub.ID, err)
+				}
 			}
 		}()
 	}

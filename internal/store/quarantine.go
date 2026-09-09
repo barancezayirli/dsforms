@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -192,22 +193,24 @@ func (s *Store) SubmissionSignals(submissionID string) ([]SpamSignal, error) {
 // The spam_signals rows are deliberately kept. They are the evidence of a false
 // positive, and someone tuning the filter later needs to see what it got wrong.
 func (s *Store) RestoreSubmission(id string) (Submission, error) {
-	res, err := s.db.Exec(
-		"UPDATE submissions SET is_held = 0, read = 0, held_at = '' WHERE id = ? AND is_held = 1", id)
+	// UPDATE … RETURNING rather than update-then-select. With two statements the
+	// row is already restored by the time the re-read runs, so a failure there
+	// returned an error for a submission that *was* restored — and the handler
+	// told the operator "could not be restored", pointing them at the queue
+	// while the submission sat unread in the inbox with its notification never
+	// sent. One statement removes the window entirely.
+	//
+	// The AND is_held = 1 guard is what makes this idempotent: a double-click or
+	// a resubmitted POST affects no rows and returns sql.ErrNoRows rather than
+	// restoring twice and sending the withheld notification twice.
+	sub, err := scanHeld(s.db.QueryRow(
+		"UPDATE submissions SET is_held = 0, read = 0, held_at = '' WHERE id = ? AND is_held = 1 "+
+			"RETURNING "+heldColumns, id))
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Submission{}, fmt.Errorf("restore submission %s: not held", id)
+		}
 		return Submission{}, fmt.Errorf("restore submission: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return Submission{}, fmt.Errorf("restore submission: %w", err)
-	}
-	if n == 0 {
-		return Submission{}, fmt.Errorf("restore submission %s: not held", id)
-	}
-
-	sub, err := scanHeld(s.db.QueryRow("SELECT "+heldColumns+" FROM submissions WHERE id = ?", id))
-	if err != nil {
-		return Submission{}, fmt.Errorf("restore submission: reload: %w", err)
 	}
 	return sub, nil
 }

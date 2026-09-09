@@ -18,6 +18,13 @@ import (
 )
 
 func setupQuarantine(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {
+	s, m, _, r := setupQuarantineWithWebhook(t)
+	return s, m, r
+}
+
+// setupQuarantineWithWebhook also exposes the webhook recorder, for the tests
+// that care that a restore makes good on *both* withheld notifications.
+func setupQuarantineWithWebhook(t *testing.T) (*store.Store, *mail.MockMailer, *mockWebhookSender, *chi.Mux) {
 	t.Helper()
 	s, err := store.New(":memory:")
 	if err != nil {
@@ -39,6 +46,7 @@ func setupQuarantine(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {
 			`{{if .Error}}<span class="err">{{.Error}}</span>{{end}}{{end}}`))
 
 	m := mail.NewMockMailer()
+	wh := newMockWebhookSender()
 	h := &QuarantineHandler{
 		Base: Base{
 			Store:     s,
@@ -47,6 +55,7 @@ func setupQuarantine(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {
 			Templates: map[string]*template.Template{"quarantine.html": page, "rules.html": rules},
 		},
 		Notifier:         m,
+		Webhook:          wh,
 		RetentionDays:    30,
 		DefaultThreshold: spam.DefaultThreshold,
 	}
@@ -62,7 +71,7 @@ func setupQuarantine(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {
 		r.Get("/admin/rules", h.RulesPage)
 		r.Post("/admin/rules", h.AddRule)
 	})
-	return s, m, r
+	return s, m, wh, r
 }
 
 func seedHeld(t *testing.T, s *store.Store, id string, score int, signals []store.SpamSignal) {
@@ -315,5 +324,97 @@ func TestSubmissionReaderRejectsHeldSubmissions(t *testing.T) {
 	}
 	if held[0].Read {
 		t.Error("the reader marked a held submission read")
+	}
+}
+
+// A restore must make good on BOTH withheld notifications. The hold path
+// withholds the email and the webhook; sending only the email leaves a restored
+// lead sitting in the inbox and never reaching the CRM, with nothing anywhere
+// to indicate the webhook was skipped.
+func TestQuarantineRestoreAlsoFiresTheWebhook(t *testing.T) {
+	t.Parallel()
+	s, m, wh, r := setupQuarantineWithWebhook(t)
+
+	// The seeded form needs a webhook configured for one to be owed.
+	f, err := s.GetForm("f1")
+	if err != nil {
+		t.Fatalf("GetForm: %v", err)
+	}
+	f.WebhookURL = "https://hooks.example.com/abc"
+	f.WebhookFormat = "generic"
+	if err := s.UpdateForm(f); err != nil {
+		t.Fatalf("UpdateForm: %v", err)
+	}
+	seedHeld(t, s, "h1", 6, nil)
+
+	if w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", ""); w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", w.Code)
+	}
+	if !m.Wait(2 * time.Second) {
+		t.Error("the withheld email was not sent")
+	}
+	if !wh.wait(2 * time.Second) {
+		t.Error("the withheld webhook was not sent")
+	}
+}
+
+// If the form cannot be read, the restore must not happen at all — the previous
+// order restored the row, skipped the notification, and flashed a success
+// message with an empty form name.
+func TestQuarantineRestoreAbortsWhenTheFormIsUnreadable(t *testing.T) {
+	t.Parallel()
+	s, m, _, r := setupQuarantineWithWebhook(t)
+	seedHeld(t, s, "h1", 6, nil)
+
+	// Delete the form out from under the held row. Foreign keys cascade, so
+	// reach past the store to leave an orphan — the state a concurrent delete
+	// would produce.
+	if _, err := s.DB().Exec("PRAGMA foreign_keys=OFF"); err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	if _, err := s.DB().Exec("DELETE FROM forms WHERE id = 'f1'"); err != nil {
+		t.Fatalf("orphan the submission: %v", err)
+	}
+
+	w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", "")
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", w.Code)
+	}
+
+	// The submission must still be held: a restore that could not notify is a
+	// restore that should not have happened.
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 {
+		t.Errorf("submission left quarantine despite the form being unreadable: %v", held)
+	}
+	if m.Wait(200 * time.Millisecond) {
+		t.Error("a notification was sent for a restore that did not complete")
+	}
+}
+
+// Restoring twice must not send the withheld notification twice — a double
+// click or a resubmitted POST is the ordinary way this happens.
+func TestQuarantineRestoreIsIdempotent(t *testing.T) {
+	t.Parallel()
+	s, m, _, r := setupQuarantineWithWebhook(t)
+	seedHeld(t, s, "h1", 6, nil)
+
+	if w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", ""); w.Code != http.StatusSeeOther {
+		t.Fatalf("first restore: status = %d", w.Code)
+	}
+	if !m.Wait(2 * time.Second) {
+		t.Fatal("first restore sent no notification")
+	}
+	if w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", ""); w.Code != http.StatusSeeOther {
+		t.Fatalf("second restore: status = %d", w.Code)
+	}
+	if m.Wait(300 * time.Millisecond) {
+		t.Error("the second restore sent the withheld notification again")
+	}
+	if n := m.CallCount(); n != 1 {
+		t.Errorf("notifications sent = %d, want exactly 1", n)
 	}
 }

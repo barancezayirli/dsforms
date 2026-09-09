@@ -543,6 +543,7 @@ func main() {
 	quarantineHandler := &handler.QuarantineHandler{
 		Base:             base,
 		Notifier:         mailer,
+		Webhook:          webhookSender,
 		RetentionDays:    int(quarantineRetention / (24 * time.Hour)),
 		DefaultThreshold: cfg.SpamThreshold,
 	}
