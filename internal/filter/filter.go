@@ -11,8 +11,10 @@ package filter
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -54,18 +56,20 @@ func Validate(ruleType, value string) (string, error) {
 
 	switch ruleType {
 	case TypeEmail:
-		// Accepts both "bot@example.com" and "Bot <bot@example.com>", keeping
-		// only the address. This is the same parser the submit handler uses to
-		// validate an incoming email field, so the two agree on what an address
-		// is.
-		addr, err := mail.ParseAddress(v)
-		if err != nil {
+		// Through canonicalAddress, which is also what every submission value is
+		// reduced by. Storing a rule in a form matching cannot produce is a rule
+		// that never fires, and that gap was a live bypass twice.
+		addr, ok := canonicalAddress(v)
+		if !ok {
 			return "", fmt.Errorf("not a valid email address: %s", v)
 		}
-		return strings.ToLower(addr.Address), nil
+		return addr, nil
 
 	case TypeDomain:
-		d := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(v, "@"), "."))
+		// asciiLower, not strings.ToLower, for the same reason as addresses: the
+		// domain half of a submission address is folded the same way, so folding
+		// the rule differently would let a Unicode spelling match it.
+		d := asciiLower(strings.TrimPrefix(strings.TrimPrefix(v, "@"), "."))
 		if !isHostname(d) {
 			return "", fmt.Errorf("not a valid domain: %s", v)
 		}
@@ -192,7 +196,18 @@ func matches(r Rule, addrs []string, ip string) bool {
 		}
 		_, network, err := net.ParseCIDR(r.Value)
 		return err == nil && network.Contains(parsed)
+
+	case TypeKeyword:
+		// Keyword rules feed the scorer instead of matching here; Match filters
+		// them out before this is reached.
+		return false
 	}
+
+	// Unreachable while the filter_rules CHECK constraint holds. It is called out
+	// rather than left as a bare fallthrough because returning false here is
+	// fail-open for a *block* rule: a rule the operator believes is protecting
+	// them would silently match nothing.
+	log.Printf("filter: rule %s has unknown type %q; matched nothing", r.ID, r.Type)
 	return false
 }
 
@@ -205,7 +220,7 @@ func matches(r Rule, addrs []string, ip string) bool {
 func allAddresses(data map[string]string) []string {
 	var out []string
 	for _, v := range data {
-		if addr, ok := emailShaped(v); ok {
+		if addr, ok := canonicalAddress(v); ok {
 			out = append(out, addr)
 		}
 	}
@@ -224,8 +239,29 @@ const (
 	SenderAmbiguous
 )
 
+// String names the state, so a log line or a failed assertion reads
+// "SenderAmbiguous" rather than "2".
+func (s SenderState) String() string {
+	switch s {
+	case SenderNone:
+		return "SenderNone"
+	case SenderOne:
+		return "SenderOne"
+	case SenderAmbiguous:
+		return "SenderAmbiguous"
+	}
+	return "SenderState(" + strconv.Itoa(int(s)) + ")"
+}
+
 // SenderAddress resolves the single field that identifies the submitter,
-// returning its raw value. It is the one definition of "the sender" in this
+// returning its raw value.
+//
+// The returned address is non-empty only when the state is SenderOne; every
+// other state returns "". That is what makes `addr, _ := SenderAddress(data)`
+// safe rather than a bypass — a caller who ignores the state gets nothing, not a
+// guess. It is a contract, not an implementation detail: returning a "best
+// effort" address for the ambiguous case, say for a log line, would silently
+// reopen the hole every caller relies on this to close. It is the one definition of "the sender" in this
 // codebase; both the allow-rule matcher here and the submit handler's email
 // validation call it, so the two cannot drift.
 //
@@ -276,18 +312,76 @@ func senderAddresses(data map[string]string) []string {
 	if state != SenderOne {
 		return nil
 	}
-	if addr, ok := emailShaped(raw); ok {
+	if addr, ok := canonicalAddress(raw); ok {
 		return []string{addr}
 	}
 	return nil
 }
 
-// emailShaped reports whether a value looks like an address, returning it
-// lowercased for comparison against a normalised rule value.
-func emailShaped(v string) (string, bool) {
-	v = strings.ToLower(strings.TrimSpace(v))
-	ok := strings.Count(v, "@") == 1 && !strings.ContainsAny(v, " \t\n") && strings.Contains(v, ".")
-	return v, ok
+// canonicalAddress reduces a value to the one form addresses are compared in,
+// or reports that it is not an address.
+//
+// This is the single definition. Rule storage (Validate), submission matching
+// (allAddresses, senderAddresses) and the submit handler's validation all go
+// through it, because the package previously held three different answers to
+// "what is an address" and each gap between them was a filter bypass:
+//
+//   - Validate parsed with mail.ParseAddress, which accepts RFC 5322
+//     display-name form. Matching used a shape test that rejected any value
+//     containing a space. So "Bot <bot@example.com>" validated, stored, and
+//     displayed as the sender while being invisible to every block rule — one
+//     token the spammer controls, defeating email and domain rules permanently.
+//   - Both folded with strings.ToLower, which is not injective into ASCII:
+//     U+0130 lowers to "i" and U+212A (Kelvin) to "k", so "MİKE@works.com"
+//     matched an allow rule for "mike@works.com" and skipped the block list and
+//     all scoring.
+//
+// Folding is ASCII-only for that reason. Two values match only if they are the
+// same address in bytes once ASCII case is normalised — no Unicode spelling can
+// collide with an operator's rule.
+//
+// The parser runs first so every form Validate accepts is also recognisable in a
+// submission. The shape test remains as a fallback so unifying on the parser
+// cannot lose block coverage the old test had for values the parser rejects.
+func canonicalAddress(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if addr, err := mail.ParseAddress(v); err == nil {
+		if a, ok := addressShaped(asciiLower(addr.Address)); ok {
+			return a, true
+		}
+	}
+	return addressShaped(asciiLower(v))
+}
+
+// addressShaped is the conservative "is this an address at all" test. The dot
+// requirement matters because allAddresses runs this over every field value of
+// every submission: without it, arbitrary "a@b" tokens in prose would start
+// counting as addresses.
+func addressShaped(v string) (string, bool) {
+	ok := strings.Count(v, "@") == 1 &&
+		!strings.ContainsAny(v, " \t\n") &&
+		strings.Contains(v[strings.LastIndex(v, "@")+1:], ".")
+	if !ok {
+		return "", false
+	}
+	return v, true
+}
+
+// asciiLower lowercases A-Z and leaves every other byte alone.
+//
+// strings.ToLower is wrong here and the difference is the security property:
+// Unicode case folding maps distinct characters onto ASCII ones, so it can turn
+// an address the operator never wrote into one they did. Bytes in a multi-byte
+// UTF-8 sequence are all >= 0x80, so they are never in the A-Z range and pass
+// through untouched.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i := range b {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+		}
+	}
+	return string(b)
 }
 
 // Keywords returns the custom blocking keywords, for the scorer to add to its

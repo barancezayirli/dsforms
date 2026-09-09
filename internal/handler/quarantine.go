@@ -421,13 +421,20 @@ func (h *QuarantineHandler) renderRules(w http.ResponseWriter, r *http.Request, 
 		Error:     errMsg,
 	}
 	for _, rule := range rules {
+		// Every column is named explicitly. A rule with an unrecognised Kind used
+		// to land in Block by default, which told the operator a sender was
+		// blocked while filter.Match — which iterates only {KindAllow, KindBlock}
+		// — never matched it. Claiming a protection that does not exist is worse
+		// than omitting the row.
 		switch {
 		case rule.Type == filter.TypeKeyword:
 			data.Keywords = append(data.Keywords, rule)
 		case rule.Kind == filter.KindAllow:
 			data.Allow = append(data.Allow, rule)
-		default:
+		case rule.Kind == filter.KindBlock:
 			data.Block = append(data.Block, rule)
+		default:
+			log.Printf("rules: rule %s has unknown kind %q; not displayed", rule.ID, rule.Kind)
 		}
 	}
 	h.Render(w, "rules.html", data)

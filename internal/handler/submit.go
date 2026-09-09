@@ -101,16 +101,26 @@ var internalFields = map[string]bool{
 // which address we read in the submitter's hands — see filter.SenderAddress,
 // which this shares so the validator and the allow-rule matcher cannot disagree
 // about who the sender is.
+//
+// This deliberately parses rather than calling filter's canonicalAddress. The
+// two answer different questions: validation asks "did the visitor type a
+// well-formed address", matching asks "what is the comparable form". Matching
+// requires a dot after the @ because it scans every field of every submission
+// and must not treat prose tokens as addresses; validation must not, or an
+// intranet form posting user@localhost would be rejected. Do not "unify" them.
 func emailFieldValid(data map[string]string) bool {
 	value, state := filter.SenderAddress(data)
 	switch state {
 	case filter.SenderNone:
+		// No email field at all is legal — not every form has one.
 		return true
-	case filter.SenderAmbiguous:
-		return false
-	default:
+	case filter.SenderOne:
 		_, err := mail.ParseAddress(value)
 		return err == nil
+	default:
+		// SenderAmbiguous today, and anything added later. The permissive
+		// outcome must never be the one a new state falls into by default.
+		return false
 	}
 }
 
