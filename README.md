@@ -130,13 +130,15 @@ on its own. It is accepted when it is:
 - a URL on the same origin as `BASE_URL`.
 
 Anything else is ignored and the visitor goes to the form's configured redirect,
-or to the built-in success page. The submission is still stored and still
-notified — a redirect the server will not follow is not a reason to lose someone's
-message — and the refusal is logged with the origin that was refused.
+or to the built-in success page. The submission is still stored and handled
+normally — a redirect the server will not follow is not a reason to lose
+someone's message — and the refusal is logged with the origin that was refused,
+where there is one to name.
 
-The practical consequence: set **Redirect after submit** on the form to your own
-site, and `_redirect` then works for any page on it. Without it, only paths on
-this instance are accepted. Without that rule, anyone could use your form
+The practical consequence: set **Redirect after submit** on the form to a URL on
+your own site, and `_redirect` then works for any page on that site. If you set
+it to a path instead, or leave it empty, `_redirect` accepts only paths on this
+instance and URLs on `BASE_URL`. Without that rule, anyone could use your form
 endpoint to bounce visitors from your domain to theirs.
 
 **Honeypot example:**

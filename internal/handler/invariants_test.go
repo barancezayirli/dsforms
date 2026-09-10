@@ -493,8 +493,9 @@ func TestHandlersDoNotDependOnDatabaseSQL(t *testing.T) {
 //
 // The open redirect was not one bug in one place. determineRedirect returned the
 // submitted value verbatim and was called from four sites — two in submit.go,
-// two in waitlist_submit.go — one of which was the honeypot branch, which is
-// exactly the one a careful four-site patch overlooks. The fix collapsed them to
+// two in waitlist_submit.go. Two of the four were honeypot branches, which are
+// exactly the ones a careful four-site patch overlooks: they read as drops
+// rather than as redirects. The fix collapsed them to
 // a single resolver, and this is what stops the fifth endpoint from arriving
 // with its own copy: the next form-like handler will be written by pasting an
 // existing one.
@@ -502,30 +503,165 @@ func TestHandlersDoNotDependOnDatabaseSQL(t *testing.T) {
 // The package-level internalFields map must keep naming the field — it is what
 // strips _redirect out of stored submission data — so the detector looks inside
 // function bodies only, and that exemption is a fixture rather than an accident.
-func rawRedirectDetector() astcheck.Detector {
-	reads := func(f *ast.File) bool {
-		found := false
-		for _, d := range f.Decls {
-			fn, ok := d.(*ast.FuncDecl)
-			if !ok || fn.Name.Name == "redirectTarget" || fn.Body == nil {
+// redirectFieldNames collects package-level identifiers bound to the literal
+// "_redirect", so hoisting the string to a named constant does not disable the
+// guard. Hoisting a magic string to a constant is ordinary good practice, which
+// is exactly why it is a plausible way for the next handler to slip past.
+func redirectFieldNames(f *ast.File) map[string]bool {
+	out := map[string]bool{}
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || (gd.Tok != token.CONST && gd.Tok != token.VAR) {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
 				continue
 			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				lit, ok := n.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
+			for i, name := range vs.Names {
+				if name.Name == "internalFields" || i >= len(vs.Values) {
+					continue
 				}
-				if v, err := strconv.Unquote(lit.Value); err == nil && v == "_redirect" {
-					found = true
+				if isRedirectString(vs.Values[i], nil) {
+					out[name.Name] = true
 				}
-				return true
-			})
+			}
 		}
+	}
+	return out
+}
+
+// isRedirectString reports whether e evaluates to "_redirect": as a literal, as
+// a concatenation of literals, or through one of the named identifiers.
+//
+// The concatenation case is not hypothetical padding. AGENT.md §7 records a scan
+// in this repo that "inspected zero queries because it looked for string
+// literals when every query is a concatenation" — the same evasion, in the same
+// codebase, caught once already.
+func isRedirectString(e ast.Expr, names map[string]bool) bool {
+	switch v := e.(type) {
+	case *ast.BasicLit:
+		if v.Kind != token.STRING {
+			return false
+		}
+		s, err := strconv.Unquote(v.Value)
+		return err == nil && s == "_redirect"
+	case *ast.BinaryExpr:
+		if v.Op != token.ADD {
+			return false
+		}
+		l, lok := literalString(v.X)
+		r, rok := literalString(v.Y)
+		return lok && rok && l+r == "_redirect"
+	case *ast.Ident:
+		return names[v.Name]
+	}
+	return false
+}
+
+// literalString flattens a literal or a concatenation of literals.
+func literalString(e ast.Expr) (string, bool) {
+	switch v := e.(type) {
+	case *ast.BasicLit:
+		if v.Kind != token.STRING {
+			return "", false
+		}
+		s, err := strconv.Unquote(v.Value)
+		return s, err == nil
+	case *ast.BinaryExpr:
+		if v.Op != token.ADD {
+			return "", false
+		}
+		l, lok := literalString(v.X)
+		r, rok := literalString(v.Y)
+		return l + r, lok && rok
+	}
+	return "", false
+}
+
+// rawRedirectDetector reports whether a file obtains the _redirect form value
+// anywhere outside the one resolver allowed to.
+//
+// The open redirect was not one bug in one place. determineRedirect returned the
+// submitted value verbatim and was called from four sites — two in submit.go,
+// two in waitlist_submit.go. Two of the four were honeypot branches, which are
+// exactly the ones a careful four-site patch overlooks: they read as drops
+// rather than as redirects. The fix collapsed them to a single resolver, and
+// this is what stops the fifth endpoint from arriving with its own copy — the
+// next form-like handler will be written by pasting an existing one.
+//
+// Scope is the whole file, not just function bodies. An earlier version walked
+// only FuncDecls in order to whitelist the package-level internalFields map, and
+// a review got past it four ways: a *method* named redirectTarget, a package-level
+// var holding a func literal, a hoisted const, and a string concatenation. The
+// exemption is now the single declaration that needs it, by name, and the
+// resolver is exempt only as a plain function — a method with the same name is
+// a different function and gets no pass.
+func rawRedirectDetector() astcheck.Detector {
+	reads := func(f *ast.File) bool {
+		names := redirectFieldNames(f)
+
+		// The one declaration allowed to name the field: the table that strips
+		// internal fields out of stored submission data.
+		var exemptField ast.Node
+		var exemptFunc ast.Node
+		for _, d := range f.Decls {
+			switch v := d.(type) {
+			case *ast.GenDecl:
+				for _, spec := range v.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, n := range vs.Names {
+							if n.Name == "internalFields" {
+								exemptField = v
+							}
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				// A plain function, not a method. A method named redirectTarget
+				// on some new handler type is new code, not the resolver.
+				if v.Name.Name == "redirectTarget" && v.Recv == nil {
+					exemptFunc = v
+				}
+			}
+		}
+
+		found := false
+		ast.Inspect(f, func(n ast.Node) bool {
+			if n == nil || (exemptField != nil && n == exemptField) || (exemptFunc != nil && n == exemptFunc) {
+				return false
+			}
+			// Skip the declarations that merely bind the name; using them is
+			// what counts.
+			if gd, ok := n.(*ast.GenDecl); ok {
+				for _, spec := range gd.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, nm := range vs.Names {
+							if names[nm.Name] {
+								return false
+							}
+						}
+					}
+				}
+			}
+			if call, ok := n.(*ast.CallExpr); ok {
+				for _, arg := range call.Args {
+					if isRedirectString(arg, names) {
+						found = true
+					}
+				}
+			}
+			if idx, ok := n.(*ast.IndexExpr); ok && isRedirectString(idx.Index, names) {
+				found = true
+			}
+			return true
+		})
 		return found
 	}
 
 	return astcheck.Detector{
-		Name:  "_redirect read outside redirectTarget",
+		Name:  "_redirect obtained outside redirectTarget",
 		Match: reads,
 		Positive: map[string]string{
 			"FormValue in a handler": `package p
@@ -543,10 +679,29 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 import "net/http"
 func Handle(w http.ResponseWriter, r *http.Request) { _ = r.PostForm["_redirect"] }`,
 
-			"a second helper that resolves it itself": `package p
+			"a second helper with a different name": `package p
 import "net/http"
 func redirectTarget(r *http.Request) string { return r.FormValue("_redirect") }
 func otherTarget(r *http.Request) string { return r.FormValue("_redirect") }`,
+
+			// The four below each defeated the FuncDecl-only version.
+			"a method reusing the resolver's name": `package p
+import "net/http"
+type NewThingHandler struct{}
+func (h *NewThingHandler) redirectTarget(r *http.Request) string { return r.FormValue("_redirect") }`,
+
+			"package-level var holding a func literal": `package p
+import "net/http"
+var rawRedirect = func(r *http.Request) string { return r.FormValue("_redirect") }`,
+
+			"the field name hoisted to a const": `package p
+import "net/http"
+const redirectField = "_redirect"
+func Handle(r *http.Request) { _ = r.FormValue(redirectField) }`,
+
+			"the literal split by concatenation": `package p
+import "net/http"
+func Handle(r *http.Request) { _ = r.FormValue("_redi" + "rect") }`,
 		},
 		Negative: map[string]string{
 			// The real exemption: the field-stripping table, at package level.
@@ -560,6 +715,10 @@ func redirectTarget(r *http.Request) string { return r.FormValue("_redirect") }`
 			"an unrelated field": `package p
 import "net/http"
 func Handle(r *http.Request) { _ = r.FormValue("_honeypot") }`,
+
+			"a name that merely resembles it": `package p
+import "net/http"
+func Handle(r *http.Request) { _ = r.FormValue("_redirect_url") }`,
 		},
 	}
 }

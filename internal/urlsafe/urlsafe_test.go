@@ -1,6 +1,11 @@
 package urlsafe
 
-import "testing"
+import (
+	"net/url"
+	"path"
+	"strings"
+	"testing"
+)
 
 // The rows here are chosen for the implementations they kill, not for coverage.
 // Every one of them corresponds to a way of writing this check that looks right
@@ -27,6 +32,18 @@ func TestRelativePath(t *testing.T) {
 		// open-redirect bypass.
 		{"protocol-relative is not a path", "//evil.example.net", false},
 		{"protocol-relative with a path", "//evil.example.net/x", false},
+
+		// Three or more slashes are what the explicit "//" prefix guard is for:
+		// url.Parse reads these as a path with an empty Host, so the Host check
+		// alone lets them through. Without the guard, RelativePath("///evil")
+		// returns true.
+		{"three slashes", "///evil.example.net", false},
+		{"four slashes", "////evil.example.net", false},
+
+		// Percent-encoded backslashes: no literal "\\" in the string, but
+		// url.Parse decodes them and net/http emits "/\\evil.example.net".
+		{"encoded backslashes", "/%5c%5cevil.example.net", false},
+		{"backslash produced by path.Clean", `/../\evil.example.net`, false},
 
 		// Browsers normalise backslashes to slashes in the authority position;
 		// Go does not. HasPrefix(raw, "/") accepts these.
@@ -77,6 +94,11 @@ func TestSameOrigin(t *testing.T) {
 		// Everything before the @ is userinfo. A hand-rolled host extractor that
 		// splits on "/" or takes the text after "://" reads example.com here.
 		{"userinfo cannot impersonate the host", "https://example.com@evil.net/", "https://example.com/t", false},
+
+		// The row that actually exercises the userinfo check. The three others
+		// pick a host that already differs from the anchor, so they pass whether
+		// or not userinfo is refused — they test Go's parser, not this code.
+		{"userinfo on the vouched-for host", "https://user@example.com/thanks", "https://example.com/t", false},
 
 		{"scheme must match", "http://example.com/a", "https://example.com/t", false},
 		{"explicit non-default port differs", "https://example.com:8443/a", "https://example.com/t", false},
@@ -136,6 +158,14 @@ func TestRedirect(t *testing.T) {
 
 		// With no anchors at all, only paths are possible.
 		{"absolute refused when nothing is configured", "https://customer.example/x", "", "", "/success", true},
+
+		// A hostile value already in the database. ConfiguredRedirect runs on
+		// write and nothing backfilled existing rows, so the fallback is checked
+		// too — refusing one hostile destination and returning another is not a
+		// fix.
+		{"legacy protocol-relative fallback", "https://evil.example.net/x", "//evil2.example.net", "", "/success", true},
+		{"legacy javascript fallback", "", "javascript:alert(1)", "", "/success", false},
+		{"legacy backslash fallback", "https://evil.example.net/x", `/\evil.example.net`, "", "/success", true},
 	}
 
 	for _, tc := range cases {
@@ -253,7 +283,13 @@ func TestOrigin(t *testing.T) {
 		{"https://a.example:8443/x", "https://a.example:8443"},
 		{"http://a.example/", "http://a.example"},
 		{"javascript:alert(1)", "javascript:"},
+		// The protocol-relative bypass: no scheme, but the host is where the
+		// browser would have gone, and it is the thing worth logging.
+		{"//evil.example.net/x", "//evil.example.net"},
+		{"//EVIL.example.net", "//evil.example.net"},
 		{"/thanks", "(no origin)"},
+		// Go reads the backslash form as a path, so there is no host to name.
+		{`/\evil.example.net`, "(no origin)"},
 		{"", "(no origin)"},
 	}
 	for _, tc := range cases {
@@ -279,5 +315,72 @@ func TestOriginNeverLeaksThePath(t *testing.T) {
 		if got := Origin(in); got != "https://a.example" {
 			t.Errorf("Origin(%q) = %q, want just the origin", in, got)
 		}
+	}
+}
+
+// TestAcceptedPathsSurvivePathClean is the regression for a bypass that the
+// per-input table could not have caught, because the hostile value is not the
+// one submitted.
+//
+// net/http runs path.Clean over a relative Location before writing the header.
+// "/../\evil.example.net" contains no leading "/\", passed RelativePath, and
+// arrived at the browser as "/\evil.example.net" — another origin. The first
+// version of this guard checked the string that was submitted rather than the
+// string that would be sent.
+//
+// So this is stated as a property over the output rather than as a list of
+// inputs: whatever RelativePath accepts, the form net/http will emit must still
+// be a path on this server. That closes the shape, including the members of it
+// nobody has thought of yet.
+func TestAcceptedPathsSurvivePathClean(t *testing.T) {
+	t.Parallel()
+
+	candidates := []string{
+		"/", "/success", "/thanks?ref=a#top", "/a/b/c", "/a/../b", "/./thanks",
+		"/..", "/../..", "/..//evil.example.net", "/a/../../b",
+		`/../\evil.example.net`, `/a/../\evil.example.net`, `/./\evil.example.net`,
+		`/\evil.example.net`, `/../\\evil.example.net`, `/../\evil.example.net?q=1`,
+		"//evil.example.net", "///evil.example.net", "////evil.example.net",
+		"/%2f%2fevil.example.net", "/%5c%5cevil.example.net", "/⁄⁄evil",
+	}
+
+	for _, in := range candidates {
+		if !RelativePath(in) {
+			continue
+		}
+		// Exactly what http.Redirect does to a relative target before writing it:
+		// path.Clean over the UNESCAPED path. Using EscapedPath here instead
+		// renders a backslash as %5C and the check silently stops working — the
+		// first version of this test did that and passed against the bug.
+		u, err := url.Parse(in)
+		if err != nil {
+			t.Errorf("RelativePath accepted %q, which does not parse", in)
+			continue
+		}
+		emitted := path.Clean(u.Path)
+		if !strings.HasPrefix(emitted, "/") {
+			t.Errorf("RelativePath accepted %q, which net/http emits as %q — not a path",
+				in, emitted)
+		}
+		if strings.HasPrefix(emitted, "//") || strings.HasPrefix(emitted, `/\`) {
+			t.Errorf("RelativePath accepted %q, which net/http emits as %q.\n"+
+				"A browser reads that as another origin — this is the open redirect, "+
+				"reached through the cleaned form rather than the submitted one.", in, emitted)
+		}
+	}
+}
+
+// TestPathCleanStillMovesBackslashesForward characterises the standard-library
+// behaviour the guard above depends on, per AGENT.md §7: pin what you depend on,
+// not only what you wrote. If a future Go release stops doing this, the reason
+// for the backslash rule disappears and someone should be told why it is there.
+func TestPathCleanStillMovesBackslashesForward(t *testing.T) {
+	t.Parallel()
+
+	if got := path.Clean(`/../\evil.example.net`); got != `/\evil.example.net` {
+		t.Errorf("path.Clean(`/../\\evil.example.net`) = %q, want `/\\evil.example.net`.\n"+
+			"RelativePath refuses backslashes because path.Clean could promote one to "+
+			"the front. If that is no longer true, revisit the rule rather than "+
+			"assuming it is still load-bearing.", got)
 	}
 }

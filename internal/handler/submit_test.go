@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -940,4 +942,45 @@ func postSubmit(r *chi.Mux, form url.Values, accept string) *httptest.ResponseRe
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
+}
+
+// TestRefusedRedirectLogsTheOriginAndNotThePath enforces a rule the code states
+// three times and nothing checked.
+//
+// urlsafe.Origin strips the path, and TestOriginNeverLeaksThePath pins that. But
+// nothing pinned that the call site uses it: changing redirectTarget to log the
+// raw requested value writes the full submitter-supplied URL, query and all,
+// into the log — and the whole suite stayed green. A redirect can carry a
+// tracking token or an email address, and this repo's rule is that
+// submission-adjacent values do not enter logs.
+func TestRefusedRedirectLogsTheOriginAndNotThePath(t *testing.T) {
+	// Not parallel: it swaps the global log output.
+	_, _, r := setupSubmit(t)
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	const secret = "tracking-token-9f83a"
+	form := url.Values{
+		"name":      {"Alice"},
+		"_redirect": {"https://evil.example.net/landing?token=" + secret},
+	}
+	postSubmit(r, form, "")
+
+	logged := buf.String()
+	if !strings.Contains(logged, "refused off-origin _redirect") {
+		t.Fatalf("no refusal was logged; an operator has nothing to correlate against.\ngot:\n%s", logged)
+	}
+	if !strings.Contains(logged, "https://evil.example.net") {
+		t.Errorf("the refusal does not name the origin that was refused.\ngot:\n%s", logged)
+	}
+	if strings.Contains(logged, secret) {
+		t.Errorf("the log line contains the redirect's query string (%q).\n"+
+			"Refusals log the origin only — a redirect URL can carry a token or an "+
+			"address, and those do not go into logs.\ngot:\n%s", secret, logged)
+	}
+	if strings.Contains(logged, "/landing") {
+		t.Errorf("the log line contains the redirect's path.\ngot:\n%s", logged)
+	}
 }

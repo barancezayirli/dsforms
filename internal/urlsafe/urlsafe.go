@@ -20,6 +20,7 @@ package urlsafe
 
 import (
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -34,14 +35,22 @@ const DefaultRedirect = "/success"
 // operator-set and act as anchors. It returns the destination and whether the
 // requested value was refused.
 //
-// A refused value is not an error. By the time this runs the submission is
-// screened and stored, and failing the request over a bad *destination* would
-// destroy real mail to punish a bad query parameter — the trade AGENT.md makes
-// the other way everywhere else. The caller logs the refusal and sends the
-// visitor somewhere that works.
+// A refused value is not an error. The caller resolves the destination before
+// the submission is screened or stored — deliberately, so that every exit from
+// the handler shares one vetted value — which means failing here would reject a
+// message on the strength of a query parameter, before anything had even looked
+// at the message. The destination does not get to decide whether the submission
+// survives. The caller logs the refusal and sends the visitor somewhere that
+// works.
 func Redirect(requested, configured, base string) (string, bool) {
+	// The fallback is checked too, not just trusted for being operator-set.
+	// ConfiguredRedirect runs on write, and nothing backfilled the rows written
+	// before it existed — so a form stored with Redirect="//evil.example.net"
+	// would have had that handed straight to the browser, including on the path
+	// where a hostile _redirect was refused. Refusing one hostile value and
+	// returning another is not a fix.
 	fallback := configured
-	if fallback == "" {
+	if fallback == "" || !ConfiguredRedirect(fallback) {
 		fallback = DefaultRedirect
 	}
 	if requested == "" {
@@ -61,19 +70,43 @@ func Redirect(requested, configured, base string) (string, bool) {
 // way this class of guard is bypassed. And browsers normalise a backslash in the
 // authority position to a slash while Go does not, so "/\evil.example.net" is a
 // path to strings.HasPrefix and another origin to Chrome.
+//
+// The subtle one, and the reason this checks the *cleaned* form: net/http runs
+// path.Clean over a relative Location before writing it, and path.Clean can
+// manufacture a hostile prefix out of an innocent-looking one. "/../\evil.example.net"
+// has no leading "/\" and passed the first version of this function; it reaches
+// the browser as "/\evil.example.net", which is another origin. Checking the
+// string that was submitted rather than the string that will be sent is how a
+// guard like this gets bypassed, so both are checked here, and any backslash
+// anywhere is refused — a path this service hands out has no business containing
+// one.
 func RelativePath(raw string) bool {
 	if !strings.HasPrefix(raw, "/") {
 		return false
 	}
-	// Protocol-relative, or the backslash variant browsers treat the same way.
-	if strings.HasPrefix(raw, "//") || strings.HasPrefix(raw, `/\`) {
+	// Protocol-relative, and the ///-and-more variants of it.
+	if strings.HasPrefix(raw, "//") {
 		return false
 	}
 	u, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
 		return false
 	}
-	return u.Scheme == "" && u.Host == "" && u.User == nil
+	// A backslash at any position, because path.Clean can move one to the front
+	// and browsers read it as a slash. Checked on the DECODED path: "%5c" is not
+	// a backslash to strings.Contains, but url.Parse turns it into one, and
+	// "/%5c%5cevil.example.net" is emitted as "/\evil.example.net" — another
+	// origin. Testing the raw string here looks equivalent and is not.
+	if strings.Contains(u.Path, `\`) {
+		return false
+	}
+	// What net/http will actually put in the header. Measured, not assumed:
+	// http.Redirect cleans u.Path, the *unescaped* form. EscapedPath() renders a
+	// backslash as %5C, so a check built on it never sees the character that
+	// causes the problem — which is how the first attempt at this check, and the
+	// review comment suggesting it, both missed.
+	cleaned := path.Clean(u.Path)
+	return strings.HasPrefix(cleaned, "/") && !strings.HasPrefix(cleaned, "//")
 }
 
 // SameOrigin reports whether raw and anchor are absolute http(s) URLs sharing a
@@ -134,9 +167,23 @@ func Origin(raw string) string {
 	if o, ok := origin(raw); ok {
 		return o
 	}
-	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(no origin)"
+	}
+	// Protocol-relative: no scheme, but a host, and that host is where the
+	// browser would have gone. This is the most common bypass shape, so naming
+	// the target matters more here than anywhere — reporting "(no origin)" for
+	// "//evil.example.net" tells the operator nothing about what was attempted.
+	if u.Scheme == "" && u.Host != "" {
+		return "//" + strings.ToLower(u.Hostname())
+	}
+	if u.Scheme != "" {
 		return u.Scheme + ":"
 	}
+	// A value with neither, such as "/\evil.example.net": Go reads it as a path,
+	// so there is genuinely no origin to name. Saying so is better than echoing a
+	// value that may carry personal data.
 	return "(no origin)"
 }
 
