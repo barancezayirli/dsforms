@@ -137,6 +137,19 @@ func CheckRules(rs []Rule) []RuleProblem {
 			continue
 		}
 
+		// An allow-kind keyword is inert in both directions: Match skips every
+		// keyword rule, and Keywords() feeds only block-kind ones to the scorer.
+		// Both fields are individually valid, so the round trip below passes it —
+		// and renderRules files it under "Custom keywords" beside working ones,
+		// under copy promising it scores. Not reachable through the shipped forms
+		// (they hardcode the kind), but AddRule reads kind and type from the POST
+		// independently and both satisfy the DB constraints.
+		if r.Kind == KindAllow && r.Type == TypeKeyword {
+			out = append(out, RuleProblem{r.ID, r.Value,
+				"an allow keyword is never consulted; keyword rules only ever add to the score"})
+			continue
+		}
+
 		norm, err := ValidateRule(r.Type, r.Value)
 		if err != nil {
 			out = append(out, RuleProblem{r.ID, r.Value,

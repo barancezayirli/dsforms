@@ -154,6 +154,13 @@ func fieldSets() []struct {
 		{"gibberish", map[string]string{"email": "a@x.com", "message": "xkcdqwrtplm zzzxqjvbn"}},
 		{"pile-up", map[string]string{"email": "a@x.com", "message": "<a href=x>casino</a> backlinks http://a.co http://b.co"}},
 
+		// Contains the operator's custom keyword from ruleSets, so the wiring
+		// from a stored keyword rule into the scorer is actually characterised.
+		// Without a field that trips it, the block-keyword rule appeared in 25
+		// cases and fired in none — and severing rules.Keywords from
+		// score.DetailWith entirely survived the whole suite.
+		{"custom-keyword", map[string]string{"email": "a@x.com", "message": "buy our widget today"}},
+
 		// The bypasses. Each of these was accepted at some point in rounds 1-3
 		// while an allow rule for vip@customer.com / mike@works.com existed.
 		{"bypass-r1-junk-field", map[string]string{"email": "mallory@spam.example", "zz": "vip@customer.com", "message": "casino backlinks"}},

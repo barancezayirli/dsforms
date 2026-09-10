@@ -38,6 +38,12 @@ func TestCheckRulesFindsRulesThatCanNeverFire(t *testing.T) {
 			"matching lowercases, so this can never be produced"},
 
 		// Corrupt beyond normalisation.
+		// Individually valid fields, inert in combination: Match skips keyword
+		// rules and Keywords() takes only block-kind ones, so this scores
+		// nothing while being displayed among the working keywords.
+		{"an allow keyword", Rule{ID: "11", Kind: KindAllow, Type: TypeKeyword, Value: "casino"}, true,
+			"an allow-kind keyword is consulted by neither the matcher nor the scorer"},
+
 		{"unknown kind", Rule{ID: "8", Kind: "BLOCK", Type: TypeEmail, Value: "bot@example.com"}, true,
 			"Match iterates only allow and block, so this is skipped entirely"},
 		{"unknown type", Rule{ID: "9", Kind: KindBlock, Type: "nonsense", Value: "x"}, true, "no matcher for this type"},

@@ -1207,6 +1207,95 @@
      signal keyword field="message" match="backlinks" weight=5
      signal extra_links field="" match="" weight=2
 
+=== matrix/custom-keyword/no-rules
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/custom-keyword/allow-email
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/custom-keyword/allow-email-mike
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/custom-keyword/allow-domain
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/custom-keyword/block-email
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/custom-keyword/block-domain
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/custom-keyword/block-domain-ru
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/custom-keyword/block-ip
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/custom-keyword/block-cidr
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/custom-keyword/block-keyword
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule block/keyword "widget"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="widget" weight=5
+
+=== matrix/custom-keyword/allow-beats-block
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=0
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
 === matrix/bypass-r1-junk-field/no-rules
   field email = "mallory@spam.example"
   field message = "casino backlinks"
@@ -2262,6 +2351,14 @@
      signal keyword field="message" match="backlinks" weight=5
      signal extra_links field="" match="" weight=2
 
+=== threshold-4/custom-keyword
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=4 prior=0
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
 === threshold-4/bypass-r1-junk-field
   field email = "mallory@spam.example"
   field message = "casino backlinks"
@@ -2457,6 +2554,14 @@
      signal keyword field="message" match="casino" weight=5
      signal keyword field="message" match="backlinks" weight=5
      signal extra_links field="" match="" weight=2
+
+=== threshold-9/custom-keyword
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=9 prior=0
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
 
 === threshold-9/bypass-r1-junk-field
   field email = "mallory@spam.example"
@@ -2654,6 +2759,14 @@
      signal keyword field="message" match="backlinks" weight=5
      signal extra_links field="" match="" weight=2
 
+=== threshold-20/custom-keyword
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=20 prior=0
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
 === threshold-20/bypass-r1-junk-field
   field email = "mallory@spam.example"
   field message = "casino backlinks"
@@ -2849,6 +2962,14 @@
      signal keyword field="message" match="casino" weight=5
      signal keyword field="message" match="backlinks" weight=5
      signal extra_links field="" match="" weight=2
+
+=== repeat-prior-1/custom-keyword
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=1
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
 
 === repeat-prior-1/bypass-r1-junk-field
   field email = "mallory@spam.example"
@@ -3054,6 +3175,14 @@
      signal keyword field="message" match="casino" weight=5
      signal keyword field="message" match="backlinks" weight=5
      signal extra_links field="" match="" weight=2
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat-prior-2/custom-keyword
+  field email = "a@x.com"
+  field message = "buy our widget today"
+  ip="203.0.113.5" threshold=6 prior=2
+  rule (none)
+  -> HOLD score=6 matchedRule=""
      signal repeat_ip field="" match="203.0.113.5" weight=6
 
 === repeat-prior-2/bypass-r1-junk-field
