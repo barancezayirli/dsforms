@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/token"
 	"io"
 	"maps"
 	"net/http"
@@ -20,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/astcheck"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/go-chi/chi/v5"
 )
@@ -634,14 +634,13 @@ func uploadForms(t *testing.T) []uploadForm {
 // to it, as "TypeName.MethodName".
 func postRoutes(t *testing.T) map[string]string {
 	t.Helper()
-	fset := token.NewFileSet()
-	files := parsePkg(t, fset, ".")
+	_, files := astcheck.Package(t, ".")
 
 	// Handler variable -> type name, from `x := &handler.XHandler{...}`.
 	varType := map[string]string{}
 	for _, f := range files {
-		local := localName(f, handlerPkg)
-		if local == "" {
+		local := astcheck.ImportedAs(f, handlerPkg)
+		if len(local) == 0 {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -662,7 +661,7 @@ func postRoutes(t *testing.T) map[string]string {
 				return true
 			}
 			if sel, ok := lit.Type.(*ast.SelectorExpr); ok {
-				if id, ok := sel.X.(*ast.Ident); ok && id.Name == local {
+				if id, ok := sel.X.(*ast.Ident); ok && local[id.Name] {
 					varType[name.Name] = sel.Sel.Name
 				}
 			}
@@ -713,8 +712,7 @@ func postRoutes(t *testing.T) map[string]string {
 // method reads.
 func formFileNamesByMethod(t *testing.T) map[string]map[string]bool {
 	t.Helper()
-	fset := token.NewFileSet()
-	files := parsePkg(t, fset, "internal/handler")
+	_, files := astcheck.Package(t, "internal/handler")
 
 	out := map[string]map[string]bool{}
 	for _, f := range files {

@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"html/template"
 	"io"
 	"mime/multipart"
@@ -17,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/astcheck"
 	"github.com/barancezayirli/dsforms/internal/auth"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
@@ -314,39 +313,63 @@ func TestBackupImportTellsTheOperatorWhichOutcomeHappened(t *testing.T) {
 func TestUploadIsStagedBesideTheDatabase(t *testing.T) {
 	t.Parallel()
 
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "backup.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parsing backup.go: %v", err)
+	// The detector, so the same predicate the guard runs is the one the fixtures
+	// exercise. Two copies of a matcher is how one of them stops matching.
+	stagesInTheSystemTempDir := func(f *ast.File) bool {
+		bad := false
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) == 0 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "CreateTemp" {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); !ok || id.Name != "os" {
+				return true
+			}
+			if _, ok := call.Args[0].(*ast.BasicLit); ok {
+				bad = true
+			}
+			return true
+		})
+		return bad
 	}
 
-	found := 0
-	ast.Inspect(f, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) == 0 {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "CreateTemp" {
-			return true
-		}
-		if id, ok := sel.X.(*ast.Ident); !ok || id.Name != "os" {
-			return true
-		}
-		found++
-		if lit, ok := call.Args[0].(*ast.BasicLit); ok {
-			t.Errorf("backup.go:%d stages the upload with os.CreateTemp(%s, …).\n"+
-				"An empty or literal directory puts it on the system temp filesystem, "+
-				"while the database lives on the data volume — so the rename that "+
-				"completes the restore fails with EXDEV on every containerized "+
-				"deployment. Stage it beside h.DBPath.",
-				fset.Position(call.Pos()).Line, lit.Value)
-		}
-		return true
-	})
+	astcheck.Detector{
+		Name:  "upload staged on the system temp filesystem",
+		Match: stagesInTheSystemTempDir,
+		Positive: map[string]string{
+			"empty dir means os.TempDir": `package handler
+import "os"
+func f() { os.CreateTemp("", "dsforms-import-*.db") }`,
+			"a literal directory is just as wrong": `package handler
+import "os"
+func f() { os.CreateTemp("/tmp", "dsforms-import-*.db") }`,
+		},
+		Negative: map[string]string{
+			"staged beside the database": `package handler
+import (
+	"os"
+	"path/filepath"
+)
+func f(dbPath string) { os.CreateTemp(filepath.Dir(dbPath), "dsforms-import-*.db") }`,
+			"no CreateTemp at all": `package handler
+func f() {}`,
+		},
+	}.Verify(t)
 
-	if found == 0 {
-		t.Fatal("no os.CreateTemp call found in backup.go; the scan is no longer " +
-			"matching it, so this test asserts nothing")
+	// And the property itself, against the real source.
+	_, files := astcheck.Package(t, ".")
+	src, ok := files["backup.go"]
+	if !ok {
+		t.Fatal("backup.go not found; the scan is no longer reading it")
+	}
+	if stagesInTheSystemTempDir(src) {
+		t.Error("backup.go stages the upload on the system temp filesystem.\n" +
+			"backup.Import finishes with os.Rename, which cannot cross filesystems, " +
+			"and the database lives on the data volume — so the restore fails with " +
+			"EXDEV on every containerized deployment. Stage it beside h.DBPath.")
 	}
 }

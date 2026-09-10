@@ -4,10 +4,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/barancezayirli/dsforms/internal/astcheck"
 )
 
 // flattenQuery renders a string expression as text, replacing identifiers with
@@ -67,17 +68,11 @@ func flattenQuery(n ast.Expr) (string, bool) {
 func TestEverySubmissionReadUsesTheSharedColumnList(t *testing.T) {
 	t.Parallel()
 
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
-	if err != nil {
-		t.Fatalf("parsing package source: %v", err)
-	}
+	fset, files := astcheck.Package(t, ".")
 
 	var inspected int
-	for _, pkg := range pkgs {
-		for path, file := range pkg.Files {
+	for path, file := range files {
+		{
 			ast.Inspect(file, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
@@ -123,4 +118,71 @@ func TestEverySubmissionReadUsesTheSharedColumnList(t *testing.T) {
 			"the way queries are written and is no longer guarding anything", inspected)
 	}
 	t.Logf("inspected %d submission reads", inspected)
+}
+
+// TestFlattenQueryHandlesTheWayQueriesAreWritten is the positive control for the
+// scan above, and it exists because the first version of that scan inspected
+// exactly zero queries.
+//
+// It matched string literals. Every real read in this package is a concatenation
+// — "SELECT " + heldColumns + " FROM …" — so it walked the package, found
+// nothing, reported success, and asserted nothing. A count floor catches that
+// once the floor is right; it cannot catch a flattener that has stopped
+// understanding a shape, because the count simply drops to something that still
+// clears the bar.
+//
+// So the flattener is tested directly, on the shapes queries are actually
+// written in.
+func TestFlattenQueryHandlesTheWayQueriesAreWritten(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		expr string
+		want string
+	}{
+		{"a plain literal", `"SELECT id FROM submissions"`, "SELECT id FROM submissions"},
+		{"the shape every real read uses",
+			`"SELECT " + heldColumns + " FROM submissions WHERE id = ?"`,
+			"SELECT heldColumns FROM submissions WHERE id = ?"},
+		{"a helper call keeps the function name",
+			`"SELECT " + heldColumnsFor("s") + " FROM submissions s"`,
+			"SELECT heldColumnsFor FROM submissions s"},
+		{"several concatenations",
+			`"SELECT " + heldColumns + " FROM submissions" + " WHERE is_held = 1"`,
+			"SELECT heldColumns FROM submissions WHERE is_held = 1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			expr, err := parser.ParseExpr(tc.expr)
+			if err != nil {
+				t.Fatalf("parsing fixture: %v", err)
+			}
+			got, ok := flattenQuery(expr)
+			if !ok {
+				t.Fatalf("flattenQuery refused %s.\nThe scan silently skips what it "+
+					"cannot flatten, so a shape it does not understand is a query it "+
+					"never checks.", tc.expr)
+			}
+			if got != tc.want {
+				t.Errorf("flattenQuery(%s)\n  = %q\n want %q", tc.expr, got, tc.want)
+			}
+		})
+	}
+
+	// The negative half: a non-string expression must be refused rather than
+	// flattened into something that accidentally contains "heldColumns".
+	if _, ok := flattenQuery(mustParseExpr(t, `42`)); ok {
+		t.Error("flattenQuery accepted a non-string expression")
+	}
+}
+
+func mustParseExpr(t *testing.T, src string) ast.Expr {
+	t.Helper()
+	e, err := parser.ParseExpr(src)
+	if err != nil {
+		t.Fatalf("parsing %q: %v", src, err)
+	}
+	return e
 }
