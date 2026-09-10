@@ -367,6 +367,80 @@ threshold of 6 — confirmed firing by dropping the form's threshold to 1, which
 showed exactly those weights. In each case the product was right and the test
 was wrong.
 
+## Eighth pass — driving the UI in a real browser
+
+A full pass through the admin UI in Chrome against a freshly built image and an
+empty database: login, forms, the generated snippet, a cross-origin submission
+from a customer page, the drawer, bulk select and delete, search, quarantine,
+filter rules, waitlists, account, users, backups including a real upload-restore
+round trip, the 404 page, the sidebar toggle and logout. No console errors.
+
+Two things with bad histories here both held up: the drawer closes on **one**
+press of Back, and a restore through the file upload swapped the database,
+reverted post-snapshot data, left no `.rollback` behind and kept the container
+healthy.
+
+Four defects came out of it, none visible from the test suite. Each needed a
+browser or a probe against a running instance.
+
+**Landed: the password minimum the UI has always promised.** `account.html` and
+`users_new.html` said "minimum 12 characters"; the store enforced 8. The Nocturne
+port wrote the markup a day before any minimum existed in code, and when one
+arrived it was a different number — so the two were never in agreement. Raised
+the check to 12 and removed the number from the markup: both hints call
+`minPassword`, and the strength meter in `static/app.js` now reads
+`data-strength-min` instead of keeping its own copy of 12. Prerequisite commit
+collapsed five `template.FuncMap` literals into `handler.TemplateFuncs()`.
+
+**Still open — the other three, with a plan approved and written up:**
+
+- `_redirect` is an open redirect. `determineRedirect` returns the submitter's
+  value verbatim; confirmed live against a running instance. POST-only, so it
+  needs an attacker-hosted auto-submitting form rather than a bare link. The fix
+  is a new `internal/urlsafe` making the operator-configured `Redirect` the trust
+  anchor, and it carries a deliberate upgrade break for anyone who pasted the
+  snippet's `_redirect` without setting the form's own redirect field.
+- The database size figure ignores the WAL. The card read 4.0 KB while the
+  database held 172 KB, all of it in the write-ahead log.
+- Accepted submissions report `score 0`. Score and signals are persisted only on
+  the held path, so the detail drawer prints a number the app never computed for
+  that row.
+
+## What the review round caught, and what it says about the guards
+
+Worth recording because the pattern repeats. The branch's tests were green, and
+the review found the branch did not assert its own central claim:
+
+- **`minPassword` could return `MinPasswordLength - 5` with the whole suite
+  green.** Two structural guards — no literal in the markup, function registered
+  in the map — and neither rendered a page, so neither could notice the number
+  being wrong. Fixed by asserting against the *rendered output* of both real
+  templates, which catches every wording because it checks the value. The
+  mutation now fails on four assertions.
+- **The first duplication guard was a string grep and was evadable four ways**
+  (`make`, a conversion, a type alias, an aliased import). `internal/astcheck`
+  exists in this repo *because* an aliased import defeated a matcher once
+  already, and its package doc says so — writing a second string matcher after
+  that was the mistake the package was extracted to prevent. Rewritten as an
+  `astcheck.Detector` with all four evasions as fixtures.
+- **Both handler-side length checks had no test at all**, and removing one is
+  worse than a no-op: the store's `ErrPasswordTooShort` is not a UNIQUE error, so
+  the handler falls through to a 500. A short password became "internal error"
+  instead of a sentence. Both now tested, and the mutation fails with `status =
+  500`, which is how the consequence was confirmed rather than assumed.
+- **Four sibling tests were passing for the wrong reason** — they used passwords
+  below the minimum and asserted only "an error appeared", so they depended on
+  the *order* of checks in the handler rather than on reaching their own branch.
+  All four now assert the specific sentence.
+- **Three claims in my own comments and commit messages were false**, and git
+  disproved each: the hint had not been there "since the templates were written"
+  (one day, not five months); there was one full duplicate of the FuncMap, not
+  two; and `TestCreateUserBcryptsPassword` was correct on `main` — I broke it
+  while lengthening fixtures and then described fixing my own breakage as
+  finding a pre-existing defect. Corrected in place. A comment that invents
+  history is worse than no comment, because it is the version the next person
+  believes.
+
 ## Accepted risks
 
 | Risk | Why accepted |

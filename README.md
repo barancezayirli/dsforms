@@ -236,7 +236,7 @@ docker compose exec dsforms ./dsforms user list
 docker compose exec dsforms ./dsforms user add alice secretpassword
 
 # Reset a password
-docker compose exec dsforms ./dsforms user set-password admin newpassword
+docker compose exec dsforms ./dsforms user set-password admin a-new-passphrase
 
 # Delete a user
 docker compose exec dsforms ./dsforms user delete alice
@@ -385,8 +385,10 @@ dsforms/
 
 - Session tokens stored as SHA-256 hashes in the database (cookie leak doesn't expose sessions)
 - Password change invalidates all sessions across all devices
-- bcrypt at cost 12 for all passwords, minimum 8 characters (enforced on every
-  path that sets one: the admin form, the account page, and both CLI commands)
+- bcrypt at cost 12 for all passwords, minimum 12 characters — enforced in the
+  store, so it applies to the admin form, the account page and both CLI
+  commands. The one exception is the seeded `admin` / `admin` account, which is
+  written directly and is why the first run warns you to change it.
 - HMAC-SHA256 signed flash cookies
 - Rate limiting on form submissions (per-IP token bucket)
 - Login brute-force protection (5 attempts, 15-minute lockout)

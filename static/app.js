@@ -253,13 +253,20 @@
   }
 
   /* — password strength ————————————————————————————————————————————————
-     Four segments, matching the bcrypt-cost/12-character note beside it. This
-     is advisory only; the server enforces the real minimum. */
-  function scorePassword(v) {
+     Four segments. Advisory only; the server enforces the real minimum.
+
+     The length thresholds come from the field's data-strength-min, which the
+     template renders from store.MinPasswordLength — they used to be the literal
+     12, written to match the note beside the field. That note is now generated
+     from the constant, so a hardcoded 12 here would be the third copy of a
+     number this page has already been wrong about once: the markup claimed a
+     minimum the server did not enforce. A missing attribute falls back to 12,
+     which only affects how many bars light up. */
+  function scorePassword(v, min) {
     if (!v) return 0;
     var score = 0;
-    if (v.length >= 12) score++;
-    if (v.length >= 16) score++;
+    if (v.length >= min) score++;
+    if (v.length >= min + 4) score++;
     if (/[a-z]/.test(v) && /[A-Z]/.test(v)) score++;
     if (/[0-9]/.test(v) || /[^A-Za-z0-9]/.test(v)) score++;
     return Math.min(score, 4);
@@ -335,7 +342,9 @@
     if (!e.target.matches || !e.target.matches('[data-strength]')) return;
     var meter = $(e.target.getAttribute('data-strength'));
     if (!meter) return;
-    var n = scorePassword(e.target.value);
+    var min = parseInt(e.target.getAttribute('data-strength-min'), 10);
+    if (!(min > 0)) min = 12;
+    var n = scorePassword(e.target.value, min);
     $$('span', meter).forEach(function (seg, i) { seg.classList.toggle('on', i < n); });
   });
 
