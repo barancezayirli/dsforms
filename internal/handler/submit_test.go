@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -186,7 +188,18 @@ func TestSubmitNotificationCarriesCreatedAt(t *testing.T) {
 	}
 }
 
-func TestSubmitRedirectOverride(t *testing.T) {
+// TestSubmitRedirectOffOriginRefused is the reproduction for the open redirect.
+//
+// This test used to assert the vulnerability: it posted an off-origin _redirect
+// and required it to come back in the Location header. That is exactly what an
+// attacker needs — a page anywhere can auto-submit a cross-site form to this
+// endpoint and bounce the visitor to a phishing site carrying the trust of the
+// domain they just submitted to.
+//
+// The fixture form's Redirect is https://example.com/thanks, so the submission
+// lands there instead: refused, not failed. The submission itself is stored
+// either way, which the sibling test below pins.
+func TestSubmitRedirectOffOriginRefused(t *testing.T) {
 	t.Parallel()
 	_, _, r := setupSubmit(t)
 	form := url.Values{"name": {"Alice"}, "_redirect": {"https://other.com/done"}}
@@ -197,8 +210,10 @@ func TestSubmitRedirectOverride(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
 	}
-	if loc := w.Header().Get("Location"); loc != "https://other.com/done" {
-		t.Errorf("Location = %q, want https://other.com/done", loc)
+	if loc := w.Header().Get("Location"); loc != "https://example.com/thanks" {
+		t.Errorf("Location = %q, want the form's configured redirect.\n"+
+			"An off-origin _redirect must not reach the Location header — that is "+
+			"the open redirect this exists to close.", loc)
 	}
 }
 
@@ -445,30 +460,6 @@ func TestExtractIPRemoteAddr(t *testing.T) {
 	// httptest sets RemoteAddr to "192.0.2.1:1234"
 	if got := ExtractIP(req); got != "192.0.2.1" {
 		t.Errorf("ExtractIP = %q, want 192.0.2.1", got)
-	}
-}
-
-func TestDetermineRedirectFormValue(t *testing.T) {
-	t.Parallel()
-	got := determineRedirect("https://custom.com", "https://form.com")
-	if got != "https://custom.com" {
-		t.Errorf("determineRedirect = %q, want https://custom.com", got)
-	}
-}
-
-func TestDetermineRedirectFormDefault(t *testing.T) {
-	t.Parallel()
-	got := determineRedirect("", "https://form.com")
-	if got != "https://form.com" {
-		t.Errorf("determineRedirect = %q, want https://form.com", got)
-	}
-}
-
-func TestDetermineRedirectFallback(t *testing.T) {
-	t.Parallel()
-	got := determineRedirect("", "")
-	if got != "/success" {
-		t.Errorf("determineRedirect = %q, want /success", got)
 	}
 }
 
@@ -795,4 +786,201 @@ func TestREADMEDocumentsOnlyFieldsThatExist(t *testing.T) {
 		}
 	}
 	t.Logf("checked %d documented hidden field(s)", len(documented))
+}
+
+// The rest of the redirect rule. Each of these covers a way out of Handle, and
+// the point of having them all is that the old code resolved the destination
+// separately at each one — which is how the honeypot branch kept returning the
+// raw value while the main path was being fixed.
+
+func TestSubmitRedirectSameOriginAllowed(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupSubmit(t)
+	// The fixture form's Redirect is https://example.com/thanks, so the operator
+	// has vouched for that origin and any page on it is fair game. This is the
+	// documented feature the fix has to keep working.
+	form := url.Values{"name": {"Alice"}, "_redirect": {"https://example.com/other-page"}}
+	w := postSubmit(r, form, "")
+	if loc := w.Header().Get("Location"); loc != "https://example.com/other-page" {
+		t.Errorf("Location = %q, want the requested page on the configured origin", loc)
+	}
+}
+
+func TestSubmitRedirectRelativeAllowed(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupSubmit(t)
+	w := postSubmit(r, url.Values{"name": {"Alice"}, "_redirect": {"/thanks"}}, "")
+	if loc := w.Header().Get("Location"); loc != "/thanks" {
+		t.Errorf("Location = %q, want /thanks", loc)
+	}
+}
+
+// TestSubmitHoneypotRedirectOffOriginRefused covers the branch a four-call-site
+// fix forgets. A bot filling the honeypot still gets a redirect, and it was the
+// one computed from the raw submitted value.
+func TestSubmitHoneypotRedirectOffOriginRefused(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+	form := url.Values{
+		"name":      {"Bot"},
+		"_honeypot": {"filled"},
+		"_redirect": {"https://evil.example.net/phish"},
+	}
+	w := postSubmit(r, form, "")
+	if loc := w.Header().Get("Location"); loc != "https://example.com/thanks" {
+		t.Errorf("Location = %q, want the configured redirect — the honeypot branch "+
+			"is a separate exit and must apply the same rule", loc)
+	}
+	// Still dropped, not stored: the refusal must not change what the honeypot does.
+	if subs, _ := s.ListSubmissions("test-form"); len(subs) != 0 {
+		t.Errorf("stored %d submissions, want 0 — the honeypot still drops", len(subs))
+	}
+}
+
+// TestSubmitRedirectRefusedStillStoresSubmission asserts the behaviour rather
+// than its absence. Without it, a future "just return 400 on a bad redirect"
+// passes every other test here while throwing away real mail over a query
+// parameter.
+func TestSubmitRedirectRefusedStillStoresSubmission(t *testing.T) {
+	t.Parallel()
+	s, m, r := setupSubmit(t)
+	form := url.Values{
+		"name":      {"Alice"},
+		"email":     {"alice@example.org"},
+		"_redirect": {"https://evil.example.net/phish"},
+	}
+	w := postSubmit(r, form, "")
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302 — a refused destination is not a failed submission", w.Code)
+	}
+	subs, err := s.ListSubmissions("test-form")
+	if err != nil {
+		t.Fatalf("ListSubmissions: %v", err)
+	}
+	if len(subs) != 1 {
+		t.Fatalf("stored %d submissions, want 1 — the submission was lost over its redirect", len(subs))
+	}
+	if subs[0].Data["name"] != "Alice" {
+		t.Errorf("stored name = %q, want Alice", subs[0].Data["name"])
+	}
+	// Delivery is asynchronous, so wait for it rather than sampling.
+	if !m.Wait(2 * time.Second) {
+		t.Error("no notification sent; a refused redirect must not suppress delivery")
+	}
+}
+
+// TestSubmitRedirectJSONUnaffected: the JSON branch never emitted a Location and
+// still must not, refused or otherwise.
+func TestSubmitRedirectJSONUnaffected(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupSubmit(t)
+	form := url.Values{"name": {"Alice"}, "_redirect": {"https://evil.example.net/phish"}}
+	w := postSubmit(r, form, "application/json")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "" {
+		t.Errorf("Location = %q, want no Location header at all on the JSON path", loc)
+	}
+	if body := w.Body.String(); !strings.Contains(body, `"success":true`) {
+		t.Errorf("body = %q, want the success payload", body)
+	}
+}
+
+// TestSubmitRedirectWithNoAnchorsFallsBackToSuccess pins the accepted upgrade
+// break as a decision rather than an accident: a form with no configured
+// Redirect, on an instance with no BASE_URL, accepts relative paths only.
+func TestSubmitRedirectWithNoAnchorsFallsBackToSuccess(t *testing.T) {
+	t.Parallel()
+	s, m, _ := setupSubmit(t)
+	_ = s.CreateForm(store.Form{ID: "bare", Name: "Bare", EmailTo: "t@example.com"})
+	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "", Screener: screen.New(1000)}
+	r := chi.NewRouter()
+	r.Post("/f/{formID}", h.Handle)
+
+	req := httptest.NewRequest("POST", "/f/bare",
+		strings.NewReader(url.Values{"name": {"Alice"}, "_redirect": {"https://customer.example/thanks"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if loc := w.Header().Get("Location"); loc != "/success" {
+		t.Errorf("Location = %q, want /success.\nWith no configured Redirect and no "+
+			"BASE_URL there is no origin anyone vouched for, so an absolute _redirect "+
+			"has nothing to match. This is the upgrade break, recorded deliberately.", loc)
+	}
+}
+
+// TestSubmitRedirectAllowedBySameOriginBaseURL covers the third anchor, and is
+// the first test to make BaseURL a field this handler actually reads.
+func TestSubmitRedirectAllowedBySameOriginBaseURL(t *testing.T) {
+	t.Parallel()
+	s, m, _ := setupSubmit(t)
+	_ = s.CreateForm(store.Form{ID: "bare", Name: "Bare", EmailTo: "t@example.com"})
+	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://forms.example.com", Screener: screen.New(1000)}
+	r := chi.NewRouter()
+	r.Post("/f/{formID}", h.Handle)
+
+	req := httptest.NewRequest("POST", "/f/bare",
+		strings.NewReader(url.Values{"name": {"Alice"}, "_redirect": {"https://forms.example.com/thanks"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if loc := w.Header().Get("Location"); loc != "https://forms.example.com/thanks" {
+		t.Errorf("Location = %q, want the requested page on this instance's own origin", loc)
+	}
+}
+
+// postSubmit posts a form to the test-form endpoint.
+func postSubmit(r *chi.Mux, form url.Values, accept string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// TestRefusedRedirectLogsTheOriginAndNotThePath enforces a rule the code states
+// three times and nothing checked.
+//
+// urlsafe.Origin strips the path, and TestOriginNeverLeaksThePath pins that. But
+// nothing pinned that the call site uses it: changing redirectTarget to log the
+// raw requested value writes the full submitter-supplied URL, query and all,
+// into the log — and the whole suite stayed green. A redirect can carry a
+// tracking token or an email address, and this repo's rule is that
+// submission-adjacent values do not enter logs.
+func TestRefusedRedirectLogsTheOriginAndNotThePath(t *testing.T) {
+	// Not parallel: it swaps the global log output.
+	_, _, r := setupSubmit(t)
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	const secret = "tracking-token-9f83a"
+	form := url.Values{
+		"name":      {"Alice"},
+		"_redirect": {"https://evil.example.net/landing?token=" + secret},
+	}
+	postSubmit(r, form, "")
+
+	logged := buf.String()
+	if !strings.Contains(logged, "refused off-origin _redirect") {
+		t.Fatalf("no refusal was logged; an operator has nothing to correlate against.\ngot:\n%s", logged)
+	}
+	if !strings.Contains(logged, "https://evil.example.net") {
+		t.Errorf("the refusal does not name the origin that was refused.\ngot:\n%s", logged)
+	}
+	if strings.Contains(logged, secret) {
+		t.Errorf("the log line contains the redirect's query string (%q).\n"+
+			"Refusals log the origin only — a redirect URL can carry a token or an "+
+			"address, and those do not go into logs.\ngot:\n%s", secret, logged)
+	}
+	if strings.Contains(logged, "/landing") {
+		t.Errorf("the log line contains the redirect's path.\ngot:\n%s", logged)
+	}
 }

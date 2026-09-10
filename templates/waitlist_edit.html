@@ -22,6 +22,7 @@
         <label class="field">
           <span>Redirect after signup</span>
           <input class="input" name="redirect" value="{{.Waitlist.Redirect}}" placeholder="https://yoursite.com/joined">
+          <span class="form-hint">If this is a full URL, it is also the allowlist for <code>_redirect</code>: any page on that origin is accepted.</span>
         </label>
         <label class="field">
           <span>Confirmation subject</span>
@@ -50,9 +51,11 @@
 
   &lt;!-- left empty by people, filled by bots --&gt;
   &lt;input type="text" name="_honeypot" style="display:none" tabindex="-1"&gt;
-
+{{if .Waitlist.Redirect}}  &lt;input type="hidden" name="_redirect" value="{{.Waitlist.Redirect}}"&gt;
+{{end}}
   &lt;button type="submit"&gt;Join&lt;/button&gt;
-&lt;/form&gt;</pre>
+&lt;/form&gt;</pre>{{if not .Waitlist.Redirect}}
+        <div class="form-hint" style="margin-top:6px">Set a redirect above to use <code>_redirect</code> from your own site.</div>{{end}}
       <button class="btn btn-ghost" type="button" data-copy="#wl-snippet" style="margin-top:6px">
         <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">Copy snippet</span>
       </button>

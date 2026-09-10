@@ -407,19 +407,39 @@ green. There is a rendered-page test now. It also caught that my justification
 for excluding `-shm` ("a fixed size would dominate a small database") applies to
 the WAL itself at 128x the scale — the fix was right, the reasoning was not.
 
-**Still open — the other two, with a plan approved and written up:**
+**Landed: the open redirect is closed.** `_redirect` was returned verbatim in a
+Location header. The rule now is that the operator-configured `Redirect` is the
+trust anchor — a submitter picks a page, within an origin an operator vouched
+for — plus relative paths and `BASE_URL`. New leaf package `internal/urlsafe`,
+which also absorbed the webhook check that was inlined twice. Accepted upgrade
+break: a form with no configured Redirect on an instance with no `BASE_URL` now
+sends visitors to `/success` instead of an absolute `_redirect`.
 
-- `_redirect` is an open redirect. `determineRedirect` returns the submitter's
-  value verbatim; confirmed live against a running instance. POST-only, so it
-  needs an attacker-hosted auto-submitting form rather than a bare link. The fix
-  is a new `internal/urlsafe` making the operator-configured `Redirect` the trust
-  anchor, and it carries a deliberate upgrade break for anyone who pasted the
-  snippet's `_redirect` without setting the form's own redirect field.
+The first version of that fix did not work, and review is what found it:
+`/../\evil.example.net` passed the check and reached the browser as
+`/\evil.example.net`, because `net/http` runs `path.Clean` over a relative
+Location and that promotes the backslash to the front. The guard was validating
+the string that arrived rather than the string that would be sent. Writing the
+regression as a property over the *emitted* form then found a second bypass
+review had cleared as safe — `/%5c%5cevil.example.net`, where `url.Parse`
+decodes the escape into a backslash. And getting the property right took one
+more correction: both the first attempt and the review's suggested fix used
+`EscapedPath()`, which renders a backslash as `%5C`, so the check could not see
+the character it existed for and passed against the live bug. `http.Redirect`
+cleans `u.Path`. Measured against a real Location header, then pinned.
+
+Second hole from the same review: the *fallback* was never validated. A row
+stored before the write-side check existed — nothing backfilled them — was
+handed to the browser verbatim, including on the path where a hostile
+`_redirect` had just been refused.
+
+**Still open — one, with a plan approved and written up:**
+
 - Accepted submissions report `score 0`. Score and signals are persisted only on
   the held path, so the detail drawer prints a number the app never computed for
   that row.
 
-## What the review round caught, and what it says about the guards
+## What the review rounds caught, and what it says about guards
 
 Worth recording because the pattern repeats. The branch's tests were green, and
 the review found the branch did not assert its own central claim:

@@ -12,6 +12,7 @@ import (
 	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/urlsafe"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -122,11 +123,13 @@ var internalFields = map[string]bool{
 // Flow:
 //  1. Look up form by ID → 404 if missing
 //  2. Parse form body
-//  3. Honeypot: if _honeypot non-empty → silently succeed without saving
+//  3. Resolve the redirect once, before anything else can exit (see
+//     redirectTarget), then honeypot: if _honeypot non-empty → silently
+//     succeed without saving
 //  4. Filter internal fields, build data map
 //  5. Validate: data map must have ≥1 key → else 400
 //  6. Validate: an "email" field, if present, must be a well-formed address → else 400
-//  7. Determine redirect: _redirect > form.Redirect > /success; extract client IP
+//  7. (redirect already resolved at step 3) extract client IP
 //  8. Filter rules: allow → accept and skip scoring; block → hold on arrival
 //  9. Otherwise score, plus repeat-IP; at or above the effective threshold → hold
 //  10. Held submissions are stored with their breakdown and notify nobody
@@ -156,6 +159,12 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolved once, above the honeypot branch, so every way out of this handler
+	// uses the same vetted destination. Computing it per branch is what let the
+	// honeypot path keep returning the raw value.
+	ip := ExtractIP(r)
+	redirectURL := redirectTarget(r, "submit: form "+formID, form.Redirect, h.BaseURL, ip)
+
 	// Honeypot — drop without storing, but leave a trace.
 	//
 	// This is the one drop left in this handler; everything else is now held for
@@ -166,8 +175,8 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// submitted and never heard back, there is something to correlate against.
 	// Field values are never logged, here or anywhere else in this file.
 	if r.FormValue("_honeypot") != "" {
-		log.Printf("submit: dropped submission for form %s from %s (honeypot)", formID, ExtractIP(r))
-		respondSuccess(w, r, formID, determineRedirect(r.FormValue("_redirect"), form.Redirect))
+		log.Printf("submit: dropped submission for form %s from %s (honeypot)", formID, ip)
+		respondSuccess(w, r, formID, redirectURL)
 		return
 	}
 
@@ -196,9 +205,6 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid email", http.StatusBadRequest)
 		return
 	}
-
-	redirectURL := determineRedirect(r.FormValue("_redirect"), form.Redirect)
-	ip := ExtractIP(r)
 
 	// Operator overrides beat the scorer in both directions. A failure to read
 	// them is not fatal: fall through to scoring rather than refusing the
@@ -326,16 +332,29 @@ func respondSuccess(w http.ResponseWriter, r *http.Request, formID, redirectURL 
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
-// determineRedirect returns the redirect URL in priority order:
-// formValue (_redirect field) > formDefault (form.Redirect) > "/success".
-func determineRedirect(formValue, formDefault string) string {
-	if formValue != "" {
-		return formValue
+// redirectTarget resolves where to send the browser, refusing a _redirect that
+// names an origin no operator vouched for.
+//
+// This is the only place in the package that reads the _redirect field, and
+// TestNoRawRedirectFieldRead keeps it that way. The previous version,
+// determineRedirect, returned the submitted value verbatim from four call sites
+// — two in this file and two in waitlist_submit.go — and a fix applied at four
+// call sites is a fix that misses one. Two of those four were honeypot branches,
+// the likeliest to be missed: they read as drops rather than as redirects.
+//
+// ctx is a log prefix such as "submit: form abc123". A refusal is logged once,
+// with the origin only: a redirect URL can carry a token or an address in its
+// query, and submission-adjacent values do not go into logs here. The message
+// names the remedy, because the operator's next question is why their
+// thank-you page stopped working.
+func redirectTarget(r *http.Request, ctx, configured, baseURL, ip string) string {
+	requested := r.FormValue("_redirect")
+	target, refused := urlsafe.Redirect(requested, configured, baseURL)
+	if refused {
+		log.Printf("%s: refused off-origin _redirect to %s from %s; set this form's "+
+			"Redirect to that origin to allow it", ctx, urlsafe.Origin(requested), ip)
 	}
-	if formDefault != "" {
-		return formDefault
-	}
-	return "/success"
+	return target
 }
 
 // ExtractIP returns the client IP address from the request.

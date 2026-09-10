@@ -190,3 +190,100 @@ func TestSubstituteVarsNoTemplateInjection(t *testing.T) {
 		t.Errorf("substituteVars should not recursively expand injected tokens; got %q", got)
 	}
 }
+
+// The waitlist honours _redirect and had no test for it at all, in either
+// branch. Both exits are covered here because both call http.Redirect directly
+// rather than going through submit.go's respondSuccess.
+
+func TestWaitlistSubmitRedirectOffOriginRefused(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupWaitlistSubmit(t)
+	form := url.Values{"email": {"a@example.org"}, "_redirect": {"https://evil.example.net/phish"}}
+	w := postWaitlist(r, "wl", form, "")
+	loc := w.Header().Get("Location")
+	if strings.Contains(loc, "evil.example.net") {
+		t.Fatalf("Location = %q — an off-origin _redirect reached the Location header", loc)
+	}
+	// Equality, not HasPrefix: the success path appends ?position=N, so the whole
+	// value is knowable and a prefix check would accept a fallback that had grown
+	// something else on the end.
+	if want := "https://example.com/joined?position=1"; loc != want {
+		t.Errorf("Location = %q, want %q", loc, want)
+	}
+}
+
+func TestWaitlistSubmitHoneypotRedirectOffOriginRefused(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupWaitlistSubmit(t)
+	form := url.Values{
+		"email":     {"bot@example.org"},
+		"_honeypot": {"filled"},
+		"_redirect": {"https://evil.example.net/phish"},
+	}
+	w := postWaitlist(r, "wl", form, "")
+	if loc := w.Header().Get("Location"); loc != "https://example.com/joined" {
+		t.Errorf("Location = %q, want the configured redirect — the honeypot branch "+
+			"calls http.Redirect on its own and needs the same rule", loc)
+	}
+}
+
+// TestWaitlistSubmitRedirectSameOriginKeepsPosition pins the ordering: the trust
+// check runs first and appendPosition decorates a destination already vetted.
+// Reversed, appendPosition would be parsing an attacker-supplied URL.
+func TestWaitlistSubmitRedirectSameOriginKeepsPosition(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupWaitlistSubmit(t)
+	form := url.Values{"email": {"a@example.org"}, "_redirect": {"https://example.com/welcome"}}
+	w := postWaitlist(r, "wl", form, "")
+	loc := w.Header().Get("Location")
+	if !strings.HasPrefix(loc, "https://example.com/welcome") {
+		t.Errorf("Location = %q, want the requested page on the configured origin", loc)
+	}
+	if !strings.Contains(loc, "position=1") {
+		t.Errorf("Location = %q, want the position appended to an allowed redirect", loc)
+	}
+}
+
+// TestWaitlistSubmitRedirectRefusedStillStoresEntry is the waitlist's version of
+// the form-side test, and exists for the same reason: the three tests above
+// assert only the Location header, so a future "reject the request on a bad
+// _redirect" would drop the signup while they all still passed.
+func TestWaitlistSubmitRedirectRefusedStillStoresEntry(t *testing.T) {
+	t.Parallel()
+	s, m, r := setupWaitlistSubmit(t)
+	form := url.Values{"email": {"a@example.org"}, "_redirect": {"https://evil.example.net/phish"}}
+	w := postWaitlist(r, "wl", form, "")
+
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302 — a refused destination is not a failed signup", w.Code)
+	}
+	entries, err := s.ListEntries("wl")
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("stored %d entries, want 1 — the signup was lost over its redirect", len(entries))
+	}
+	if entries[0].Email != "a@example.org" {
+		t.Errorf("stored email = %q, want a@example.org", entries[0].Email)
+	}
+	if !m.Wait(2 * time.Second) {
+		t.Error("no confirmation sent; a refused redirect must not suppress it")
+	}
+}
+
+// TestWaitlistSubmitRedirectJSONUnaffected mirrors the form-side JSON test: this
+// branch never emitted a Location and still must not.
+func TestWaitlistSubmitRedirectJSONUnaffected(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupWaitlistSubmit(t)
+	form := url.Values{"email": {"a@example.org"}, "_redirect": {"https://evil.example.net/phish"}}
+	w := postWaitlist(r, "wl", form, "application/json")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "" {
+		t.Errorf("Location = %q, want no Location header at all on the JSON path", loc)
+	}
+}

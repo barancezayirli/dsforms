@@ -834,3 +834,68 @@ func TestCreateFormWebhookInvalidURL(t *testing.T) {
 		t.Error("expected validation error message")
 	}
 }
+
+// The Redirect field is stored with no validation at all, and a typo in it is
+// silent twice over: the redirect itself stops working, and — since it is the
+// allowlist for _redirect — every _redirect on that form starts falling back
+// with no visible cause. These reject the shapes that cannot be a destination.
+//
+// Deliberately not a check on which origin: the operator is the trust anchor,
+// and an instance that second-guesses its own administrator has no anchor left.
+
+func TestCreateFormRejectsUnusableRedirect(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{"htp://customer.example/thanks", "customer.example/thanks", "javascript:alert(1)"} {
+		t.Run(bad, func(t *testing.T) {
+			t.Parallel()
+			s, r := setupAdmin(t)
+			form := url.Values{"name": {"Test"}, "redirect": {bad}}
+			w := doAdminRequest(t, s, r, "POST", "/admin/forms/new", form.Encode())
+			if w.Code != http.StatusOK {
+				t.Errorf("status = %d, want 200 (re-render with the reason)", w.Code)
+			}
+			if !strings.Contains(w.Body.String(), "Redirect must be") {
+				t.Errorf("page did not explain the redirect problem; got:\n%s", w.Body.String())
+			}
+			if forms, _ := s.ListForms(); len(forms) != 0 {
+				t.Errorf("stored %d forms, want 0 — nothing should be created", len(forms))
+			}
+		})
+	}
+}
+
+func TestCreateFormAcceptsUsableRedirects(t *testing.T) {
+	t.Parallel()
+	for _, ok := range []string{"", "/thanks", "https://customer.example/thanks", "http://customer.example/thanks"} {
+		t.Run(ok, func(t *testing.T) {
+			t.Parallel()
+			s, r := setupAdmin(t)
+			form := url.Values{"name": {"Test"}, "redirect": {ok}}
+			w := doAdminRequest(t, s, r, "POST", "/admin/forms/new", form.Encode())
+			if w.Code != http.StatusFound {
+				t.Errorf("status = %d, want 302 — %q is a usable redirect", w.Code, ok)
+			}
+		})
+	}
+}
+
+func TestEditFormRejectsUnusableRedirect(t *testing.T) {
+	t.Parallel()
+	s, r := setupAdmin(t)
+	_ = s.CreateForm(store.Form{ID: "f1", Name: "Test", EmailTo: "t@example.com", Redirect: "https://customer.example/thanks"})
+
+	form := url.Values{"name": {"Test"}, "redirect": {"htp://customer.example/thanks"}}
+	w := doAdminRequest(t, s, r, "POST", "/admin/forms/f1/edit", form.Encode())
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render with the reason)", w.Code)
+	}
+	// The stored value must be untouched, not half-written.
+	got, err := s.GetForm("f1")
+	if err != nil {
+		t.Fatalf("GetForm: %v", err)
+	}
+	if got.Redirect != "https://customer.example/thanks" {
+		t.Errorf("stored redirect = %q, want the original — a rejected edit must not "+
+			"overwrite the working value", got.Redirect)
+	}
+}

@@ -113,12 +113,14 @@ func populatedPageData() map[string]any {
 		CreatedAt: time.Now(),
 	}
 	form := store.Form{ID: "f1", Name: "Contact", EmailTo: "me@example.com",
+		Redirect:   "https://customer.example/thanks",
 		WebhookURL: "https://hooks.example.com/x", WebhookFormat: "generic", SpamThreshold: 6}
 	signals := []store.SpamSignal{
 		{Check: screen.CheckMarkup, Field: "message", Match: "[url=", Weight: 6},
 		{Check: screen.CheckKeyword, Field: "message", Match: "backlinks", Weight: 5},
 	}
-	wl := store.Waitlist{ID: "w1", Name: "Launch", ConfirmSubject: "Welcome"}
+	wl := store.Waitlist{ID: "w1", Name: "Launch", ConfirmSubject: "Welcome",
+		Redirect: "https://customer.example/joined"}
 	// Every field the shell can carry is set. Leaving one at its zero value
 	// silently skips a {{if}} in base.html, which is the failure this whole test
 	// exists to catch: Query unset meant search.html rendered its empty state and
@@ -439,4 +441,59 @@ type nilNavCounter struct{}
 
 func (n *nilNavCounter) NavCounts() (store.NavCounts, error) {
 	return store.NavCounts{}, nil
+}
+
+// TestEmbedSnippetsRedirectToTheConfiguredOrigin is the sibling of the honeypot
+// guard above, and exists for the same reason one layer down.
+//
+// form_edit.html shipped `_redirect` hardcoded to https://yoursite.com/thanks —
+// a literal placeholder, not derived from anything. Anyone pasting the snippet
+// unedited posted a redirect to a domain they did not own, and after the
+// origin rule landed, one the instance refuses. A snippet that hands out a value
+// the server will reject is worse than a snippet with no value at all.
+//
+// The property: a snippet may carry _redirect, but its value must come from a
+// template action, never a literal.
+func TestEmbedSnippetsRedirectToTheConfiguredOrigin(t *testing.T) {
+	t.Parallel()
+
+	entries, err := os.ReadDir(templateDir)
+	if err != nil {
+		t.Fatalf("read templates dir: %v", err)
+	}
+
+	snippet := regexp.MustCompile(`(?s)<pre[^>]*>.*?</pre>`)
+	postsToUs := regexp.MustCompile(`&lt;form method="POST" action="\{\{\.BaseURL\}\}`)
+	redirectInput := regexp.MustCompile(`name="_redirect" value="([^"]*)"`)
+
+	checked := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(templateDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, block := range snippet.FindAllString(string(body), -1) {
+			if !postsToUs.MatchString(block) {
+				continue
+			}
+			checked++
+			for _, m := range redirectInput.FindAllStringSubmatch(block, -1) {
+				if !strings.Contains(m[1], "{{") {
+					t.Errorf("%s hands out a snippet with a literal _redirect value %q.\n"+
+						"It must come from the form's or waitlist's configured Redirect — a "+
+						"pasted literal names an origin the operator does not own, and the "+
+						"server refuses it.", e.Name(), m[1])
+				}
+			}
+		}
+	}
+
+	// The denominator, matching the honeypot guard beside it: two snippets exist.
+	if checked < 2 {
+		t.Fatalf("inspected %d snippets, want at least 2; the snippet regex has "+
+			"stopped matching and this guard is checking nothing", checked)
+	}
 }
