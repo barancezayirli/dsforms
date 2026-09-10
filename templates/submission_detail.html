@@ -105,10 +105,10 @@
       <use href="#ph-{{if .Signals}}shield-warning{{else}}shield-check{{end}}"/>
     </svg>
     <span style="font-size:13px">
-      {{if .Signals}}Was held, then restored{{else}}Spam check passed{{end}}
+      {{if .SignalsFailed}}Spam check unavailable{{else if .Signals}}Was held, then restored{{else}}Spam check passed{{end}}
     </span>
     <span class="tag tag-outline tag-sm" style="margin-left:auto">
-      score {{.Submission.SpamScore}}{{if .Submission.HeldThreshold}} / {{.Submission.HeldThreshold}}{{end}}
+      {{if or .Submission.SpamScore .Submission.HeldThreshold}}score {{.Submission.SpamScore}}{{if .Submission.HeldThreshold}} / {{.Submission.HeldThreshold}}{{end}}{{else}}score not recorded{{end}}
     </span>
   </div>
   {{if .SignalsFailed}}
@@ -118,7 +118,12 @@
   </div>
   {{end}}
 
-  {{if .Signals}}
+  {{if .SignalsFailed}}
+  {{/* Say nothing else. The read failed, so every other sentence in this panel
+       would be a claim about evidence we could not load — and one of them said
+       "Scored below the threshold, so it was delivered" beside a notice saying
+       the submission had been held, above a score above the threshold. */}}
+  {{else if .Signals}}
   <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
     {{range .Signals}}
     <div class="rule-box">
@@ -134,6 +139,11 @@
     </div>
     {{end}}
   </div>
+  {{else if not .Submission.HeldThreshold}}
+  <div class="dim" style="font-size:12px;margin-top:5px">
+    Received before scores were recorded, so there is nothing to show. New
+    submissions carry theirs.
+  </div>
   {{else if .Submission.SpamScore}}
   <div class="dim" style="font-size:12px;margin-top:5px">
     Scored below the threshold, so it was delivered. The breakdown is kept only
@@ -141,7 +151,7 @@
   </div>
   {{else}}
   <div class="dim" style="font-size:12px;margin-top:5px">
-    No link markup, keywords, injection probes or repeat-IP activity.
+    Nothing scored against this submission.
   </div>
   {{end}}
 </div>

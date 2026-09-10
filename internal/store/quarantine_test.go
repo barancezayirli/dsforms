@@ -409,6 +409,23 @@ func TestUpgradeFromPreQuarantineSchema(t *testing.T) {
 	if len(held) != 1 {
 		t.Fatalf("got %d held after upgrade, want 1", len(held))
 	}
+	// The accepted-path write, on an upgraded database. This function was widened
+	// from five columns to seven, and the columns it gained come from the ALTER
+	// pass on an existing database rather than from the CREATE — which is exactly
+	// the difference this test exists to cover, and the path it did not exercise.
+	if err := s.CreateSubmission(Submission{
+		ID: "upgraded-accepted", FormID: "f1", RawData: `{"name":"Ana"}`,
+		SpamScore: 3, HeldThreshold: 6,
+	}); err != nil {
+		t.Fatalf("CreateSubmission on an upgraded database: %v", err)
+	}
+	if got, err := s.GetSubmission("upgraded-accepted"); err != nil {
+		t.Fatalf("GetSubmission: %v", err)
+	} else if got.SpamScore != 3 || got.HeldThreshold != 6 {
+		t.Errorf("upgraded row: SpamScore=%d HeldThreshold=%d, want 3 and 6",
+			got.SpamScore, got.HeldThreshold)
+	}
+
 }
 
 func TestNeighbours(t *testing.T) {

@@ -186,20 +186,26 @@ func TestBackupsPageRendersTheMeasuredSize(t *testing.T) {
 	}
 }
 
-// TestSubmissionPanelDistinguishesThreeStates renders the spam-check panel for
-// each state it can be in.
+// TestSubmissionPanelStatesAreEachTrue renders the spam-check panel in every
+// state it can be in and checks that none of them says something false.
 //
-// The panel had two branches and three meanings. "Was held, then restored" shows
-// when signal rows exist; everything else fell to "Spam check passed" beside
-// "score 0" and the sentence "No link markup, keywords, injection probes or
-// repeat-IP activity" — which is simply false for a submission that scored 3 and
-// was delivered anyway.
+// The panel had two branches and five meanings. "Was held, then restored" showed
+// when signal rows existed; everything else fell to "Spam check passed" beside
+// "score 0" and "No link markup, keywords, injection probes or repeat-IP
+// activity" — which is simply false about a submission that scored 3 and was
+// delivered anyway.
 //
-// It is asserted against the rendered output rather than the struct because the
-// two previous branches in this session both shipped a fix that was correct in
-// the function and invisible on the page. The store test says the number is
-// right; this says the operator sees it.
-func TestSubmissionPanelDistinguishesThreeStates(t *testing.T) {
+// Adding a third branch introduced a worse one, which review caught: a restored
+// submission whose breakdown could not be READ has no signals, so it fell
+// through to "Scored below the threshold, so it was delivered" — printed beside
+// a notice saying the submission had been held, above a score above the
+// threshold. Three contradictory claims in one panel. AGENT.md §4: an inaccurate
+// message is worse than a generic one.
+//
+// Asserted against rendered output rather than struct state, because the
+// branches in this session repeatedly shipped fixes that were right in the
+// function and invisible on the page.
+func TestSubmissionPanelStatesAreEachTrue(t *testing.T) {
 	t.Parallel()
 
 	base := populatedPageData()["submission_detail.html"]
@@ -217,56 +223,103 @@ func TestSubmissionPanelDistinguishesThreeStates(t *testing.T) {
 		return buf.String()
 	}
 
-	t.Run("held then restored", func(t *testing.T) {
-		t.Parallel()
-		body := render(t, data) // the fixture carries signals
-		if !strings.Contains(body, "Was held, then restored") {
-			t.Error("a submission with a stored breakdown must say it was restored")
-		}
-	})
+	// The claims the panel can make. Every state must produce exactly the ones
+	// that are true of it — listing the forbidden ones is the half that catches a
+	// branch falling through to the wrong text.
+	const (
+		restored  = "Was held, then restored"
+		delivered = "Scored below the threshold"
+		clean     = "Nothing scored against this submission"
+		legacy    = "Received before scores were recorded"
+		unusable  = "Spam check unavailable"
+	)
 
-	t.Run("passed, but scored something", func(t *testing.T) {
-		t.Parallel()
-		d := data
-		d.Signals = nil
-		d.Submission.SpamScore = 3
-		d.Submission.HeldThreshold = 6
-		body := render(t, d)
+	cases := []struct {
+		name       string
+		mutate     func(*submissionDetailData)
+		want       []string
+		mustNotSay []string
+	}{
+		{
+			name:       "held, then restored",
+			mutate:     func(d *submissionDetailData) {}, // the fixture carries signals
+			want:       []string{restored, "score 11"},
+			mustNotSay: []string{delivered, clean, legacy, unusable},
+		},
+		{
+			name: "delivered, but it scored something",
+			mutate: func(d *submissionDetailData) {
+				d.Signals = nil
+				d.Submission.SpamScore = 3
+				d.Submission.HeldThreshold = 6
+			},
+			want:       []string{delivered, "score 3 / 6"},
+			mustNotSay: []string{restored, clean, legacy, unusable},
+		},
+		{
+			name: "genuinely clean",
+			mutate: func(d *submissionDetailData) {
+				d.Signals = nil
+				d.Submission.SpamScore = 0
+				// A real bar, not zero: every accepted submission is judged
+				// against a clamped threshold, so held_threshold = 0 is a row the
+				// fixed code cannot write. A fixture in a state production cannot
+				// reach lets a one-word slip pass — branching on HeldThreshold
+				// rather than SpamScore would put "Scored below the threshold"
+				// under every clean submission.
+				d.Submission.HeldThreshold = 6
+			},
+			want:       []string{clean, "score 0 / 6"},
+			mustNotSay: []string{restored, delivered, legacy, unusable},
+		},
+		{
+			name: "received before scores were recorded",
+			mutate: func(d *submissionDetailData) {
+				d.Signals = nil
+				d.Submission.SpamScore = 0
+				d.Submission.HeldThreshold = 0
+			},
+			// The rows already in every existing database. The fix is not
+			// retroactive — the score was never kept, so it cannot be recovered —
+			// and "score 0" plus "nothing was detected" would be the same lie this
+			// change removes, told about the rows that still have it.
+			want:       []string{legacy, "score not recorded"},
+			mustNotSay: []string{restored, delivered, clean, unusable, "score 0"},
+		},
+		{
+			name: "the breakdown could not be read",
+			mutate: func(d *submissionDetailData) {
+				d.Signals = nil
+				d.SignalsFailed = true
+				d.Submission.SpamScore = 11
+				d.Submission.HeldThreshold = 6
+			},
+			want: []string{unusable, "could not be read"},
+			// Every other sentence would be a claim about evidence that failed to
+			// load. "Scored below the threshold" was printed here, for a score of
+			// 11 against a threshold of 6.
+			mustNotSay: []string{restored, delivered, clean, legacy},
+		},
+	}
 
-		if !strings.Contains(body, "score 3 / 6") {
-			t.Error("the panel does not show the real score against its threshold")
-		}
-		if strings.Contains(body, "No link markup") {
-			t.Error("the panel claims nothing was detected, for a submission that " +
-				"scored 3. That sentence is only true at zero.")
-		}
-		if !strings.Contains(body, "Scored below the threshold") {
-			t.Error("the panel does not explain why a scoring submission was delivered")
-		}
-		if strings.Contains(body, "Was held, then restored") {
-			t.Error("a submission with a score but no stored breakdown was never " +
-				"held; saying so would be a worse claim than the one being fixed")
-		}
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := data
+			tc.mutate(&d)
+			body := render(t, d)
 
-	t.Run("genuinely clean", func(t *testing.T) {
-		t.Parallel()
-		d := data
-		d.Signals = nil
-		d.Submission.SpamScore = 0
-		// A real bar, not zero. Every accepted submission is judged against a
-		// clamped threshold, so held_threshold = 0 is a row the fixed code cannot
-		// write — and a fixture in a state production cannot reach lets a
-		// one-word slip pass: branching on HeldThreshold instead of SpamScore
-		// would put "Scored below the threshold" under every clean submission.
-		d.Submission.HeldThreshold = 6
-		body := render(t, d)
-
-		if !strings.Contains(body, "No link markup") {
-			t.Error("a submission that really scored nothing should say so plainly")
-		}
-		if strings.Contains(body, "Scored below the threshold") {
-			t.Error("a zero-scoring submission did not score below anything")
-		}
-	})
+			for _, want := range tc.want {
+				if !strings.Contains(body, want) {
+					t.Errorf("panel does not say %q, which is true of this submission", want)
+				}
+			}
+			for _, forbidden := range tc.mustNotSay {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("panel says %q, which is not true of this submission.\n"+
+						"An inaccurate message is worse than a generic one.", forbidden)
+				}
+			}
+		})
+	}
 }

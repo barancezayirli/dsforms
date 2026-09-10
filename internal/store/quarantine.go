@@ -161,11 +161,13 @@ func (s *Store) querySubmissions(what, query string, args ...any) ([]Submission,
 // notification was withheld and still owes sending.
 //
 // score and threshold come from the parameters, and sub.SpamScore /
-// sub.HeldThreshold are ignored. That asymmetry exists because Submission is
-// both a read result and a write argument: reads populate every column, writes
-// legitimately pass zeros. Passing a populated Submission here and expecting
-// its own fields to win would silently store the parameters instead — so the
-// parameters are the only input, and this comment is the warning.
+// sub.HeldThreshold are ignored. That is now the opposite of its sibling:
+// CreateSubmission writes those two fields straight from the struct, because an
+// accepted submission has a real score and the reader was printing zero for it.
+// Two writers, the same two fields, opposite conventions — nothing in the types
+// says which, so passing a populated Submission here silently stores the
+// parameters instead. This comment is the warning, and the reason the struct's
+// own doc names both rules in one place.
 func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signals []SpamSignal) error {
 	raw := sub.RawData
 	if raw == "" {

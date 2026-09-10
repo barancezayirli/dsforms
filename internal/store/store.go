@@ -119,9 +119,12 @@ type Submission struct {
 	// the database says scored 11. That exact mismatch shipped once already.
 	// Notified likewise defaults to 1 in the schema, so a partial read claims an
 	// accepted submission was never notified.
-	IsHeld        bool
-	SpamScore     int
-	HeldThreshold int // the threshold actually applied when it was held
+	IsHeld    bool
+	SpamScore int
+	// HeldThreshold is the threshold actually applied, whether or not the
+	// submission was held — an accepted one is judged against a bar too, and the
+	// reader shows the score against it.
+	HeldThreshold int
 	Notified      bool
 }
 
@@ -816,11 +819,16 @@ func (s *Store) CreateSubmission(sub Submission) error {
 		createdAt = time.Now()
 	}
 	// SpamScore and HeldThreshold are written from the struct rather than taken
-	// as parameters, which is what CreateHeldSubmission does. The alternative
-	// would change a signature with sixty-odd call sites, almost all fixtures
-	// that legitimately pass zero — and the struct already carries both fields
-	// for reads. Writing them here is what makes them mean the same thing in
-	// both directions.
+	// as parameters, which is what CreateHeldSubmission does. This function has
+	// one production caller and a long tail of test fixtures that legitimately
+	// pass zero, so a signature change would be almost entirely churn — and the
+	// struct already carries both fields for reads. Writing them here is what
+	// makes them mean the same thing in both directions.
+	//
+	// The cost is that the two writers now honour the same fields under opposite
+	// conventions: this one reads sub.SpamScore, CreateHeldSubmission takes it as
+	// a parameter and ignores the field. Nothing in the types says so, which is
+	// why both doc comments do.
 	_, err := s.conn().Exec(
 		"INSERT INTO submissions (id, form_id, data, ip, created_at, spam_score, held_threshold) "+
 			"VALUES (?, ?, ?, ?, ?, ?, ?)",
