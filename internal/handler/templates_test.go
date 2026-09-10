@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -322,4 +323,59 @@ func TestRealTemplatesCoverEveryPage(t *testing.T) {
 		}
 		t.Errorf("templates/%s is not covered by basePageNames — add it with its data struct", e.Name())
 	}
+}
+
+// TestEmbedSnippetsCarryTheHoneypot guards the copy-paste snippets the admin
+// hands out.
+//
+// waitlist_edit.html offered a snippet with no _honeypot while
+// waitlist_submit.go reads one, and the waitlist route runs no spam screener at
+// all — so the honeypot is its only filter and every operator who copied the
+// snippet shipped a signup form with none. form_edit.html had it; nothing kept
+// the two in step.
+//
+// Checked as a property over every snippet rather than as the one template that
+// was wrong, because the next endpoint will come with the next snippet.
+func TestEmbedSnippetsCarryTheHoneypot(t *testing.T) {
+	t.Parallel()
+
+	entries, err := os.ReadDir(templateDir)
+	if err != nil {
+		t.Fatalf("read templates dir: %v", err)
+	}
+
+	// A snippet is a <pre> block containing an escaped <form> posting to a public
+	// endpoint on this instance — that is, something an operator pastes into
+	// their own site.
+	snippet := regexp.MustCompile(`(?s)<pre[^>]*>.*?</pre>`)
+	postsToUs := regexp.MustCompile(`&lt;form method="POST" action="\{\{\.BaseURL\}\}`)
+
+	checked := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".html") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(templateDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, block := range snippet.FindAllString(string(body), -1) {
+			if !postsToUs.MatchString(block) {
+				continue
+			}
+			checked++
+			if !strings.Contains(block, "_honeypot") {
+				t.Errorf("templates/%s offers an embeddable form snippet with no "+
+					"_honeypot field.\nThe endpoint reads one, so every operator who "+
+					"copies this ships a form with the spam trap missing — and on the "+
+					"waitlist route the honeypot is the only filter there is.", e.Name())
+			}
+		}
+	}
+
+	if checked < 2 {
+		t.Fatalf("found %d embeddable snippets; expected the form and waitlist ones, "+
+			"so the scan is no longer matching them", checked)
+	}
+	t.Logf("checked %d embeddable snippet(s)", checked)
 }

@@ -47,6 +47,10 @@
       <p class="card-body" style="flex:none">The field must be named <code>email</code>.</p>
       <pre class="code" id="wl-snippet">&lt;form method="POST" action="{{.BaseURL}}/w/{{.Waitlist.ID}}"&gt;
   &lt;input type="email" name="email" required&gt;
+
+  &lt;!-- left empty by people, filled by bots --&gt;
+  &lt;input type="text" name="_honeypot" style="display:none" tabindex="-1"&gt;
+
   &lt;button type="submit"&gt;Join&lt;/button&gt;
 &lt;/form&gt;</pre>
       <button class="btn btn-ghost" type="button" data-copy="#wl-snippet" style="margin-top:6px">
