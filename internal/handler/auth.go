@@ -12,9 +12,9 @@ import (
 
 // AuthStore is what login and logout need from storage.
 //
-// Three methods, and no way to read or write a user record beyond checking a
-// password. An auth handler holding CreateUser is how a login page grows a
-// registration path nobody asked for.
+// No way to read or write a user record beyond checking a password. An auth
+// handler holding CreateUser is how a login page grows a registration path
+// nobody asked for.
 type AuthStore interface {
 	CheckPassword(username, password string) (store.User, error)
 	CreateSession(userID string, expiry time.Duration) (string, error)

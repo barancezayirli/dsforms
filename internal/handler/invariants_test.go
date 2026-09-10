@@ -191,11 +191,10 @@ func TestShellActiveNamesAKnownNavGroup(t *testing.T) {
 // TestNoHandlerHoldsTheConcreteStore is what keeps this package's storage
 // surfaces narrow.
 //
-// Every handler used to embed Base{Store *store.Store} and could therefore reach
-// all seventy-nine methods on the store regardless of the five or twenty it
-// actually called. Each now declares an interface naming exactly what it uses —
-// SubmitStore is five methods, SearchStore is one — so what a handler *can* touch
-// is what it does touch.
+// Handlers used to hold the store itself — most by embedding Base, three by
+// declaring their own field — and could therefore reach every method on it,
+// however few they called. Each now declares an interface naming exactly what it
+// uses, so what a handler *can* touch is what it does touch.
 //
 // Nothing in the compiler defends that. Changing a field back to *store.Store
 // builds cleanly, every existing call site keeps working, and the narrowing is
@@ -212,6 +211,14 @@ func TestNoHandlerHoldsTheConcreteStore(t *testing.T) {
 
 	structs := 0
 	for path, f := range files {
+		// Resolve the identifier the store is imported under in THIS file rather
+		// than assuming "store". A second, aliased import of the same package is
+		// legal Go, and `Store *st.Store` reinstates the whole surface while a
+		// scan hardcoding "store" reports success.
+		storeLocal := importedAs(f, "github.com/barancezayirli/dsforms/internal/store")
+		if len(storeLocal) == 0 {
+			continue
+		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			ts, ok := n.(*ast.TypeSpec)
 			if !ok {
@@ -232,7 +239,7 @@ func TestNoHandlerHoldsTheConcreteStore(t *testing.T) {
 					continue
 				}
 				pkg, ok := sel.X.(*ast.Ident)
-				if !ok || pkg.Name != "store" || sel.Sel.Name != "Store" {
+				if !ok || !storeLocal[pkg.Name] || sel.Sel.Name != "Store" {
 					continue
 				}
 				name := "(embedded)"
@@ -249,11 +256,123 @@ func TestNoHandlerHoldsTheConcreteStore(t *testing.T) {
 		})
 	}
 
-	// A matcher that matches nothing passes while asserting nothing. Two AST
-	// tests on this branch have already shipped in that state — one inspected
-	// zero queries because every query was a concatenation rather than a literal.
+	// A count floor measures only that files were parsed; it cannot see a
+	// predicate that has stopped matching. So the predicate is exercised against
+	// a known-positive below, which is the part that actually keeps this honest —
+	// one scan on this line of work passed while inspecting zero queries, because
+	// it matched string literals when every query was a concatenation (c282125).
 	if structs < 20 {
 		t.Fatalf("only %d structs inspected; the scan is no longer finding them", structs)
 	}
 	t.Logf("inspected %d structs", structs)
+}
+
+// TestConcreteStoreDetectorFires is the positive control for the scan above.
+//
+// Without it, TestNoHandlerHoldsTheConcreteStore passing means either "no
+// handler holds the concrete store" or "the detector no longer detects
+// anything", and nothing distinguishes those two. Both forms below are real
+// regressions that must be caught: the plain one, and the aliased import that
+// defeated the first version of the detector.
+func TestConcreteStoreDetectorFires(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"plain", `package handler
+import "github.com/barancezayirli/dsforms/internal/store"
+type H struct{ Store *store.Store }`, true},
+		{"aliased import", `package handler
+import st "github.com/barancezayirli/dsforms/internal/store"
+type H struct{ Store *st.Store }`, true},
+		{"aliased alongside the plain import", `package handler
+import (
+	"github.com/barancezayirli/dsforms/internal/store"
+	st "github.com/barancezayirli/dsforms/internal/store"
+)
+type S interface{ GetForm(string) (store.Form, error) }
+type H struct{ Store *st.Store }`, true},
+		{"narrow interface", `package handler
+import "github.com/barancezayirli/dsforms/internal/store"
+type S interface{ GetForm(string) (store.Form, error) }
+type H struct{ Store S }`, false},
+		{"unrelated pointer", `package handler
+import "database/sql"
+type H struct{ DB *sql.DB }`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "x.go", tc.src, 0)
+			if err != nil {
+				t.Fatalf("parsing fixture: %v", err)
+			}
+			if got := holdsConcreteStore(f); got != tc.want {
+				t.Errorf("detector returned %v, want %v — the scan in "+
+					"TestNoHandlerHoldsTheConcreteStore would %s this:\n%s",
+					got, tc.want,
+					map[bool]string{true: "wrongly flag", false: "miss"}[got],
+					tc.src)
+			}
+		})
+	}
+}
+
+// holdsConcreteStore reports whether f declares a struct field of type
+// *store.Store, under whatever name the package is imported as.
+//
+// Extracted so the scan and its positive control run the same predicate. Two
+// copies of a matcher is how one of them silently stops matching.
+func holdsConcreteStore(f *ast.File) bool {
+	local := importedAs(f, "github.com/barancezayirli/dsforms/internal/store")
+	if len(local) == 0 {
+		return false
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		st, ok := n.(*ast.StructType)
+		if !ok {
+			return true
+		}
+		for _, field := range st.Fields.List {
+			if star, ok := field.Type.(*ast.StarExpr); ok {
+				if sel, ok := star.X.(*ast.SelectorExpr); ok {
+					if id, ok := sel.X.(*ast.Ident); ok && local[id.Name] && sel.Sel.Name == "Store" {
+						found = true
+					}
+				}
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// importedAs returns every identifier path is imported under in f.
+//
+// A set, not a single name: Go permits the same package to be imported more than
+// once under different names in one file, and returning only the first match is
+// what let `import st ".../store"` alongside the plain import reinstate
+// *store.Store while this scan reported success. The first version of this
+// helper had exactly that bug, and the fixture below did not catch it because it
+// declared only the aliased import — the shape a real regression takes is both
+// at once.
+func importedAs(f *ast.File, path string) map[string]bool {
+	out := map[string]bool{}
+	for _, imp := range f.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || p != path {
+			continue
+		}
+		if imp.Name != nil {
+			out[imp.Name.Name] = true
+			continue
+		}
+		out[path[strings.LastIndex(path, "/")+1:]] = true
+	}
+	return out
 }

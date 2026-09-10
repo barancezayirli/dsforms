@@ -78,7 +78,8 @@ main.go        config, store, handler construction, routes, CLI — no logic
   │            also constructs mail, webhook and broadcaster, and wires them
   │            into handler through the interfaces handler declares
   └── handler  HTTP: request → store/domain calls → template
-        ├── auth · backup               (imported directly; both wrap store)
+        ├── auth                        wraps store (sessions)
+        ├── backup                      imports nothing from internal/
         ├── store                       every SQL statement in the project
         ├── screen                      the hold/accept decision, sealed
         └── ratelimit · flash · safe
@@ -88,8 +89,14 @@ Verified with `go list -f '{{join .Imports "\n"}}'`, not from memory:
 
 - `handler` → auth, backup, flash, ratelimit, safe, screen, store
 - `store` → screen · `config` → screen · `broadcaster` → safe, store
-- `auth`, `backup`, `mail`, `webhook` → store · `ratelimit` → safe
-- `flash` and `safe` are the only packages importing nothing from `internal/`
+- `auth`, `mail`, `webhook` → store · `ratelimit` → safe
+- `backup`, `flash` and `safe` import nothing from `internal/`
+
+`backup` used to import `store`, for one parameter: `Import(s *store.Store, …)`,
+which called two methods on it. Naming those two in an interface `backup`
+declares itself dropped the import entirely. That is the rule below applied to a
+package that was already written — the dependency was never real, only spelled
+that way.
 
 Note what `handler` does *not* import: **`mail`, `webhook` and `broadcaster`**.
 It reaches all three only through interfaces it declares itself, which is the

@@ -47,9 +47,9 @@ var (
 	_ handler.BroadcastNotifier = (*broadcaster.Worker)(nil)
 	_ auth.SessionStore         = (*store.Store)(nil)
 
-	// One store, eleven narrow views of it. Each handler declares only the
-	// methods it calls, so what a handler *can* reach is what it does reach;
-	// before this, every handler held *store.Store and could reach all of it.
+	// One store, one narrow view per handler. Each declares only the methods it
+	// calls, so what a handler *can* reach is what it does reach; before this,
+	// every handler held *store.Store and could reach all of it.
 	//
 	// Asserted here rather than left to the wiring because a store method
 	// renamed out from under an interface should fail with "does not implement",
@@ -62,13 +62,20 @@ var (
 	_ handler.SubmitStore         = (*store.Store)(nil)
 	_ handler.OverviewStore       = (*store.Store)(nil)
 	_ handler.AuthStore           = (*store.Store)(nil)
-	_ handler.WaitlistSubmitStore = (*store.Store)(nil)
 	_ handler.BackupStore         = (*store.Store)(nil)
+	_ handler.WaitlistSubmitStore = (*store.Store)(nil)
 	_ handler.SearchStore         = (*store.Store)(nil)
 	_ handler.DigestStore         = (*store.Store)(nil)
 
 	// backup.Import swaps the database file underneath the process; it names the
 	// two methods that takes rather than importing store at all.
+	//
+	// handler.BackupStore is an alias for this type, so the assertion above is
+	// redundant to the compiler. It is kept deliberately: this block is the list
+	// TestEveryStorageFieldIsWired reads to decide which fields a handler literal
+	// must set, and dropping the alias from it silently stopped BackupHandler's
+	// own Store field being required — verified by removing the wiring and
+	// watching the test pass.
 	_ backup.Store = (*store.Store)(nil)
 )
 

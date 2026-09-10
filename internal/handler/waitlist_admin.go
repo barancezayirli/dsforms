@@ -24,10 +24,12 @@ type BroadcastNotifier interface {
 
 // WaitlistStore is what the waitlist admin needs from storage.
 //
-// Disjoint from the forms and quarantine side entirely — not one of these twelve
-// appears on any other admin handler's surface, which is the isolation this
-// declaration makes true rather than merely intended. Its only overlap anywhere
-// is GetWaitlist, shared with the public WaitlistSubmitStore.
+// Disjoint from the forms and quarantine side entirely — no method here appears
+// on any other admin handler's surface, and its only overlap anywhere is
+// GetWaitlist, shared with the public WaitlistSubmitStore.
+//
+// Stated as an observation, not a guarantee: nothing stops a future AdminStore
+// from gaining ListWaitlists, and no test asserts the disjointness.
 type WaitlistStore interface {
 	CountEntries(waitlistID string) (int, error)
 	CreateBroadcast(b store.Broadcast, emails []string) error

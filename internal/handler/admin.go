@@ -21,10 +21,11 @@ import (
 
 // AdminStore is what the forms admin needs from storage.
 //
-// Twenty methods is the widest surface any handler declares, and that is worth
-// reading as a signal about AdminHandler rather than about the store: forms,
-// submissions, read state, bulk delete and two stats queries are a lot for one
-// handler. Splitting it is a separate change; naming the surface is the
+// This is the widest surface any handler declares, and that is worth reading as
+// a signal about AdminHandler rather than about the store: forms, submissions,
+// read state, bulk delete and the stats queries are a lot for one handler. The
+// routes already draw the line — the forms half and the submissions half share
+// only GetForm. Splitting it is a separate change; naming the surface is the
 // precondition for seeing that it wants splitting.
 type AdminStore interface {
 	CountAllSubmissions() (int, error)

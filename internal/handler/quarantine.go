@@ -20,8 +20,9 @@ import (
 //
 // It is the only surface that can both read held submissions and *edit* the
 // rules that hold them, because reviewing what was caught and adjusting what
-// catches it are the same operator task on the same screen. SubmitStore also
-// reads the rules, but cannot add or delete one.
+// catches it are one operator concern, even though they render as two screens.
+// SubmitStore reads the rules and bumps a hit counter, but cannot add or delete
+// one.
 type QuarantineStore interface {
 	AddFilterRule(kind, ruleType, value, note string) (screen.Rule, error)
 	DeleteAllHeld() (int, error)

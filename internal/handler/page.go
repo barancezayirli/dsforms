@@ -106,10 +106,13 @@ var navGroups = map[string]string{
 // instead of rendering silently eats the operator's message. Call it on paths
 // that render.
 //
-// A failure to read the nav counts or stat the database is logged rather than
-// returned: a sidebar badge is not worth turning a working page into a 500. It
-// does set Degraded, so the page says the counts are unreliable instead of
-// showing zeroes as though they were the answer.
+// A failure to read the nav counts is logged rather than returned — a sidebar
+// badge is not worth turning a working page into a 500 — and sets Degraded, so
+// the page says the counts are unreliable instead of showing zeroes as though
+// they were the answer.
+//
+// The database card is different: dbStatus swallows a failed stat silently and
+// does not set Degraded, on the reasoning recorded there.
 func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active string) PageData {
 	user, _ := auth.UserFromContext(r.Context())
 	flashType, flashMsg := flash.Get(r, w, b.SecretKey)

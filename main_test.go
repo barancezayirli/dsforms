@@ -3,12 +3,17 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/token"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"regexp"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -476,56 +481,91 @@ func TestRecoveryRendersStyled500(t *testing.T) {
 	}
 }
 
-// TestFileUploadNamesReachAHandler catches a mismatch that no other test can see
-// and that the browser reports as a plausible-looking error message.
+// TestUploadFormsReachTheirHandler checks the whole seam an upload crosses, not
+// the one link of it that broke last time.
 //
-// templates/backups.html posted its file as name="backup"; BackupHandler.Import
-// read r.FormFile("file"). Restore therefore failed every single time it was
-// used, from the feature's first commit — the operator picked a .db file,
-// confirmed the "this cannot be undone" prompt, and got "No file uploaded."
+// templates/backups.html posted its file as name="backup" while
+// BackupHandler.Import read r.FormFile("file"), so database restore failed on
+// every use from the Nocturne port (664bfbc) until it was fixed: the operator
+// picked a .db, confirmed a prompt saying the change could not be undone, and
+// got "No file uploaded."
 //
-// The handler test suite was green throughout, because it builds its own
-// multipart body and posts "file": it encoded the handler's side of the contract
-// and never the template's, so the two halves could disagree indefinitely with
-// nothing to notice. That is the shape this repo keeps rediscovering — both ends
-// individually tested, the seam between them owned by no one.
+// The handler suite stayed green throughout, because it builds its own multipart
+// body and posts "file" — it encoded the handler's half of the contract and
+// never the template's, leaving the seam between them owned by nobody.
 //
-// Checked in the direction the bug runs: a template offering a field nobody
-// reads is dead UI. The reverse is fine — a handler may read an upload posted by
-// something other than a template.
-func TestFileUploadNamesReachAHandler(t *testing.T) {
+// The first version of this test checked only that a file input's name appeared
+// in SOME handler's FormFile call. That closes the reported instance and not the
+// mechanism: it goes green again the moment any second upload field exists
+// anywhere, and it is blind to the two other ways this same form breaks with the
+// same symptom — a missing enctype (the browser posts only the filename) and an
+// action pointing at a route that does not accept the post. So each upload form
+// is now followed all the way through: enctype, then action to route, then route
+// to handler method, then the field name that method actually reads.
+func TestUploadFormsReachTheirHandler(t *testing.T) {
 	t.Parallel()
 
-	handlerSrc, err := os.ReadDir("internal/handler")
-	if err != nil {
-		t.Fatalf("read handler dir: %v", err)
-	}
-	read := map[string]bool{}
-	formFile := regexp.MustCompile(`FormFile\("([^"]+)"\)`)
-	for _, e := range handlerSrc {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile("internal/handler/" + e.Name())
-		if err != nil {
-			t.Fatalf("read %s: %v", e.Name(), err)
-		}
-		for _, m := range formFile.FindAllStringSubmatch(string(body), -1) {
-			read[m[1]] = true
-		}
-	}
-	if len(read) == 0 {
-		t.Fatal("found no FormFile call sites; the scan is no longer matching them")
+	routes := postRoutes(t)
+	reads := formFileNamesByMethod(t)
+
+	forms := uploadForms(t)
+	if len(forms) == 0 {
+		t.Fatal("no upload forms found in templates; the scan is no longer matching them")
 	}
 
+	for _, f := range forms {
+		where := fmt.Sprintf("templates/%s (form action=%q)", f.file, f.action)
+
+		if !strings.Contains(f.enctype, "multipart/form-data") {
+			t.Errorf("%s carries a file input but enctype is %q.\nWithout "+
+				"multipart/form-data the browser posts the file NAME as an ordinary "+
+				"field and no bytes at all, so FormFile returns ErrMissingFile and the "+
+				"operator is told no file was uploaded.", where, f.enctype)
+			continue
+		}
+		if f.field == "" {
+			t.Errorf("%s has a file input with no name attribute, so it posts nothing", where)
+			continue
+		}
+
+		method, ok := routes[normalizePath(f.action)]
+		if !ok {
+			t.Errorf("%s posts to a path with no POST route in main.go.\nThe request "+
+				"is answered by the router, not the handler — a 405, after the operator "+
+				"confirmed the action.", where)
+			continue
+		}
+		if !reads[method][f.field] {
+			t.Errorf("%s posts its upload as name=%q, but %s reads %v.\nThe upload "+
+				"arrives empty and the operator is told the file is missing.",
+				where, f.field, method, slices.Sorted(maps.Keys(reads[method])))
+		}
+	}
+	t.Logf("checked %d upload form(s) against %d POST route(s)", len(forms), len(routes))
+}
+
+// uploadForm is one <form> in a template that contains a file input.
+type uploadForm struct {
+	file, action, enctype, field string
+}
+
+func uploadForms(t *testing.T) []uploadForm {
+	t.Helper()
 	entries, err := templateFS.ReadDir("templates")
 	if err != nil {
 		t.Fatalf("read templates dir: %v", err)
 	}
-	input := regexp.MustCompile(`<input[^>]*type="file"[^>]*>`)
-	nameAttr := regexp.MustCompile(`name="([^"]+)"`)
+	formRe := regexp.MustCompile(`(?s)<form\b[^>]*>.*?</form>`)
+	fileRe := regexp.MustCompile(`<input[^>]*type="file"[^>]*>`)
+	attr := func(tag, name string) string {
+		m := regexp.MustCompile(name + `="([^"]*)"`).FindStringSubmatch(tag)
+		if m == nil {
+			return ""
+		}
+		return m[1]
+	}
 
-	checked := 0
+	var out []uploadForm
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -534,32 +574,160 @@ func TestFileUploadNamesReachAHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", e.Name(), err)
 		}
-		for _, tag := range input.FindAllString(string(body), -1) {
-			m := nameAttr.FindStringSubmatch(tag)
-			if m == nil {
-				t.Errorf("templates/%s has a file input with no name attribute, so it "+
-					"posts nothing: %s", e.Name(), tag)
+		for _, form := range formRe.FindAllString(string(body), -1) {
+			input := fileRe.FindString(form)
+			if input == "" {
 				continue
 			}
-			checked++
-			if !read[m[1]] {
-				t.Errorf("templates/%s posts its upload as name=%q, which no handler reads.\n"+
-					"Handlers read: %v\nThe upload silently arrives empty and the operator "+
-					"is told the file is missing.", e.Name(), m[1], keysOf(read))
-			}
+			openTag := form[:strings.Index(form, ">")+1]
+			out = append(out, uploadForm{
+				file:    e.Name(),
+				action:  attr(openTag, "action"),
+				enctype: attr(openTag, "enctype"),
+				field:   attr(input, "name"),
+			})
 		}
 	}
-	if checked == 0 {
-		t.Fatal("no file inputs found in templates; the scan is no longer matching them")
-	}
-	t.Logf("checked %d file input(s) against %d FormFile name(s)", checked, len(read))
+	return out
 }
 
-func keysOf(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+// postRoutes maps each POST route pattern in main.go to the handler method bound
+// to it, as "TypeName.MethodName".
+func postRoutes(t *testing.T) map[string]string {
+	t.Helper()
+	fset := token.NewFileSet()
+	files := parsePkg(t, fset, ".")
+
+	// Handler variable -> type name, from `x := &handler.XHandler{...}`.
+	varType := map[string]string{}
+	for _, f := range files {
+		local := localName(f, handlerPkg)
+		if local == "" {
+			continue
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			as, ok := n.(*ast.AssignStmt)
+			if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+				return true
+			}
+			name, ok := as.Lhs[0].(*ast.Ident)
+			if !ok {
+				return true
+			}
+			rhs := as.Rhs[0]
+			if u, ok := rhs.(*ast.UnaryExpr); ok {
+				rhs = u.X
+			}
+			lit, ok := rhs.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			if sel, ok := lit.Type.(*ast.SelectorExpr); ok {
+				if id, ok := sel.X.(*ast.Ident); ok && id.Name == local {
+					varType[name.Name] = sel.Sel.Name
+				}
+			}
+			return true
+		})
 	}
-	sort.Strings(out)
+
+	out := map[string]string{}
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) != 2 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Post" {
+				return true
+			}
+			pat, ok := call.Args[0].(*ast.BasicLit)
+			if !ok {
+				return true
+			}
+			path, err := strconv.Unquote(pat.Value)
+			if err != nil {
+				return true
+			}
+			h, ok := call.Args[1].(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			recv, ok := h.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if typ, ok := varType[recv.Name]; ok {
+				out[normalizePath(path)] = typ + "." + h.Sel.Name
+			}
+			return true
+		})
+	}
+	if len(out) == 0 {
+		t.Fatal("found no POST routes in main.go; the scan is no longer matching them")
+	}
 	return out
+}
+
+// formFileNamesByMethod maps "TypeName.MethodName" to the FormFile names that
+// method reads.
+func formFileNamesByMethod(t *testing.T) map[string]map[string]bool {
+	t.Helper()
+	fset := token.NewFileSet()
+	files := parsePkg(t, fset, "internal/handler")
+
+	out := map[string]map[string]bool{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 || fn.Body == nil {
+				continue
+			}
+			typ := fn.Recv.List[0].Type
+			if star, ok := typ.(*ast.StarExpr); ok {
+				typ = star.X
+			}
+			id, ok := typ.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			key := id.Name + "." + fn.Name.Name
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok || len(call.Args) != 1 {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "FormFile" {
+					return true
+				}
+				lit, ok := call.Args[0].(*ast.BasicLit)
+				if !ok {
+					return true
+				}
+				name, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					return true
+				}
+				if out[key] == nil {
+					out[key] = map[string]bool{}
+				}
+				out[key][name] = true
+				return true
+			})
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("found no FormFile call sites in internal/handler; the scan is no longer matching them")
+	}
+	return out
+}
+
+// normalizePath reduces a template action and a chi route pattern to a common
+// form, so `/admin/forms/{{.Form.ID}}/x` and `/admin/forms/{id}/x` compare equal.
+func normalizePath(p string) string {
+	p = regexp.MustCompile(`\{\{[^}]*\}\}`).ReplaceAllString(p, "{}")
+	p = regexp.MustCompile(`\{[^{}]+\}`).ReplaceAllString(p, "{}")
+	return strings.TrimSuffix(p, "/")
 }

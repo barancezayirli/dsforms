@@ -8,7 +8,8 @@ import (
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
-// SearchStore is what search needs from storage: one query.
+// SearchStore is what search needs from storage: the search query, and nothing
+// else.
 type SearchStore interface {
 	SearchSubmissions(query string, limit int) ([]store.SearchResult, error)
 }

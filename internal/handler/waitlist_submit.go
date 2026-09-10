@@ -24,7 +24,7 @@ type ConfirmationMailer interface {
 
 // WaitlistSubmitStore is what the public waitlist endpoint needs from storage.
 //
-// Two methods, both scoped to one waitlist by id. Like SubmitStore this is
+// Both methods are scoped to one waitlist by id. Like SubmitStore this is
 // unauthenticated-request surface.
 type WaitlistSubmitStore interface {
 	CreateEntry(e store.WaitlistEntry) (position int, alreadyJoined bool, err error)

@@ -67,10 +67,10 @@ func Validate(path string) error {
 // process: the handle to close, and the way to open the replacement.
 //
 // Declared here rather than taking *store.Store because those two methods are
-// the whole dependency. Naming them removes this package's import of store
-// altogether, so backup and store are now siblings that share no types — and
-// the pair is small enough to read as what it is, which matters when the
-// operation is "replace the database".
+// the whole dependency. Naming them drops store from this package's non-test
+// build entirely — only the tests still import it, since swapping a database
+// needs a real one — and the pair is small enough to read as what it is, which
+// matters when the operation is "replace the database".
 type Store interface {
 	DB() *sql.DB
 	Reopen(path string) error

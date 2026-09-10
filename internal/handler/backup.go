@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -13,16 +12,19 @@ import (
 	"github.com/barancezayirli/dsforms/internal/flash"
 )
 
-// BackupStore is what the backup screen needs from storage.
+// BackupStore is what the backup screen needs from storage: the handle to snapshot
+// from, and the way to reopen after the file underneath has been replaced.
 //
-// Both methods hand out or replace the database itself, which is exactly why
-// the interface is worth having: these two are the most dangerous methods on
-// the store, and this names the one handler allowed to reach them. Import needs
-// the same pair — see backup.Store, which this satisfies.
-type BackupStore interface {
-	DB() *sql.DB
-	Reopen(path string) error
-}
+// An alias rather than a second declaration. backup.Import needs the identical
+// pair, and this handler's only reason to hold them is to hand them to it — so
+// writing the methods out again here produced two copies of one contract that
+// happened to typecheck only while they stayed byte-identical. The alias makes
+// them the same type, which is what they always were.
+//
+// DB() is a real hole in the narrowing, not a clean seam: whoever holds it has
+// unrestricted SQL, so this constrains who may reach the database rather than
+// what they may do with it.
+type BackupStore = backup.Store
 
 // BackupHandler handles backup export and import.
 type BackupHandler struct {
