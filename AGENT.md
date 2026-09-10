@@ -78,29 +78,45 @@ main.go        config, store, handler construction, routes, CLI — no logic
   │            also constructs mail, webhook and broadcaster, and wires them
   │            into handler through the interfaces handler declares
   └── handler  HTTP: request → store/domain calls → template
-        ├── auth · backup               (imported directly)
+        ├── auth · backup               (imported directly; both wrap store)
         ├── store                       every SQL statement in the project
-        └── filter · spam · ratelimit · flash · safe   (leaves)
+        ├── screen                      the hold/accept decision, sealed
+        └── ratelimit · flash · safe
 ```
 
-`store` imports `filter` and `spam`; `config` imports `spam` for
-`spam.DefaultThreshold`; `broadcaster` imports `store`, `filter`, `spam`, `safe`.
+Verified with `go list -f '{{join .Imports "\n"}}'`, not from memory:
+
+- `handler` → auth, backup, flash, ratelimit, safe, screen, store
+- `store` → screen · `config` → screen · `broadcaster` → safe, store
+- `auth`, `backup`, `mail`, `webhook` → store · `ratelimit` → safe
+- `flash` and `safe` are the only packages importing nothing from `internal/`
 
 Note what `handler` does *not* import: **`mail`, `webhook` and `broadcaster`**.
 It reaches all three only through interfaces it declares itself, which is the
-rule below made concrete. `go list -deps ./internal/handler` is the check — the
-diagram claimed `mail` for two rounds because nobody ran it.
+rule below made concrete. Run the command rather than trusting this block — the
+diagram claimed `mail` for two rounds because nobody did, and it claimed
+`broadcaster` imports `screen` until someone did.
 
 **Rules that follow:**
 
-- **Leaves stay leaves.** `spam`, `filter`, `flash` and `safe` import nothing
-  from `internal/` at all; `ratelimit` imports only `safe`. That is what makes
-  them testable without a database. `store` imports `filter` and `spam` —
-  downward, and fine.
+- **Leaves stay leaves.** `flash` and `safe` import nothing from `internal/` at
+  all; `ratelimit` imports only `safe`. That is what makes them testable without
+  a database.
 
-  `safe` is the one permitted exception, because it has no dependencies of its
-  own and every layer needs it: a goroutine anywhere that is not guarded can take
-  the process down. Anything else in a leaf is a design error.
+  `safe` is the one permitted exception to a leaf importing anything, because it
+  has no dependencies of its own and every layer needs it: a goroutine anywhere
+  that is not guarded can take the process down. Anything else in a leaf is a
+  design error.
+
+- **`screen` is a sealed subtree, not a leaf.** Its public surface is one file;
+  the implementation lives in `internal/screen/internal/{addr,rules,score,repeat}`,
+  which Go forbids any package outside `internal/screen` from importing. That is
+  a compiler rule. It exists because the hold/accept decision previously had
+  three owners — the handler decided sender validity, the store decided the
+  stored form of a rule, the matcher decided the compared form — and a filter
+  bypass was found in the seam between two of them in three consecutive review
+  rounds. `store` and `config` import `screen` for the types they persist and the
+  threshold bounds; nothing can reach past it.
 - **All SQL lives in `internal/store`.** Handlers never touch `db.Query`. A
   handler that needs data needs a store method.
 - **Interfaces are declared by the consumer**, never by the implementer.
@@ -115,8 +131,8 @@ diagram claimed `mail` for two rounds because nobody ran it.
 ### Adding a package
 
 Check first whether the logic belongs in an existing leaf. A package earns its
-place when it has its own vocabulary and is testable alone — `internal/filter`
-qualified (validation and matching with no database); one helper function
+place when it has its own vocabulary and is testable alone — `internal/screen`
+qualified (the whole hold/accept decision, no database); one helper function
 usually would not.
 
 `internal/safe` is the deliberate exception and worth stating so nobody deletes
@@ -176,8 +192,9 @@ generic one.
 fix: in `config` for a missing required env var **and for a malformed integer
 one** (`envOrInt` — a bad `BROADCAST_MAX_ATTEMPTS` or `SPAM_THRESHOLD` is a
 refusal to start, not a fallback), and in the leaf constructors
-(`ratelimit.NewLimiter`, `ratelimit.NewLoginGuard`, `spam.NewTracker`) on a
-programmer-error argument. Never during a request.
+(`ratelimit.NewLimiter`, `ratelimit.NewLoginGuard`, `screen.New`) on a
+programmer-error argument. Never during a request. `screen.New` is the reachable
+one — it panics via the tracker it constructs, which is itself sealed.
 
 **Goroutines.** Run anything outliving a request through `safe.Do`, which
 recovers and logs — a `recover()` only catches panics in its *own* goroutine, so
@@ -199,16 +216,19 @@ wrong reason under load.
 
 **Determinism.** Go randomises map iteration. Anything whose order is
 observable — rendered output, a returned slice, a test assertion — sorts first.
-`spam.Detail` sorts field names for this reason.
+The content scorer sorts field names for this reason, so `Verdict.Signals`
+arrives in a stable order.
 
-**Prefer a defined type over a documented string set.** `spam.Rule` is a type
+**Prefer a defined type over a documented string set.** `screen.Check` is a type
 because its documented list of valid values went stale inside the very PR that
-wrote it.
+wrote it. (It was called `spam.Rule` then. It is `Check` now precisely because
+`screen.Rule` — the operator's allow/block rule — is a different thing, and one
+package cannot own two `Rule`s. Do not apply this paragraph to `screen.Rule`.)
 
 The type alone buys less than it looks. Go does not exhaustiveness-check a map
 literal keyed by a named type, or a switch over one, so a new constant with no
 display entry compiles cleanly and `go vet` is silent — the blank icon the type
-was supposed to prevent. What closes it is `spam.AllRules` next to the constants,
+was supposed to prevent. What closes it is `screen.AllChecks` next to the constants,
 ranged by the coverage test, plus a test that derives the constant list from the
 package's own AST so the slice cannot fall behind either. A guarantee like this
 has to be built; naming the type is only the first half.
@@ -306,9 +326,9 @@ their address in the field we check.
 **And "canonical" has to be canonical.** The first fix restricted allow rules to
 fields *named* `email`, case-insensitively, which left the hole open: HTTP field
 names are case-sensitive, so `email` and `Email` are two fields one submission
-can carry at once. `filter.SenderAddress` is now the single definition, shared
-with the submit handler's validation, and it returns three states — none, one,
-ambiguous. Ambiguous stays unresolved: every tie-break has a side the attacker
+can carry at once. The sender has a single definition, sealed inside
+`internal/screen`, reached by the submit handler through `screen.SenderOK`, and it
+returns three states — none, one, ambiguous. Ambiguous stays unresolved: every tie-break has a side the attacker
 can land on, so two claimants means we do not know who sent this, and a
 permissive rule never fires on a guess.
 
@@ -406,7 +426,8 @@ internal/
   config/                env → Config
   store/                 all SQLite
   auth/ flash/           sessions, one-time messages
-  spam/ filter/          scoring; operator block/allow rules
+  screen/                the hold/accept decision; implementation sealed
+                         under screen/internal/{addr,rules,score,repeat}
   ratelimit/             per-IP token bucket, in-process
   mail/ webhook/ backup/ broadcaster/
   safe/                  run a func without letting a panic escape

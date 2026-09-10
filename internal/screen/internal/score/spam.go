@@ -1,4 +1,4 @@
-// Package spam provides a conservative weighted-scoring filter for detecting
+// Package score provides a conservative weighted-scoring filter for detecting
 // link/content spam in form submissions. It has no dependencies.
 //
 // The weights are fixed in this file and deliberately absolute: a stored

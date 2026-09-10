@@ -89,12 +89,12 @@ func SenderAddress(data map[string]string) (string, SenderState) {
 	}
 }
 
-// canonicalAddress reduces a value to the one form addresses are compared in,
+// Canonical reduces a value to the one form addresses are compared in,
 // or reports that it is not an address.
 //
 // This is the single definition. Rule storage (Validate), submission matching
-// (allAddresses, senderAddresses) and the submit handler's validation all go
-// through it, because the package previously held three different answers to
+// (allAddresses, senderAddresses) both go through it, because the package
+// previously held three different answers to
 // "what is an address" and each gap between them was a filter bypass:
 //
 //   - Validate parsed with mail.ParseAddress, which accepts RFC 5322
@@ -124,7 +124,7 @@ func Canonical(v string) (string, bool) {
 	return shaped(ASCIILower(v))
 }
 
-// addressShaped is the conservative "is this an address at all" test. The dot
+// shaped is the conservative "is this an address at all" test. The dot
 // requirement matters because allAddresses runs this over every field value of
 // every submission: without it, arbitrary "a@b" tokens in prose would start
 // counting as addresses.
@@ -138,7 +138,7 @@ func shaped(v string) (string, bool) {
 	return v, true
 }
 
-// asciiLower lowercases A-Z and leaves every other byte alone.
+// ASCIILower lowercases A-Z and leaves every other byte alone.
 //
 // strings.ToLower is wrong here and the difference is the security property:
 // Unicode case folding maps distinct characters onto ASCII ones, so it can turn

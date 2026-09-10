@@ -53,7 +53,7 @@ func Validate(ruleType, value string) (string, error) {
 
 	switch ruleType {
 	case TypeEmail:
-		// Through canonicalAddress, which is also what every submission value is
+		// Through addr.Canonical, which is also what every submission value is
 		// reduced by. Storing a rule in a form matching cannot produce is a rule
 		// that never fires, and that gap was a live bypass twice.
 		addr, ok := addr.Canonical(v)
@@ -63,7 +63,7 @@ func Validate(ruleType, value string) (string, error) {
 		return addr, nil
 
 	case TypeDomain:
-		// asciiLower, not strings.ToLower, for the same reason as addresses: the
+		// addr.ASCIILower, not strings.ToLower, for the same reason as addresses: the
 		// domain half of a submission address is folded the same way, so folding
 		// the rule differently would let a Unicode spelling match it.
 		d := addr.ASCIILower(strings.TrimPrefix(strings.TrimPrefix(v, "@"), "."))

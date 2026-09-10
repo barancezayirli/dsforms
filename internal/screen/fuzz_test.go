@@ -8,9 +8,13 @@ import (
 )
 
 // senderCanonical is the canonical form of a submission's sender, for asserting
-// the allow-match property. The test lives inside internal/screen, so it can
-// reach the sealed packages that callers cannot — which is exactly the right
-// asymmetry: the invariant is checked against the real definition, not a copy.
+// the allow-match property.
+//
+// The test lives inside internal/screen, so it can reach the sealed packages
+// that callers cannot. That is convenient but it is not independence: this calls
+// the same addr.Canonical the property is validating, so the property is sound
+// relative to that definition and blind to defects within it. See the caveat on
+// property 2.
 func senderCanonical(fields map[string]string) (string, bool) {
 	raw, state := addr.SenderAddress(fields)
 	if state != addr.SenderOne {
@@ -30,16 +34,23 @@ func senderCanonical(fields map[string]string) (string, bool) {
 // So this asserts properties rather than outcomes. A property holds for every
 // input or it does not hold; there is no list to fall behind.
 func FuzzDecide(f *testing.F) {
-	// Seeds: the three forms that were live bypasses, plus the shapes around
-	// them. A fuzzer explores outward from its corpus, so the historical bugs
-	// are the right neighbourhood to start in.
+	// Seeds: every form that was a live bypass, plus the shapes around them. A
+	// fuzzer explores outward from its corpus, so the historical bugs are the
+	// right neighbourhood to start in.
+	//
+	// The signature carries one sender and one other field, so the round-1 and
+	// round-2 shapes — an allowlisted address in a *second* field — are seeded
+	// through `other`, which the fuzzer places in "message". The dedicated
+	// two-email-key case lives in the golden, which can express arbitrary field
+	// maps; this signature cannot.
 	seeds := []struct {
 		sender, other, ruleVal string
 		kind, typ              string
 		threshold              int
 	}{
 		{"vip@customer.com", "hello", "vip@customer.com", KindAllow, TypeEmail, 6},
-		{"mallory@spam.example", "vip@customer.com", "vip@customer.com", KindAllow, TypeEmail, 6}, // round 1
+		{"mallory@spam.example", "vip@customer.com", "vip@customer.com", KindAllow, TypeEmail, 6}, // round 1: allowlisted address in another field
+		{"Email", "vip@customer.com", "vip@customer.com", KindAllow, TypeEmail, 6},                // round 2: a case-variant key as the sender value
 		{"MİKE@works.com", "casino", "mike@works.com", KindAllow, TypeEmail, 6},                   // round 3, U+0130
 		{"MIKE@works.com", "casino", "mike@works.com", KindAllow, TypeEmail, 6},                   // round 3, U+212A
 		{"Bot <bot@example.com>", "hello", "bot@example.com", KindBlock, TypeEmail, 6},            // round 3
@@ -90,8 +101,15 @@ func FuzzDecide(f *testing.F) {
 		// Property 1: never panics. Everything below depends on this holding.
 		v := decide(in, false)
 
-		// Property 2 — allow-match soundness. This is the one all three
-		// bypasses violated, and nothing before this expressed it.
+		// Property 2 — allow-match soundness. This is the one every historical
+		// bypass violated, and nothing before this expressed it.
+		//
+		// Sound only *relative to* Canonical: both sides normalise with it, so a
+		// defect inside Canonical keeps the equation true and is invisible here.
+		// That is not hypothetical — it is exactly why reintroducing the round-3
+		// Unicode fold left this property passing. The independent check is
+		// FuzzCanonicalIsInjectiveModuloASCIICase in internal/screen/internal/addr,
+		// which reimplements the fold rather than calling it.
 		//
 		// If an allow rule decided the verdict, the submission's canonical
 		// sender must be byte-equal to that rule's stored value (or, for a

@@ -188,14 +188,14 @@ const (
 
 // ruleIcons maps a stored spam signal to its Phosphor glyph and human label.
 //
-// The rule strings come from internal/spam and from the submit handler, and are
+// The check strings come from internal/screen, and are
 // stored verbatim in spam_signals. An unknown rule — a row written by an older
 // or newer binary — must still render something, so both lookups fall back
 // rather than producing a blank icon and an empty label.
 // Keyed by screen.Check so the value set has one definition, but Go does not
 // exhaustiveness-check a map literal: adding a rule without a label here
 // compiles cleanly and go vet says nothing. TestRuleIconAndLabelFallBack is the
-// guard, and it ranges screen.AllRules so it cannot fall behind the constants.
+// guard, and it ranges screen.AllChecks so it cannot fall behind the constants.
 var ruleIcons = map[screen.Check]string{
 	screen.CheckMarkup:     "link",
 	screen.CheckKeyword:    "text-aa",

@@ -18,7 +18,7 @@ import (
 
 // QuarantineHandler serves the spam review queue and the filter rules screen.
 //
-// The queue exists because internal/spam used to drop a matching submission
+// The queue exists because the pre-quarantine scorer used to drop a matching submission
 // with no record kept, which made a false positive unrecoverable. Every action
 // here is about making that recoverable: see why it was held, put it back, or
 // confirm it was right.
@@ -378,7 +378,7 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 	// Field values are deliberately not logged, here as everywhere else: the
 	// rules and the score are what a weight-tuning exercise needs, and the
 	// submission itself stays in the database where it already is.
-	log.Printf("spam: FALSE POSITIVE reported for submission %s (form %s) — score %d, threshold %d, rules [%s]",
+	log.Printf("screen: FALSE POSITIVE reported for submission %s (form %s) — score %d, threshold %d, rules [%s]",
 		sub.ID, sub.FormID, sub.SpamScore, sub.HeldThreshold, strings.Join(rules, " "))
 
 	flash.Set(w, h.SecretKey, "success",

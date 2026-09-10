@@ -16,7 +16,7 @@ import (
 //
 // Separate from screen.Signal because this one is a row: it is scanned from the
 // database, carries whatever an older binary wrote, and is rendered rather than
-// computed. The Rule field is typed by internal/spam all the same, so the value
+// computed. The Check field is typed by internal/screen all the same, so the value
 // set has one definition — the same reason store returns screen.Rule directly.
 type SpamSignal struct {
 	Check  screen.Check
@@ -246,7 +246,7 @@ func (s *Store) HeldCount() (int, error) {
 }
 
 // SubmissionSignals returns the stored breakdown for a submission, in insertion
-// order — which is the order internal/spam emitted them, and the order the
+// order — which is the order internal/screen emitted them, and the order the
 // quarantine panel renders them.
 func (s *Store) SubmissionSignals(submissionID string) ([]SpamSignal, error) {
 	rows, err := s.db.Query(

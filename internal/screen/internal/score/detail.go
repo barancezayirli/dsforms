@@ -15,12 +15,15 @@ const maxMatchRunes = 200
 // Check identifies the check that produced a Signal.
 //
 // A defined type rather than a bare string because the documented value set had
-// already gone stale on arrival: it omitted repeat_ip, which the submit handler
-// stamps rather than the scorer. The values are split between this package,
-// which emits most of them, and internal/handler, which stamps the rest and owns
-// the display mapping — so one authoritative list is the only thing that keeps
-// them in step. That list is AllChecks; this comment deliberately does not
-// restate it or count it. It scans to and from SQL exactly like a string.
+// already gone stale on arrival: it omitted repeat_ip, which this package does
+// not emit. The values are split — this package emits the content checks, and
+// internal/screen stamps repeat_ip and rule — so one authoritative list is the
+// only thing that keeps them in step. That list is AllChecks; this comment
+// deliberately does not restate it or count it.
+//
+// internal/handler owns the display mapping and nothing else.
+//
+// It scans to and from SQL exactly like a string.
 type Check string
 
 // The complete set. CheckRepeatIP and CheckBlocked are stamped by the submit
@@ -106,7 +109,8 @@ func Detail(data map[string]string) (int, []Signal) {
 	return DetailWith(data, nil)
 }
 
-// DetailWith is Detail plus operator-supplied keywords from internal/filter.
+// DetailWith is Detail plus operator-supplied keywords, which the screener
+// takes from the operator's rules.
 //
 // Custom keywords score at the same keywordWeight as the built-in list rather
 // than short-circuiting to a hold. That is deliberate and is the whole reason

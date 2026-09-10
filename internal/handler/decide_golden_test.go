@@ -41,10 +41,8 @@ func TestDecideGolden(t *testing.T) {
 		// would make every later case a repeat.
 		sc := screen.New(16)
 		in := screen.Input{FormID: "f", Fields: c.fields, IP: c.ip, Rules: c.rules, Threshold: c.threshold}
-		if c.repeated {
-			for i := 0; i < 2; i++ {
-				sc.Decide(in)
-			}
+		for i := 0; i < c.prior; i++ {
+			sc.Decide(in)
 		}
 		writeCase(&buf, c, sc.Decide(in))
 	}
@@ -83,7 +81,13 @@ type goldenCase struct {
 	ip        string
 	rules     []screen.Rule
 	threshold int
-	repeated  bool
+
+	// prior is how many submissions from this (form, IP) precede the one being
+	// recorded. It is a count, not a bool, because Tracker.Seen's threshold is a
+	// count: priming twice and measuring the third call samples 1 and 3 and never
+	// 2, so changing that threshold from >= 3 to >= 2 altered real behaviour and
+	// produced no golden diff at all. A boolean corpus cannot see a boundary.
+	prior int
 }
 
 // writeCase renders one case deterministically. Fields are sorted because Go
@@ -103,7 +107,7 @@ func writeCase(buf *bytes.Buffer, c goldenCase, v screen.Verdict) {
 		buf.WriteString("  field (none)\n")
 	}
 
-	fmt.Fprintf(buf, "  ip=%q threshold=%d repeated=%v\n", c.ip, c.threshold, c.repeated)
+	fmt.Fprintf(buf, "  ip=%q threshold=%d prior=%d\n", c.ip, c.threshold, c.prior)
 	for _, r := range c.rules {
 		fmt.Fprintf(buf, "  rule %s/%s %q\n", r.Kind, r.Type, r.Value)
 	}
@@ -126,8 +130,8 @@ func writeCase(buf *bytes.Buffer, c goldenCase, v screen.Verdict) {
 }
 
 // fieldSets are the submission shapes worth characterising: one per content
-// check, the multi-signal pile-ups, the degenerate inputs, and the three forms
-// that were live filter bypasses in review rounds 1, 2 and 3.
+// check, the multi-signal pile-ups, the degenerate inputs, and every form that
+// was a live filter bypass in review rounds 1, 2 and 3.
 func fieldSets() []struct {
 	name   string
 	fields map[string]string
@@ -232,14 +236,21 @@ func goldenCases() []goldenCase {
 
 	// Repeat-IP is stamped outside the scorer and weighted at the threshold, so
 	// it holds on its own — except behind an allow rule, which skips it.
-	for _, fs := range fieldSets() {
-		cases = append(cases, goldenCase{
-			name:      "repeat/" + fs.name,
-			fields:    fs.fields,
-			ip:        ip,
-			threshold: 6,
-			repeated:  true,
-		})
+	//
+	// Both sides of the boundary are sampled. prior=1 is the second submission
+	// from this IP, which must NOT count as a repeat; prior=2 is the third, which
+	// must. Recording only the second case is what let the threshold move without
+	// the golden noticing.
+	for _, prior := range []int{1, 2} {
+		for _, fs := range fieldSets() {
+			cases = append(cases, goldenCase{
+				name:      fmt.Sprintf("repeat-prior-%d/%s", prior, fs.name),
+				fields:    fs.fields,
+				ip:        ip,
+				threshold: 6,
+				prior:     prior,
+			})
+		}
 	}
 	for _, rs := range ruleSets() {
 		cases = append(cases, goldenCase{
@@ -248,7 +259,7 @@ func goldenCases() []goldenCase {
 			ip:        ip,
 			rules:     rs.rules,
 			threshold: 6,
-			repeated:  true,
+			prior:     2,
 		})
 	}
 

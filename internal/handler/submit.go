@@ -203,7 +203,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if held {
 		// Held, not dropped. The response below is indistinguishable from
 		// success so a bot learns nothing, but the submission is now
-		// recoverable: internal/spam used to bin it with no record at all, and
+		// recoverable: the pre-quarantine scorer used to bin it with no record at all, and
 		// a false positive was unrecoverable.
 		//
 		// Field values are never logged — the reason is diagnosable without
