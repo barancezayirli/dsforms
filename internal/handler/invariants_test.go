@@ -187,3 +187,73 @@ func TestShellActiveNamesAKnownNavGroup(t *testing.T) {
 	}
 	t.Logf("inspected %d Shell call sites", checked)
 }
+
+// TestNoHandlerHoldsTheConcreteStore is what keeps this package's storage
+// surfaces narrow.
+//
+// Every handler used to embed Base{Store *store.Store} and could therefore reach
+// all seventy-nine methods on the store regardless of the five or twenty it
+// actually called. Each now declares an interface naming exactly what it uses —
+// SubmitStore is five methods, SearchStore is one — so what a handler *can* touch
+// is what it does touch.
+//
+// Nothing in the compiler defends that. Changing a field back to *store.Store
+// builds cleanly, every existing call site keeps working, and the narrowing is
+// silently gone; the interface declaration stays in the file looking as though it
+// still means something. That is precisely the regression this test exists to
+// catch, and it is the same shape as the bug that motivated the whole refactor:
+// a property everybody believed was enforced, enforced by nothing.
+//
+// main.go is exempt and not scanned — it is the composition root, it constructs
+// the store, and it legitimately holds the concrete type.
+func TestNoHandlerHoldsTheConcreteStore(t *testing.T) {
+	t.Parallel()
+	fset, files := parseHandlerPackage(t)
+
+	structs := 0
+	for path, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			structs++
+			for _, field := range st.Fields.List {
+				star, ok := field.Type.(*ast.StarExpr)
+				if !ok {
+					continue
+				}
+				sel, ok := star.X.(*ast.SelectorExpr)
+				if !ok {
+					continue
+				}
+				pkg, ok := sel.X.(*ast.Ident)
+				if !ok || pkg.Name != "store" || sel.Sel.Name != "Store" {
+					continue
+				}
+				name := "(embedded)"
+				if len(field.Names) > 0 {
+					name = field.Names[0].Name
+				}
+				t.Errorf("%s:%d %s.%s is *store.Store — the whole store, not the "+
+					"methods this type uses.\nDeclare an interface next to the type "+
+					"naming just those methods, as the other handlers do, and assert "+
+					"it in main.go's var block.",
+					path, fset.Position(field.Pos()).Line, ts.Name.Name, name)
+			}
+			return true
+		})
+	}
+
+	// A matcher that matches nothing passes while asserting nothing. Two AST
+	// tests on this branch have already shipped in that state — one inspected
+	// zero queries because every query was a concatenation rather than a literal.
+	if structs < 20 {
+		t.Fatalf("only %d structs inspected; the scan is no longer finding them", structs)
+	}
+	t.Logf("inspected %d structs", structs)
+}
