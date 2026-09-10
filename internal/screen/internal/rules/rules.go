@@ -259,9 +259,21 @@ func senderAddresses(data map[string]string) []string {
 func Keywords(rules []Rule) []string {
 	var out []string
 	for _, r := range rules {
-		if r.Kind == KindBlock && r.Type == TypeKeyword {
-			out = append(out, r.Value)
+		if r.Kind != KindBlock || r.Type != TypeKeyword {
+			continue
 		}
+		// Blanks are dropped here, at the boundary where operator data enters
+		// the scoring path, and not only in the scorer that consumes them.
+		//
+		// The scorer does filter them, so this was not a live bug — but the
+		// defence against "every string contains the empty string" sat two
+		// packages away from where a blank can enter, which makes it one edit
+		// from being a bug. A blank keyword reaching strings.Contains scores
+		// every submission on every field.
+		if strings.TrimSpace(r.Value) == "" {
+			continue
+		}
+		out = append(out, r.Value)
 	}
 	return out
 }

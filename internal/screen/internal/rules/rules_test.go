@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/barancezayirli/dsforms/internal/screen/internal/addr"
@@ -462,4 +463,78 @@ func TestMatchesFailsClosedOnDegenerateInput(t *testing.T) {
 			t.Error("a keyword rule matched in Match; it should reach the scorer instead")
 		}
 	})
+}
+
+// TestUnvalidatedValuesNeverOverMatch pins the property that makes the Rule
+// invariant safe to leave unenforced at the point of use.
+//
+// Rule.Value is documented as normalised by Validate before storage, and Decide
+// passes rules straight to Match without re-checking. That was sound while the
+// only producer was the store, which validates every write — but the handler's
+// consumer interfaces made the producer pluggable, so the type now permits a
+// rule whose value never round-tripped through Validate.
+//
+// The reason that is not a hole is this: every matcher compares against a
+// canonicalised address, so a malformed value matches *nothing* rather than
+// something extra. It fails closed. For a block rule that means spam gets
+// through — no worse than the rule not existing, and screen.CheckRules already
+// reports such rules to the operator as inert. For an allow rule it means no
+// bypass, which is the direction that matters.
+//
+// Re-validating inside Decide would cost a validation per rule per submission on
+// the public submit path and change no outcome. Asserting the property is the
+// cheaper half of that trade — and unlike a comment, it fails if someone later
+// makes a matcher looser.
+func TestUnvalidatedValuesNeverOverMatch(t *testing.T) {
+	t.Parallel()
+
+	// Values Validate would reject or rewrite: empty, unnormalised case,
+	// whitespace, a bare dot, a lone suffix.
+	bad := []string{"", " ", ".", "@", "MIKE@Works.com", "  spam@x.com  ", "*", "%"}
+
+	data := map[string]string{
+		"email":   "someone@example.com",
+		"message": "an ordinary message",
+	}
+	const ip = "203.0.113.5"
+
+	for _, typ := range []string{TypeEmail, TypeDomain, TypeIP, TypeCIDR, TypeKeyword} {
+		for _, kind := range []string{KindAllow, KindBlock} {
+			for _, v := range bad {
+				r := Rule{ID: "R1", Kind: kind, Type: typ, Value: v}
+				if _, hit := Match([]Rule{r}, data, ip); hit {
+					t.Errorf("a %s/%s rule with the unvalidated value %q matched an "+
+						"ordinary submission.\nAn unvalidated rule must be inert: matching "+
+						"*more* is how an allow rule becomes a bypass and a block rule "+
+						"starts holding legitimate mail.", kind, typ, v)
+				}
+			}
+		}
+	}
+}
+
+// TestEmptyKeywordIsNotASubstringOfEverything covers the one path where a bad
+// value could plausibly match everything rather than nothing.
+//
+// Keyword rules do not go through Match; Keywords() hands them to the scorer,
+// which does a substring test — and every string contains "". The scorer drops
+// blank keywords before that, so this asserts the drop rather than trusting it.
+func TestEmptyKeywordIsNotASubstringOfEverything(t *testing.T) {
+	t.Parallel()
+
+	got := Keywords([]Rule{
+		{ID: "K1", Kind: KindBlock, Type: TypeKeyword, Value: ""},
+		{ID: "K2", Kind: KindBlock, Type: TypeKeyword, Value: "   "},
+		{ID: "K3", Kind: KindBlock, Type: TypeKeyword, Value: "casino"},
+	})
+
+	// Keywords passes values through; the scorer is what filters blanks. Both
+	// halves are checked, here and in score's own tests, because a blank reaching
+	// strings.Contains would score every submission on every field.
+	for _, kw := range got {
+		if strings.TrimSpace(kw) == "" {
+			t.Errorf("Keywords returned a blank keyword %q — if the scorer ever stops "+
+				"filtering these, every submission matches it on every field", kw)
+		}
+	}
 }
