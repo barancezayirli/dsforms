@@ -433,11 +433,34 @@ stored before the write-side check existed — nothing backfilled them — was
 handed to the browser verbatim, including on the path where a hostile
 `_redirect` had just been refused.
 
-**Still open — one, with a plan approved and written up:**
+**Landed: accepted submissions no longer report a score they never had.** Score
+and threshold were computed for every submission and persisted only on the held
+path, so the drawer rendered the column default. They are written from the
+struct now — `CreateSubmission` has one production caller and a long tail of
+fixtures, so a signature change would have been almost pure churn. Signals are
+still not stored for accepted rows: the reader tells "was held, then restored"
+from "passed" by whether any exist.
 
-- Accepted submissions report `score 0`. Score and signals are persisted only on
-  the held path, so the detail drawer prints a number the app never computed for
-  that row.
+Review made this branch twice as long as the fix. Three mutations survived the
+first version, each one a distinction a comment claimed to be making and nothing
+asserted — the clamped-versus-configured threshold, the package default, and the
+signals decision itself. And adding a third panel branch introduced a worse
+defect than the one it fixed: a restored submission whose breakdown could not be
+*read* fell through to "Scored below the threshold, so it was delivered",
+printed beside a notice saying it had been held, above a score above the
+threshold. The panel has five states now and the test lists, for each, both what
+it must say and what it must not.
+
+**This fix is not retroactive.** Submissions received before it have no stored
+score and none can be recovered, so they say so rather than claiming zero.
+
+## Open questions from this pass
+
+- The daily digest is still only unit-tested. It runs on a hardcoded 24-hour
+  ticker with no way to trigger it, so nothing has watched one arrive.
+- Browser-side JavaScript beyond the account page is exercised by tests only
+  through rendered HTML, not by driving it.
+
 
 ## What the review rounds caught, and what it says about guards
 
