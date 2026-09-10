@@ -93,11 +93,18 @@ type Submission struct {
 	// whichever function returned the value. Guarded by
 	// TestEverySubmissionReadUsesTheSharedColumnList rather than by this comment.
 	//
-	// Write paths are the other direction and legitimately pass zeros here —
-	// CreateSubmission ignores these columns and CreateHeldSubmission takes the
-	// score and threshold as parameters. A value built for a write therefore does
-	// not satisfy the invariant, and one is handed to the mailer and webhook on
-	// the accept path; neither reads these fields, and neither should start.
+	// Write paths carry them too, now. CreateSubmission writes SpamScore and
+	// HeldThreshold straight from the struct — an accepted submission has a real
+	// score, and printing zero for it was the UI stating a number the submission
+	// never had. CreateHeldSubmission still takes them as parameters because it
+	// also writes the signal rows. A fixture that leaves them zero is saying the
+	// message scored nothing, which for a fixture is true.
+	//
+	// Signals are deliberately NOT stored for accepted submissions. The reader
+	// distinguishes "was held, then restored" from "passed" by whether any signal
+	// rows exist, so writing them for every sub-threshold hit would make ordinary
+	// submissions claim they had been quarantined — a worse statement than the
+	// one being fixed, and one that would need a new column to undo.
 	//
 	// That is deliberate, and it is the alternative to splitting this into
 	// separate held and accepted types. The two are one row and one lifecycle —
@@ -112,9 +119,12 @@ type Submission struct {
 	// the database says scored 11. That exact mismatch shipped once already.
 	// Notified likewise defaults to 1 in the schema, so a partial read claims an
 	// accepted submission was never notified.
-	IsHeld        bool
-	SpamScore     int
-	HeldThreshold int // the threshold actually applied when it was held
+	IsHeld    bool
+	SpamScore int
+	// HeldThreshold is the threshold actually applied, whether or not the
+	// submission was held — an accepted one is judged against a bar too, and the
+	// reader shows the score against it.
+	HeldThreshold int
 	Notified      bool
 }
 
@@ -808,9 +818,22 @@ func (s *Store) CreateSubmission(sub Submission) error {
 	if createdAt.IsZero() {
 		createdAt = time.Now()
 	}
+	// SpamScore and HeldThreshold are written from the struct rather than taken
+	// as parameters, which is what CreateHeldSubmission does. This function has
+	// one production caller and a long tail of test fixtures that legitimately
+	// pass zero, so a signature change would be almost entirely churn — and the
+	// struct already carries both fields for reads. Writing them here is what
+	// makes them mean the same thing in both directions.
+	//
+	// The cost is that the two writers now honour the same fields under opposite
+	// conventions: this one reads sub.SpamScore, CreateHeldSubmission takes it as
+	// a parameter and ignores the field. Nothing in the types says so, which is
+	// why both doc comments do.
 	_, err := s.conn().Exec(
-		"INSERT INTO submissions (id, form_id, data, ip, created_at) VALUES (?, ?, ?, ?, ?)",
+		"INSERT INTO submissions (id, form_id, data, ip, created_at, spam_score, held_threshold) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?)",
 		sub.ID, sub.FormID, sub.RawData, sub.IP, sqliteTimestamp(createdAt),
+		sub.SpamScore, sub.HeldThreshold,
 	)
 	if err != nil {
 		return fmt.Errorf("create submission: %w", err)

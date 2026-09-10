@@ -419,3 +419,136 @@ func TestSubmitCustomKeywordPilesUpButDoesNotHoldAlone(t *testing.T) {
 		t.Errorf("got %d held, want 1 once the keyword piles up with markup", len(held))
 	}
 }
+
+// TestAcceptedSubmissionsStoreTheirVerdict covers a number the UI was inventing.
+//
+// Score, threshold and signals are computed for every submission and were
+// persisted only on the held path, so the reader rendered the column default and
+// every accepted submission claimed "score 0". A message sent during a feature
+// pass really scored 3 — a gibberish token on the ordinary English word
+// "months" — and the drawer still said 0.
+//
+// Each row asserts the stored values equal what the screener actually returned,
+// rather than hardcoding a number. Writing `SpamScore == 3` pins the scorer's
+// current tuning as well as the persistence contract: retune gibberishWeight and
+// this test fails saying "stored SpamScore = 4, want 3", in the handler package,
+// pointing a reader at submit.go and store.go — both of which would be correct.
+// Comparing against the verdict pins the thing this test is about.
+func TestAcceptedSubmissionsStoreTheirVerdict(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		// formThreshold is the form's own override; 0 means inherit.
+		formThreshold int
+		fields        map[string]string
+		wantScoreZero bool
+	}{
+		{
+			name: "scores something and is still delivered",
+			fields: map[string]string{
+				"name":    "Ana Silva",
+				"email":   "ana@example.org",
+				"message": "We are planning a crypto rollout next quarter and wanted your thoughts.",
+			},
+		},
+		{
+			name: "genuinely clean",
+			fields: map[string]string{
+				"name":    "Ben Cole",
+				"email":   "ben@example.org",
+				"message": "We are planning a rebrand next quarter and wanted your thoughts.",
+			},
+			wantScoreZero: true,
+		},
+		{
+			// The row that makes the threshold's provenance testable. Without a
+			// form-level override, effectiveThreshold and the verdict's threshold
+			// are the same number, so storing either one passes — and the comment
+			// in submit.go explaining why the verdict's clamped value is used
+			// would be the only guard on it. 99 is above MaxThreshold, so the two
+			// differ: the screener clamps to 20 and judged the submission against
+			// that, not against 99.
+			name:          "a form threshold the screener clamped",
+			formThreshold: 99,
+			fields: map[string]string{
+				"name":    "Cara Lin",
+				"email":   "cara@example.org",
+				"message": "We are planning a crypto rollout next quarter and wanted your thoughts.",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h, s, _ := quarantineHandler(t)
+			if tc.formThreshold > 0 {
+				if err := s.UpdateForm(store.Form{
+					ID: "f1", Name: "Contact", EmailTo: "me@example.com",
+					SpamThreshold: tc.formThreshold,
+				}); err != nil {
+					t.Fatalf("UpdateForm: %v", err)
+				}
+			}
+
+			rr := submitTo(t, h, "f1", tc.fields, "203.0.113.10")
+			if rr.Code != http.StatusFound {
+				t.Fatalf("status = %d, want 302 — every row here is below its threshold", rr.Code)
+			}
+
+			// What the screener actually decided, for the same input.
+			form, err := s.GetForm("f1")
+			if err != nil {
+				t.Fatalf("GetForm: %v", err)
+			}
+			want := h.Screener.Decide(screen.Input{
+				FormID: "f1", Fields: tc.fields, IP: "203.0.113.10",
+				Threshold: h.effectiveThreshold(form),
+			})
+
+			subs, err := s.ListSubmissions("f1")
+			if err != nil {
+				t.Fatalf("ListSubmissions: %v", err)
+			}
+			if len(subs) != 1 {
+				t.Fatalf("stored %d submissions, want 1 (accepted, not held)", len(subs))
+			}
+			got := subs[0]
+
+			if got.IsHeld {
+				t.Fatal("submission was held; these rows are about the accepted path")
+			}
+			if got.SpamScore != want.Score {
+				t.Errorf("stored SpamScore = %d, want %d — the score the screener returned.\n"+
+					"The drawer renders this field, so a wrong value here is the UI "+
+					"stating a score the submission never had.", got.SpamScore, want.Score)
+			}
+			if (got.SpamScore == 0) != tc.wantScoreZero {
+				t.Errorf("SpamScore = %d, but this row expects zero=%v — the fixture no "+
+					"longer exercises the case it was written for", got.SpamScore, tc.wantScoreZero)
+			}
+			if got.HeldThreshold != want.Threshold {
+				t.Errorf("stored HeldThreshold = %d, want %d — the bar actually applied.\n"+
+					"Decide clamps, so persisting the form's raw setting would record a "+
+					"threshold the submission was never judged against.",
+					got.HeldThreshold, want.Threshold)
+			}
+
+			// The decision this branch's comment defends: an accepted submission
+			// stores no signal rows. The reader tells "was held, then restored"
+			// from "passed" by whether any exist, so writing them here would make
+			// ordinary submissions claim they had been quarantined.
+			signals, err := s.SubmissionSignals(got.ID)
+			if err != nil {
+				t.Fatalf("SubmissionSignals: %v", err)
+			}
+			if len(signals) != 0 {
+				t.Errorf("stored %d signal rows for an accepted submission, want 0.\n"+
+					"The detail page branches on their presence, so this would make it "+
+					"report that a delivered submission had been held and restored.",
+					len(signals))
+			}
+		})
+	}
+}

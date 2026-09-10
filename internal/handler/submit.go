@@ -291,12 +291,19 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// Truncated to the second because that is the resolution the row stores, so
 	// the email and the admin UI report the identical timestamp.
 	sub := store.Submission{
-		ID:        uuid.New().String(),
-		FormID:    formID,
-		RawData:   string(rawData),
-		Data:      data,
-		IP:        ip,
-		CreatedAt: time.Now().UTC().Truncate(time.Second),
+		ID:      uuid.New().String(),
+		FormID:  formID,
+		RawData: string(rawData),
+		Data:    data,
+		IP:      ip,
+		// The score this submission actually got, and the bar it was judged
+		// against. Both were computed a few lines up and then thrown away, so the
+		// reader rendered the column default and every accepted submission
+		// claimed "score 0" — including ones that scored just under the
+		// threshold, which is exactly when an operator wants to know.
+		SpamScore:     score,
+		HeldThreshold: threshold,
+		CreatedAt:     time.Now().UTC().Truncate(time.Second),
 	}
 	if err := h.Store.CreateSubmission(sub); err != nil {
 		log.Printf("submit: failed to save submission: %v", err)
