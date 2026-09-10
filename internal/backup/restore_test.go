@@ -196,3 +196,58 @@ func TestImportSucceedsAndCleansUp(t *testing.T) {
 	}
 	assertNoRollbackFile(t, dbPath)
 }
+
+// TestImportRefusesWhenTheWALCannotBeFullyFlushed is the case the first version
+// of this guard missed entirely.
+//
+// Import removes the write-ahead log before swapping, because SQLite would
+// otherwise replay the old database's frames over the restored one. That is only
+// safe if every frame has first been checkpointed into the main file.
+//
+// `PRAGMA wal_checkpoint(TRUNCATE)` does NOT report contention as an error. It
+// returns a row — (busy, log, checkpointed) — and a reader holding a snapshot
+// produces `busy=1, log=53, checkpointed=52` with a nil error. Checking only the
+// Exec error therefore passed in exactly the situation where frames are left
+// behind, which is the situation the check exists for. A concurrent admin
+// request is enough to cause it.
+func TestImportRefusesWhenTheWALCannotBeFullyFlushed(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// A second connection holding a read snapshot pins the WAL, so the
+	// checkpoint cannot copy the newest frames into the main database.
+	reader, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatalf("opening reader: %v", err)
+	}
+	defer reader.Close()
+	tx, err := reader.Begin()
+	if err != nil {
+		t.Fatalf("begin read tx: %v", err)
+	}
+	var id string
+	if err := tx.QueryRow("SELECT id FROM forms LIMIT 1").Scan(&id); err != nil {
+		t.Fatalf("read in tx: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Write after the snapshot, so there is a frame the checkpoint cannot flush.
+	for i := 0; i < 50; i++ {
+		if err := live.CreateForm(store.Form{
+			ID: "pending-" + string(rune('a'+i%26)) + string(rune('a'+i/26)), Name: "Pending", EmailTo: "p@q.com",
+		}); err != nil {
+			t.Fatalf("seeding pending writes: %v", err)
+		}
+	}
+
+	err = Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected.\nThe write-ahead log still "+
+			"holds frames that are not in the main database. Removing it — which the "+
+			"swap does next — discards them, and rolling back would restore a database "+
+			"missing its own most recent writes.", err)
+	}
+	if got := formNames(t, live); len(got) == 0 {
+		t.Error("the live store is not serving after a refused restore")
+	}
+}

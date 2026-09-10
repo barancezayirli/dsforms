@@ -127,16 +127,32 @@ func Import(s Store, uploadedPath, dbPath string) error {
 		return fmt.Errorf("%w: %w", ErrRejected, err)
 	}
 
-	// Checkpoint before anything is touched, and abort if it fails.
+	// Flush the write-ahead log into the main database before anything is
+	// touched, and refuse the restore if it cannot be flushed completely.
 	//
-	// This used to log "recent unflushed data may be lost" and carry on to delete
-	// the WAL, which is what actually lost it. It matters more now: rolling back
-	// to a database whose unflushed frames were discarded would be a quiet data
-	// loss dressed as a recovery. Aborting here costs a refused restore and
-	// nothing else, because nothing has changed yet.
-	if _, err := s.DB().Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+	// The swap removes the WAL, because SQLite would otherwise replay the old
+	// database's frames over the restored one. That is only safe once every frame
+	// is in the main file. This used to log "recent unflushed data may be lost"
+	// and delete the WAL anyway, which is what lost it; with a rollback in play it
+	// would be worse, restoring a database missing its own most recent writes.
+	//
+	// The result row is what has to be checked, not the error. wal_checkpoint does
+	// not report contention as a failure: a reader holding a snapshot returns
+	// (busy=1, log=53, checkpointed=52) with a nil error, so an Exec-and-check-err
+	// guard passes in precisely the case it exists to catch. One concurrent admin
+	// request is enough to produce it.
+	var busy, walFrames, flushed sql.NullInt64
+	if err := s.DB().QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
+		Scan(&busy, &walFrames, &flushed); err != nil {
 		return fmt.Errorf("%w: cannot flush the current database to disk, so it "+
 			"cannot be safely set aside: %w", ErrRejected, err)
+	}
+	// A database not in WAL mode reports -1 for both counts: nothing to flush.
+	if walFrames.Int64 > 0 && flushed.Int64 < walFrames.Int64 {
+		return fmt.Errorf("%w: %d of %d write-ahead frames could not be written to "+
+			"the database file, most likely because another request is holding a read "+
+			"snapshot. Removing the log now would discard those writes; retry the "+
+			"restore", ErrRejected, walFrames.Int64-flushed.Int64, walFrames.Int64)
 	}
 
 	// Close before any filesystem operation so no write races the rename.
