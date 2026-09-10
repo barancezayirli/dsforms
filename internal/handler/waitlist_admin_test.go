@@ -625,3 +625,49 @@ func TestWriteCSVReportsATruncatedDownload(t *testing.T) {
 		}
 	})
 }
+
+// The waitlist admin paths had no validation of any kind before this — not on
+// the redirect, not on anything but the name.
+
+func TestWaitlistCreateRejectsUnusableRedirect(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	form := url.Values{"name": {"Launch"}, "redirect": {"htp://customer.example/joined"}}
+	req := withUser(httptest.NewRequest("POST", "/admin/waitlists/new", strings.NewReader(form.Encode())))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render with the reason)", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Redirect must be") {
+		t.Errorf("page did not explain the redirect problem; got:\n%s", w.Body.String())
+	}
+	if wls, _ := s.ListWaitlists(); len(wls) != 0 {
+		t.Errorf("stored %d waitlists, want 0", len(wls))
+	}
+}
+
+func TestWaitlistEditRejectsUnusableRedirect(t *testing.T) {
+	t.Parallel()
+	s, h := setupWaitlistAdmin(t)
+	_ = s.CreateWaitlist(store.Waitlist{ID: "wl1", Name: "Launch", Redirect: "https://customer.example/joined"})
+
+	form := url.Values{"name": {"Launch"}, "redirect": {"customer.example/joined"}}
+	req := withURLParam(withUser(httptest.NewRequest("POST", "/admin/waitlists/wl1/edit", strings.NewReader(form.Encode()))), "id", "wl1")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.Edit(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (re-render with the reason)", w.Code)
+	}
+	got, err := s.GetWaitlist("wl1")
+	if err != nil {
+		t.Fatalf("GetWaitlist: %v", err)
+	}
+	if got.Redirect != "https://customer.example/joined" {
+		t.Errorf("stored redirect = %q, want the original — a rejected edit must not "+
+			"overwrite the working value", got.Redirect)
+	}
+}

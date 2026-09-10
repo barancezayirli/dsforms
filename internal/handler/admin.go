@@ -217,6 +217,27 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 		webhookFormat = ""
 	}
 
+	// A stored redirect is also the allowlist for _redirect on this form, so a
+	// typo here fails twice and silently: the redirect stops working, and every
+	// _redirect that named that origin starts falling back with no visible
+	// cause. Which origin the operator picks is their business; whether it can
+	// be a destination at all is not.
+	if !urlsafe.ConfiguredRedirect(redirect) {
+		data := formNewData{
+			PageData: h.Shell(w, r, "New Form", "forms"),
+			Form: store.Form{
+				Name: name, EmailTo: emailTo, Redirect: redirect,
+				WebhookURL: webhookURL, WebhookFormat: webhookFormat,
+			},
+			Error: "Redirect must be a full http(s) URL or a path starting with /.",
+		}
+		if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
+			log.Printf("form_new template error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	if webhookURL != "" && !urlsafe.HTTPScheme(webhookURL) {
 		data := formNewData{
 			PageData: h.Shell(w, r, "New Form", "forms"),
@@ -271,6 +292,42 @@ func (h *AdminHandler) EditFormPage(w http.ResponseWriter, r *http.Request) {
 		BaseURL:  h.BaseURL,
 	}
 
+	if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
+		log.Printf("form_edit template error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// renderFormEditError re-renders the edit page with the operator's submitted
+// values and a reason.
+//
+// It exists because this block was already written twice — fetch the form,
+// overlay what was posted, render with a message — and a redirect check makes
+// three. The overlay matters: re-reading the stored form alone would show the
+// operator their old values beside a complaint about the new ones.
+func (h *AdminHandler) renderFormEditError(w http.ResponseWriter, r *http.Request, id, name, emailTo, redirect, webhookURL, webhookFormat, msg string) {
+	f, err := h.Store.GetForm(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "form not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("edit form: get form %s error: %v", id, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	f.Name = name
+	f.EmailTo = emailTo
+	f.Redirect = redirect
+	f.WebhookURL = webhookURL
+	f.WebhookFormat = webhookFormat
+
+	data := formEditData{
+		PageData: h.Shell(w, r, "Edit Form", "forms"),
+		Form:     f,
+		BaseURL:  h.BaseURL,
+		Error:    msg,
+	}
 	if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
 		log.Printf("form_edit template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -334,32 +391,15 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 		webhookFormat = ""
 	}
 
+	if !urlsafe.ConfiguredRedirect(redirect) {
+		h.renderFormEditError(w, r, id, name, emailTo, redirect, webhookURL, webhookFormat,
+			"Redirect must be a full http(s) URL or a path starting with /.")
+		return
+	}
+
 	if webhookURL != "" && !urlsafe.HTTPScheme(webhookURL) {
-		ef, err := h.Store.GetForm(id)
-		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				http.Error(w, "form not found", http.StatusNotFound)
-				return
-			}
-			log.Printf("edit form: get form %s error: %v", id, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		ef.Name = name
-		ef.EmailTo = emailTo
-		ef.Redirect = redirect
-		ef.WebhookURL = webhookURL
-		ef.WebhookFormat = webhookFormat
-		data := formEditData{
-			PageData: h.Shell(w, r, "Edit Form", "forms"),
-			Form:     ef,
-			BaseURL:  h.BaseURL,
-			Error:    "Webhook URL must use http or https.",
-		}
-		if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
-			log.Printf("form_edit template error: %v", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-		}
+		h.renderFormEditError(w, r, id, name, emailTo, redirect, webhookURL, webhookFormat,
+			"Webhook URL must use http or https.")
 		return
 	}
 

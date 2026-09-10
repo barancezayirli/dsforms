@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/barancezayirli/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/urlsafe"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -109,6 +110,17 @@ func (h *WaitlistHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same rule as a form's redirect, and for the same reason: this value is the
+	// allowlist for _redirect on this waitlist, so a typo disables it silently.
+	if !urlsafe.ConfiguredRedirect(wl.Redirect) {
+		data := waitlistFormData{
+			PageData: h.Shell(w, r, "New Waitlist", "waitlists"),
+			Waitlist: wl, BaseURL: h.BaseURL, Error: "Redirect must be a full http(s) URL or a path starting with /.",
+		}
+		h.render(w, "waitlist_new.html", data)
+		return
+	}
+
 	wl.ID = uuid.New().String()
 	if err := h.Store.CreateWaitlist(wl); err != nil {
 		log.Printf("waitlist create: %v", err)
@@ -180,6 +192,17 @@ func (h *WaitlistHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		data := waitlistFormData{
 			PageData: h.Shell(w, r, "Edit Waitlist", "waitlists"),
 			Waitlist: wl, BaseURL: h.BaseURL, Error: "Waitlist name is required.",
+		}
+		h.render(w, "waitlist_edit.html", data)
+		return
+	}
+
+	// Same rule as a form's redirect, and for the same reason: this value is the
+	// allowlist for _redirect on this waitlist, so a typo disables it silently.
+	if !urlsafe.ConfiguredRedirect(wl.Redirect) {
+		data := waitlistFormData{
+			PageData: h.Shell(w, r, "Edit Waitlist", "waitlists"),
+			Waitlist: wl, BaseURL: h.BaseURL, Error: "Redirect must be a full http(s) URL or a path starting with /.",
 		}
 		h.render(w, "waitlist_edit.html", data)
 		return
