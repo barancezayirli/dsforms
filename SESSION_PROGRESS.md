@@ -215,7 +215,6 @@ Nothing below is caused by the refactor; the narrowing surfaced them.
 
 | Item | Why deferred | Target |
 |---|---|---|
-| `AdminStore` (20) and `QuarantineStore` (14) want splitting | `AdminHandler` is two handlers: the forms half and the submissions half share only `GetForm`, and the routes already draw the line. `QuarantineStore` splits into a read-mostly review queue and a three-method rule-mutation surface with zero overlap — worth separating, since a rule write is what can open a fail-open block rule. | A follow-up PR |
 
 ## Sixth pass — a failed restore must leave a working database
 
@@ -298,25 +297,49 @@ access now goes through a locked `conn()`.
 endpoint was a route nobody called — `restart: unless-stopped` does not restart a
 container whose process is alive and failing every request.
 
-## Deferred from the sixth-pass review
+## Deferred items
 
-Found by the review sweep, none caused by this branch, none acted on here.
+**None.** Everything recorded across six review passes is either done or closed
+below with a reason. The list ran 19 items at its longest.
 
-| Item | Why deferred | Target |
-|---|---|---|
+## Closed without doing — with the reasoning
+
+The deferred list is empty. These three were on it and are not being done; that
+is a decision, not an omission, and the reasoning is here so it can be argued
+with rather than rediscovered.
+
+**Retyping `screen.Rule.Kind` / `.Type` as defined types.** Measured before
+deciding: 163 uses of the constants, 44 field accesses, 47 `AddFilterRule` sites,
+across four packages and their tests. The benefit is that `Rule{Type: "emial"}`
+becomes a compile error instead of a silently inert rule. That state is already
+unreachable from storage — the `filter_rules` CHECK constraint permits only the
+five types and two kinds — and now unreachable in effect too:
+`TestUnvalidatedValuesNeverOverMatch` proves that a rule with any unvalidated
+kind or type value matches nothing rather than something extra, and
+`TestMatchLogsOnlyForAGenuinelyUnknownType` pins the log on the fail-open branch.
+So the change is ~250 mechanical edits for a guarantee three other things already
+provide. Worth doing on a quiet day, in its own branch, with nothing else in
+flight. Not worth doing at the end of a long session.
+
+**Splitting `AdminStore` (20) and `QuarantineStore` (14).** The interface split
+on its own buys nothing: giving `QuarantineHandler` two fields instead of one
+leaves it reaching the same fourteen methods. The narrowing only becomes real if
+the *handlers* split — `/admin/quarantine` and `/admin/rules` into separate
+types, and `AdminHandler`'s forms half from its submissions half, which share
+only `GetForm`. That is a feature-sized refactor with a design question in it
+(what owns the shared shell), not a loose end. The interfaces make the seam
+visible, which was the point of naming them.
+
+**A "resend notification" action for restored submissions.** `notified = 0` on a
+restored row records a notification that was never sent, and nothing reads the
+column — no sweep, no retry, no admin action. Closing it properly means deciding
+what the operator sees and does, which is product design rather than debt.
 
 ## Accepted risks
 
 | Risk | Why accepted |
 |---|---|
 | IP and CIDR **allow** rules trust `X-Forwarded-For` | `ExtractIP` has trusted the header unconditionally since before this work, and dsforms is designed to sit behind a reverse proxy that sets it. Allow rules make that a scoring bypass rather than only an attribution problem, so it is worth knowing: an IP allowlist is only safe behind a proxy you control. Email and domain allow rules are not affected — they match the sender field, which the submit handler validates. Re-architecting XFF trust needs a proxy-configuration decision and is out of scope here. |
-
-## Deferred items
-
-| Item | Why deferred | Target |
-|---|---|---|
-| Retyping `screen.Rule.Kind` / `.Type` as defined types (was `filter.Rule`) | They are the "documented string set" AGENT.md §4 names, and `matches` fails open on an unknown type — an in-memory rule with a typo'd Type silently matches nothing, which for a *block* rule is a bypass rather than a no-op. The DB `CHECK` constraints make it unreachable today, so the invariant lives in SQLite rather than in Go. The constants already exist; the change is mechanical. | A follow-up PR |
-| A "resend notification" action for restored submissions | `notified = 0` on a restored row records a notification that was never sent, but nothing reads the column — no sweep, no retry, no admin action — so a failed send is not retried. Needs UI design. The misleading comment claiming otherwise has been removed. | A follow-up PR |
 
 ## Open questions
 
