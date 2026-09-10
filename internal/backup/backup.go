@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -95,6 +97,40 @@ var (
 	ErrUnavailable = errors.New("backup: database unavailable")
 )
 
+// StagedUploadPattern matches the temp files the handler stages beside the
+// database while a restore is in flight.
+const StagedUploadPattern = "dsforms-import-*.db"
+
+// SweepStagedUploads removes leftover restore uploads from dir.
+//
+// The upload is staged next to the database so the final rename cannot cross a
+// filesystem. The cost is that a process killed between staging and the swap
+// leaves the file there — up to the upload limit, on the data volume, with
+// nothing to clean it up. Several interrupted restores quietly fill the disk
+// that the database needs.
+//
+// Called at startup, where "in flight" cannot be true: nothing has begun a
+// restore yet, so every match is certainly stale. Doing it on a timer instead
+// would have to distinguish a live staging file from an abandoned one.
+//
+// Returns the number removed. A failure to remove one is not fatal — a leftover
+// file wastes space, and refusing to boot over it would be the worse trade.
+func SweepStagedUploads(dir string) (int, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, StagedUploadPattern))
+	if err != nil {
+		return 0, fmt.Errorf("sweep staged uploads: %w", err)
+	}
+	var removed int
+	for _, m := range matches {
+		if err := os.Remove(m); err != nil {
+			log.Printf("sweep staged uploads: %s: %v", m, err)
+			continue
+		}
+		removed++
+	}
+	return removed, nil
+}
+
 // Store is what Import needs to swap the database file underneath a running
 // process: the handle to close, and the way to open the replacement.
 //
@@ -107,6 +143,18 @@ type Store interface {
 	DB() *sql.DB
 	Reopen(path string) error
 }
+
+// importMu serializes restores.
+//
+// Two overlapping Imports both close the live handle and then contend for one
+// fixed park path: the second can rename the first's parked database away, or
+// swap its upload into place between the first's swap and reopen. Every outcome
+// is some interleaving of two half-finished swaps over one file.
+//
+// Admin-only, so the reach is small, but it costs a mutex to remove entirely and
+// there is no sensible concurrent behaviour to preserve — a second restore while
+// the first is mid-swap should wait, not race.
+var importMu sync.Mutex
 
 // Import replaces the live database with an uploaded one, and guarantees that a
 // failure leaves a working database behind.
@@ -123,6 +171,9 @@ type Store interface {
 // funnels through rollBack, and Import cannot return without either a working
 // database or ErrUnavailable.
 func Import(s Store, uploadedPath, dbPath string) error {
+	importMu.Lock()
+	defer importMu.Unlock()
+
 	if err := Validate(uploadedPath); err != nil {
 		return fmt.Errorf("%w: %w", ErrRejected, err)
 	}
