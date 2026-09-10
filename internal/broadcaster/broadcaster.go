@@ -114,9 +114,25 @@ func (w *Worker) RunOnce() (int, error) {
 			if err := w.Store.MarkDeliveryFailed(d.ID, sendErr.Error(), w.MaxAttempts); err != nil {
 				log.Printf("broadcaster: mark failed %s: %v", d.ID, err)
 			}
-		} else {
-			if err := w.Store.MarkDeliverySent(d.ID); err != nil {
-				log.Printf("broadcaster: mark sent %s: %v", d.ID, err)
+		} else if err := w.Store.MarkDeliverySent(d.ID); err != nil {
+			// The mail went out and we cannot record it. Logging and moving on
+			// leaves the row pending with its attempts untouched, so the next
+			// cycle sends the identical broadcast to the same person, forever —
+			// the same poisoned-row shape the comment above describes, on the
+			// write instead of the send.
+			//
+			// So it is counted as an attempt. That is deliberately the safer lie:
+			// the row ends up labelled failed when the mail actually arrived,
+			// while the alternative is unbounded duplicates to a real recipient.
+			// The error text carries the truth for whoever reads the row, and
+			// MaxAttempts caps the duplicates at a handful instead of forever.
+			log.Printf("broadcaster: delivery %s was SENT but could not be recorded: %v", d.ID, err)
+			recordErr := fmt.Sprintf("delivered, but the result could not be saved "+
+				"(%v) — this address may receive the broadcast more than once", err)
+			if err := w.Store.MarkDeliveryFailed(d.ID, recordErr, w.MaxAttempts); err != nil {
+				log.Printf("broadcaster: delivery %s cannot be recorded at all "+
+					"(sent=%v, failed=%v); it will be retried until the database "+
+					"accepts a write", d.ID, err, recordErr)
 			}
 		}
 		w.sleep()

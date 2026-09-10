@@ -18,6 +18,7 @@ type fakeStore struct {
 	doneCalls        []string
 	failNextPending  bool
 	failGetBroadcast bool
+	failMarkSent     bool
 }
 
 func newFakeStore(b store.Broadcast, emails []string) *fakeStore {
@@ -77,6 +78,9 @@ func (f *fakeStore) GetBroadcast(id string) (store.Broadcast, error) {
 func (f *fakeStore) MarkDeliverySent(id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failMarkSent {
+		return errors.New("mark sent boom")
+	}
 	f.sent = append(f.sent, id)
 	for i := range f.pending {
 		if f.pending[i].ID == id {
@@ -322,4 +326,51 @@ func (m *poisonMailer) delivered() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.ok...)
+}
+
+// TestRunOnceStopsResendingWhenTheSendCannotBeRecorded is the delivery-side twin
+// of TestRunOncePanicExhaustsAttempts, and it covers the branch that was left
+// out when that one was written.
+//
+// The mail goes out, and then MarkDeliverySent fails. The row keeps status
+// 'pending' and its attempts are untouched, so the next cycle picks up the same
+// delivery and sends the identical broadcast again — and again, with nothing
+// bounding it. The recipient is mailed forever, the progress page permanently
+// understates the count, and finalize never completes because
+// HasPendingDeliveries never goes false.
+//
+// The comment above the send in RunOnce reasons about exactly this poisoned-row
+// shape for a panicking mailer, and stops one branch short of the write that
+// records the success.
+func TestRunOnceStopsResendingWhenTheSendCannotBeRecorded(t *testing.T) {
+	t.Parallel()
+	fs := newFakeStore(store.Broadcast{ID: "b1", Subject: "Hi", Body: "Body"}, []string{"a@x.com"})
+	fs.failMarkSent = true
+	fm := &fakeMailer{}
+	w := newTestWorker(fs, fm)
+
+	// Run well past the cap. If nothing advances the attempt counter this loops
+	// as long as the process does.
+	runs := w.MaxAttempts + 3
+	for i := 0; i < runs; i++ {
+		if _, err := w.RunOnce(); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+
+	if fm.callCount() > w.MaxAttempts {
+		t.Errorf("the same broadcast was mailed %d times over %d cycles.\n"+
+			"A send that cannot be recorded must still count as an attempt, or the "+
+			"recipient receives it every cycle until someone notices.",
+			fm.callCount(), runs)
+	}
+	if st := fs.statusOf("a"); st != store.DeliveryStatusFailed {
+		t.Errorf("delivery status = %q after %d cycles, want %q.\n"+
+			"The row is still pending, so it will be picked up again forever.",
+			st, runs, store.DeliveryStatusFailed)
+	}
+	if got := fs.failedCount("a"); got == 0 {
+		t.Error("MarkDeliveryFailed was never called, so the attempt counter never " +
+			"moved and nothing bounds the retries")
+	}
 }
