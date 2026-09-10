@@ -73,10 +73,14 @@ func Load() Config {
 // threshold of zero would hold every submission ever received.
 func spamThreshold() int {
 	n := envOrInt("SPAM_THRESHOLD", screen.DefaultThreshold)
-	if n == 0 {
-		return screen.DefaultThreshold
-	}
-	clamped := clampInt(n, screen.MinThreshold, screen.MaxThreshold)
+
+	// Through screen's own clamp, not a second implementation of the same
+	// policy. This file already shared the *constants*; sharing only those left
+	// the two disagreeing about what they mean — a typo of -6 for 6 clamped to
+	// the floor of 1 here, holding essentially every submission, where the
+	// decision itself would have used the default of 6. The bounds and the
+	// interpretation of a value outside them are one policy.
+	clamped := screen.ClampThreshold(n)
 	if clamped != n {
 		// Say so. An operator who sets 100 meaning "effectively off" gets 20,
 		// which quarantines everything scoring 20 or more — the opposite of

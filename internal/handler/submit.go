@@ -178,15 +178,17 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("submit: form %s: reading filter rules: %v", formID, err)
 	}
-	threshold := h.effectiveThreshold(form)
 	v := h.Screener.Decide(screen.Input{
 		FormID:    formID,
 		Fields:    data,
 		IP:        ip,
 		Rules:     rules,
-		Threshold: threshold,
+		Threshold: h.effectiveThreshold(form),
 	})
-	score, signals, held := v.Score, v.Signals, v.Hold
+	// The threshold comes back from the verdict, not from the local: Decide
+	// clamps, and persisting the unclamped value would record a bar the
+	// submission was never judged against.
+	score, signals, held, threshold := v.Score, v.Signals, v.Hold, v.Threshold
 
 	// Counting the hit is a database write, so it stays out of the decision:
 	// screening is pure and this is a side effect of having made it.

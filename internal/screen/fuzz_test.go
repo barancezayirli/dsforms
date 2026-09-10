@@ -57,6 +57,19 @@ func FuzzDecide(f *testing.F) {
 		{"a@x.com", "<a href=x>casino</a>", "", "", "", 6},
 		{"", "", "", "", "", 6},
 		{"a@mail.example.ru", "hi", "example.ru", KindBlock, TypeDomain, 4},
+
+		// Out-of-range thresholds, seeded rather than left to the fuzzer.
+		//
+		// Under plain `go test` a fuzz target runs its seeds and nothing else, so
+		// a property is only as strong as its corpus unless something invokes
+		// -fuzz. Every seed above passes 6 or 4, which meant clampThreshold —
+		// added specifically to stop a zero threshold holding everything with an
+		// empty breakdown — was exercised at exactly zero points. Three separate
+		// mutations to it survived the whole suite, including removing it.
+		{"a@x.com", "hi", "", "", "", 0},
+		{"a@x.com", "hi", "", "", "", -5},
+		{"a@x.com", "<a href=x>casino</a>", "", "", "", 1},
+		{"a@x.com", "<a href=x>casino</a>", "", "", "", 1000},
 	}
 	for _, s := range seeds {
 		f.Add(s.sender, s.other, s.ruleVal, s.kind, s.typ, s.threshold)

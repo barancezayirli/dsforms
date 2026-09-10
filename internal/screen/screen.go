@@ -167,6 +167,21 @@ type Verdict struct {
 	Score   int
 	Signals []Signal
 
+	// Threshold is the value actually applied, after clamping.
+	//
+	// Reported rather than left implicit because the caller persists it: a held
+	// submission records the bar it was judged against, and the quarantine meter
+	// renders the score against it. Clamping inside Decide without returning the
+	// result meant the handler stored its own unclamped number, so a form with a
+	// stray threshold of 100 produced a row reading "held — score 20, threshold
+	// 100": held at a fifth of its own stated bar, with a breakdown that sums to
+	// nothing the operator can reconcile.
+	//
+	// Before the decision was sealed the handler owned both the clamp and the
+	// store call, so they could not disagree. Sealing one without the other is
+	// what opened the seam.
+	Threshold int
+
 	// Matched reports that an operator rule decided this, and MatchedRuleID names
 	// it. The caller counts the hit; screening does not, because that is a
 	// database write and this is a pure decision.
@@ -214,7 +229,7 @@ func (s *Screener) SenderOK(fields map[string]string) bool {
 // Calling this records the submission against its IP, so it must be called once
 // per submission and not, for example, twice to "check" and then "apply".
 func (s *Screener) Decide(in Input) Verdict {
-	in.Threshold = clampThreshold(in.Threshold)
+	in.Threshold = ClampThreshold(in.Threshold)
 	// Recorded unconditionally, before any short-circuit: the tally is also the
 	// record, so skipping it behind a content check would undercount an IP
 	// whenever scoring caught the submission first.
@@ -222,15 +237,19 @@ func (s *Screener) Decide(in Input) Verdict {
 	return decide(in, repeated)
 }
 
-// clampThreshold bounds a caller-supplied threshold into the range a verdict can
-// be sensibly produced for.
+// ClampThreshold bounds a threshold into the range a verdict can sensibly be
+// produced for, and is the single interpretation of an out-of-range value.
+//
+// Exported because config resolves SPAM_THRESHOLD before any submission exists
+// and needs the same answer this does. The bounds and what a value outside them
+// means are one policy; sharing only the constants left the two disagreeing.
 //
 // Callers already clamp — the settings form and config both do — but the
 // decision cannot rely on that, because "the callers are correct" is exactly the
 // assumption that made the fuzzer's earlier threshold clamp hide this: a zero
 // threshold holds everything with no signals, violating the invariant the same
 // fuzzer asserts two properties later.
-func clampThreshold(t int) int {
+func ClampThreshold(t int) int {
 	switch {
 	case t < MinThreshold:
 		return DefaultThreshold
@@ -244,12 +263,12 @@ func clampThreshold(t int) int {
 // decide is the pure core, split out so it can be fuzzed and characterised
 // without the tracker's state.
 func decide(in Input, repeated bool) Verdict {
-	in.Threshold = clampThreshold(in.Threshold)
+	in.Threshold = ClampThreshold(in.Threshold)
 	matched, ruleHit := rules.Match(in.Rules, in.Fields, in.IP)
 
 	switch {
 	case ruleHit && matched.Kind == rules.KindAllow:
-		return Verdict{Matched: true, MatchedRuleID: matched.ID}
+		return Verdict{Matched: true, MatchedRuleID: matched.ID, Threshold: in.Threshold}
 
 	case ruleHit && matched.Kind == rules.KindBlock:
 		// The score is stamped at the threshold so the breakdown still adds up,
@@ -266,6 +285,7 @@ func decide(in Input, repeated bool) Verdict {
 			Signals:       []Signal{{Check: CheckBlocked, Match: matched.Value, Weight: in.Threshold}},
 			Matched:       true,
 			MatchedRuleID: matched.ID,
+			Threshold:     in.Threshold,
 		}
 
 	default:
@@ -278,6 +298,6 @@ func decide(in Input, repeated bool) Verdict {
 			signals = append(signals, Signal{Check: CheckRepeatIP, Match: in.IP, Weight: in.Threshold})
 			sc += in.Threshold
 		}
-		return Verdict{Hold: sc >= in.Threshold, Score: sc, Signals: signals}
+		return Verdict{Hold: sc >= in.Threshold, Score: sc, Signals: signals, Threshold: in.Threshold}
 	}
 }

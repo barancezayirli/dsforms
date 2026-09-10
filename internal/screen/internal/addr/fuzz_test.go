@@ -84,3 +84,51 @@ func extractAddress(v string) string {
 	}
 	return strings.TrimSpace(v)
 }
+
+// FuzzCanonicalFoldsAllASCIICase is the other half of the property above, and it
+// exists because the first half is one-directional by construction.
+//
+// Injectivity fails only when two *distinct* addresses collide. Under-folding
+// produces *fewer* collisions, so the more broken the fold is, the more strongly
+// that property holds — it is structurally blind to the opposite error. Measured:
+// changing ASCIILower's bound from b[i] <= 'Z' to b[i] < 'Z', so capital Z is
+// never folded, survived the entire test suite and fifteen million executions of
+// the injectivity fuzzer.
+//
+// That mutant is a live bypass. An operator's block rule typed "BOZ@x.com" stores
+// as "boZ@x.com"; a submission of "boz@x.com" reduces to "boz@x.com", misses the
+// rule, and is accepted. The rule looks correct on the rules screen forever.
+//
+// So: every ASCII letter must fold, checked against the test's own trivial fold
+// rather than the implementation's.
+func FuzzCanonicalFoldsAllASCIICase(f *testing.F) {
+	f.Add("BOZ@x.com")
+	f.Add("AZaz@x.com")
+	f.Add("QUUX@EXAMPLE.COM")
+	f.Add("Mike <MIKE@Works.com>")
+	f.Add("MİKE@works.com")
+	f.Add("")
+
+	f.Fuzz(func(t *testing.T, v string) {
+		got, ok := Canonical(v)
+		if !ok {
+			return
+		}
+		// Canonicalising an already-ASCII-folded value must reach the same
+		// answer. If any letter escapes the implementation's fold, the two
+		// disagree — which is exactly what an off-by-one on the A-Z range does.
+		alsoOK, ok2 := Canonical(foldASCII(v))
+		if !ok2 {
+			t.Fatalf("Canonical(%q) succeeded but Canonical(foldASCII(%q)) = %q did not",
+				v, v, foldASCII(v))
+		}
+		if got != alsoOK {
+			t.Fatalf("the fold is incomplete:\n"+
+				"  Canonical(%q)            = %q\n"+
+				"  Canonical(foldASCII(%q)) = %q\n"+
+				"Some ASCII letter is not being folded, so a rule stored with it "+
+				"can never match a submission written in the other case.",
+				v, got, v, alsoOK)
+		}
+	})
+}
