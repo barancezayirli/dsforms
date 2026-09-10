@@ -534,6 +534,18 @@ func main() {
 		case "backup":
 			runBackupCLI(os.Args[2:])
 			return
+		default:
+			// Anything else used to fall through and start the server, which is
+			// the least safe outcome available: `dsforms --help`, `dsforms
+			// backupp create`, or a typo in a deploy script all silently began
+			// serving instead of reporting that the command was not understood.
+			// AGENT.md §4 — in a switch over a closed set, the default denies.
+			fmt.Fprintf(os.Stderr, "dsforms: unknown command %q\n\n", os.Args[1])
+			fmt.Fprintln(os.Stderr, "Usage:")
+			fmt.Fprintln(os.Stderr, "  dsforms                      start the server")
+			fmt.Fprintln(os.Stderr, "  dsforms user <cmd> [args]    list, add, set-password, delete")
+			fmt.Fprintln(os.Stderr, "  dsforms backup <cmd>         create")
+			os.Exit(1)
 		}
 	}
 
