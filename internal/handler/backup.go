@@ -12,9 +12,24 @@ import (
 	"github.com/barancezayirli/dsforms/internal/flash"
 )
 
+// BackupStore is what the backup screen needs from storage: the handle to snapshot
+// from, and the way to reopen after the file underneath has been replaced.
+//
+// An alias rather than a second declaration. backup.Import needs the identical
+// pair, and this handler's only reason to hold them is to hand them to it — so
+// writing the methods out again here produced two copies of one contract that
+// happened to typecheck only while they stayed byte-identical. The alias makes
+// them the same type, which is what they always were.
+//
+// DB() is a real hole in the narrowing, not a clean seam: whoever holds it has
+// unrestricted SQL, so this constrains who may reach the database rather than
+// what they may do with it.
+type BackupStore = backup.Store
+
 // BackupHandler handles backup export and import.
 type BackupHandler struct {
 	Base
+	Store BackupStore
 }
 
 // backupPageData holds the data passed to backups.html.

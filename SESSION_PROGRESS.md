@@ -168,6 +168,66 @@ Fixed this pass:
   defined-type rule, which pointed at `screen.Rule` — a different type from the
   one it means.
 
+## Fifth pass — narrowing the store surface
+
+Branch `refactor/narrow-store-surface`. `internal/store` was the last shared
+kernel: every handler embedded `Base{Store *store.Store}` and could reach every
+method on it regardless of the few it called. Each handler now declares a
+consumer interface naming exactly what it uses, `Base` holds a one-method
+`NavCounter`, and `internal/backup` declares its own two-method interface — which
+dropped `store` from its imports entirely, so it is now a leaf.
+
+The method lists were generated from the call graph and the signatures from
+`go doc`, not transcribed; `main.go`'s `var _` block then proves the generation
+was faithful. Worst-case reachable surface per handler fell from every method to
+twenty, best case to one.
+
+**What the refactor introduced, and what caught it.** Swapping a pointer field
+for an interface field moves a class of error from compile time to run time: a
+struct literal that omits a field zeroes it, and `go build ./...` reported
+success on a binary in which most handlers held a nil store. Nothing failed
+until a request arrived. `TestEveryStorageFieldIsWired` reads the required set
+out of `main.go`'s assertion block — authoritative and compiler-checked — and
+checks every construction site against it.
+
+**The review found blind spots in all three new guards, and each was the same
+shape as the bug it was written to catch.** Recorded because the pattern is the
+point: the wiring test keyed on a naming convention, so renaming an interface
+walked past it; it required only directly-declared fields, so dropping
+`Base: base` zeroed seven fields and passed; it counted sites rather than
+diffing the set, so a duplicate literal paid for a missing one. The
+concrete-store scan matched the identifier `store`, so an aliased second import
+reinstated `*store.Store` with the suite green — and the first fix for that was
+itself incomplete, because a file may import one package under several names and
+the helper returned only the first. The upload guard checked one link of a
+four-link seam. All are closed, each verified by applying the regression and
+watching the named test fail. The detector now has a positive control, since a
+count floor measures only that files were parsed and cannot see a predicate that
+has stopped matching.
+
+Also fixed here: database restore had been broken since the Nocturne port
+(`664bfbc`) — the template posted `name="backup"`, the handler read `"file"`.
+Found by running the thing per step 5, not by any test.
+
+## Deferred from the fifth pass
+
+Nothing below is caused by the refactor; the narrowing surfaced them.
+
+| Item | Why deferred | Target |
+|---|---|---|
+| **`backup.Import` leaves the process holding a closed database** | Three exit paths after the live handle is closed return without reopening — stale-WAL removal, `os.Rename` (the realistic one: `os.CreateTemp("")` puts the upload on `/tmp` while the DB is on a volume, so Docker gets `EXDEV`), and `Reopen` itself. `store.Reopen` only assigns on success, so every route 500s until a restart, `/healthz` still says `ok`, and the flash blames the uploaded file — which passed validation. A rollback to the original path recovers cleanly when tried. This is the most destructive operation in the product and deserves its own branch and its own tests, not a rider on a refactor. | **Next session — highest priority** |
+| `/healthz` never touches the database | It is the failure detector for the row above and reports healthy while every real request fails. A `SELECT 1` fixes it. Pairs naturally with that work. | Next session |
+| `_subject` is documented and read by nobody | `README.md` offers it as the notification subject; `internalFields` strips it before storage and the subject is hardcoded in `mail`. A user following the README loses the value twice, silently — worse than the backup bug, which at least printed something. `submit_test.go` asserts the discard, locking it in. Either implement or delete the row. | A follow-up PR |
+| The waitlist snippet omits `_honeypot` | `waitlist_submit.go` reads it and `form_edit.html` emits it for `/f/`, but `waitlist_edit.html` does not. The waitlist route runs no screener, so the honeypot is its only filter — every operator who copies the offered snippet ships a signup form with none. | A follow-up PR |
+| `rules.html` posts no `note` | The handler reads one and the template renders it, so rules added from the quarantine screen carry provenance and identical rules added from the Rules page render bare. | A follow-up PR |
+| `sql.ErrNoRows` is an unwritten term of the new interfaces | `AdminHandler` tests `errors.Is(err, sql.ErrNoRows)` against interface results. That was a private arrangement between two concrete types; it is now the load-bearing contract of a published interface, expressed nowhere in it. Any implementation not wrapping a `database/sql` sentinel turns every 404 into a 500. A `store.ErrNotFound` is the fix and touches every handler. | A follow-up PR |
+| Nothing stops the interfaces re-widening | `TestNoHandlerHoldsTheConcreteStore` catches a field typed `*store.Store`; it does not catch `SearchStore` growing to twenty methods nobody calls. Adding unused methods keeps the suite green. A scan asserting every method declared on an `XStore` is actually called through that field closes it, in the direction the drift runs. | A follow-up PR |
+| `AdminStore` (20) and `QuarantineStore` (14) want splitting | `AdminHandler` is two handlers: the forms half and the submissions half share only `GetForm`, and the routes already draw the line. `QuarantineStore` splits into a read-mostly review queue and a three-method rule-mutation surface with zero overlap — worth separating, since a rule write is what can open a fail-open block rule. | A follow-up PR |
+| `screen.Rule`'s invariant has no owner | `Rule.Value` is documented as normalised by `Validate` before storage, and `Decide` passes rules straight to `Match`. The only producer used to be the store, which validates every write; the interfaces make that producer pluggable, so the type now permits an unvalidated block rule — which fails open. Not reachable in production. Cheapest close, consistent with the seal doctrine: have `Decide` re-validate inbound rule values. | A follow-up PR |
+| `main()`'s wiring and all routes have no executable coverage | `newRouter()` stops after middleware and `/healthz`; every handler construction and route registration lives inline in `main()`, which no test can call. So the AST scan is not the primary check on the wiring, it is the only one. Extracting `func routes(...) *chi.Mux` would let one test drive the real table — and would catch a handler bound to the wrong route, or a route registered outside the auth group, neither of which anything notices today. | A follow-up PR |
+| `store.Reopen` mutates `s.db` under a live server | No synchronisation, while every other method reads that field. Pre-existing; surfaced by reading `backup.Import` closely. Belongs with the restore work above. | With the restore fix |
+| `Base.Shell`'s nil check misses a typed nil | `b.Nav == nil` is false for a non-nil interface holding a nil pointer, so that case panics rather than degrading. Latent: `main` exits fatally if the store cannot open, so `s` is never nil. | A follow-up PR |
+
 ## Accepted risks
 
 | Risk | Why accepted |

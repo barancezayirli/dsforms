@@ -13,6 +13,16 @@ import (
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
+// NavCounter supplies the sidebar badge counts, and is the only thing the shell
+// needs from storage.
+//
+// One method rather than a store handle: Base is embedded into every admin
+// handler, so a *store.Store here was a second, wider route to the database from
+// handlers that had already declared the narrow one they use.
+type NavCounter interface {
+	NavCounts() (store.NavCounts, error)
+}
+
 // Base is the state every admin handler needs, and every admin handler embeds
 // it.
 //
@@ -21,7 +31,7 @@ import (
 // database card, the version chip), and copying those into every handler — and
 // into every per-page data struct — is how they drift apart.
 type Base struct {
-	Store     *store.Store
+	Nav       NavCounter
 	SecretKey string
 	BaseURL   string
 	DBPath    string
@@ -96,9 +106,13 @@ var navGroups = map[string]string{
 // instead of rendering silently eats the operator's message. Call it on paths
 // that render.
 //
-// A failure to read the nav counts or stat the database is logged and left at
-// zero rather than returned: a sidebar badge is not worth turning a working
-// page into a 500.
+// A failure to read the nav counts is logged rather than returned — a sidebar
+// badge is not worth turning a working page into a 500 — and sets Degraded, so
+// the page says the counts are unreliable instead of showing zeroes as though
+// they were the answer.
+//
+// The database card is different: dbStatus swallows a failed stat silently and
+// does not set Degraded, on the reasoning recorded there.
 func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active string) PageData {
 	user, _ := auth.UserFromContext(r.Context())
 	flashType, flashMsg := flash.Get(r, w, b.SecretKey)
@@ -115,17 +129,24 @@ func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active strin
 		DB:          b.dbStatus(),
 	}
 
-	if b.Store != nil {
-		counts, err := b.Store.NavCounts()
-		if err != nil {
-			// A zeroed badge is indistinguishable from an empty queue, so the
-			// failure is recorded rather than only logged.
-			log.Printf("page: nav counts: %v", err)
-			data.Degraded = true
-		} else {
-			data.Nav = counts
-		}
+	if b.Nav == nil {
+		// Unwired rather than failed, but the operator sees the same thing: a
+		// sidebar reading zero everywhere. Nav is an interface, so it is nil
+		// whenever a Base literal simply omits the field — which compiles — and
+		// silence here would render that as an empty queue.
+		log.Printf("page: no nav counter wired")
+		data.Degraded = true
+		return data
 	}
+	counts, err := b.Nav.NavCounts()
+	if err != nil {
+		// A zeroed badge is indistinguishable from an empty queue, so the
+		// failure is recorded rather than only logged.
+		log.Printf("page: nav counts: %v", err)
+		data.Degraded = true
+		return data
+	}
+	data.Nav = counts
 	return data
 }
 

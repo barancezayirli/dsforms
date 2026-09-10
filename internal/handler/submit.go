@@ -55,9 +55,27 @@ func deliver(ctx string, n Notifier, wh WebhookSender, form store.Form, sub stor
 	return emailed
 }
 
+// SubmitStore is what the public submit endpoint needs from storage.
+//
+// This is the surface reachable from an unauthenticated request, so it is the
+// one worth keeping smallest. It cannot enumerate forms, read a submission
+// back, or touch users at all: it resolves the one form named in the URL, reads
+// the rules, bumps a matched rule's hit counter, and writes a submission row.
+//
+// IncrementRuleHits is the one write here that is not a submission, and it is
+// reachable without authentication — worth knowing when reading what public
+// traffic can change.
+type SubmitStore interface {
+	CreateHeldSubmission(sub store.Submission, score, threshold int, signals []store.SpamSignal) error
+	CreateSubmission(sub store.Submission) error
+	GetForm(id string) (store.Form, error)
+	IncrementRuleHits(id string) error
+	ListFilterRules() ([]screen.Rule, error)
+}
+
 // SubmitHandler handles form submissions via POST /f/{formID}.
 type SubmitHandler struct {
-	Store    *store.Store
+	Store    SubmitStore
 	Notifier Notifier
 	Webhook  WebhookSender
 	BaseURL  string

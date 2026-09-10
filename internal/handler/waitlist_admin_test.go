@@ -51,8 +51,9 @@ func setupWaitlistAdmin(t *testing.T) (*store.Store, *WaitlistHandler) {
 		t.Fatalf("store.New: %v", err)
 	}
 	h := &WaitlistHandler{
+		Store: s,
 		Base: Base{
-			Store:     s,
+			Nav:       s,
 			SecretKey: "test-secret",
 			BaseURL:   "https://example.com",
 			Templates: testTemplates(t),

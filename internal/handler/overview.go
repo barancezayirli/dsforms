@@ -9,11 +9,24 @@ import (
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
+// OverviewStore is what the dashboard needs from storage.
+//
+// Read-only by construction: every method is a query, so the dashboard cannot
+// mutate anything even by mistake.
+type OverviewStore interface {
+	HeldSince(days int) (held, total int, err error)
+	PerFormStats() ([]store.FormStats, error)
+	RecentSubmissions(n int) ([]store.RecentSubmission, error)
+	SubmissionsPerDay(days int) ([]store.DayCounts, error)
+	TopSpamSignals(days int) ([]store.SignalTally, error)
+}
+
 // OverviewHandler renders the admin home: what arrived, what is waiting, and
 // what got blocked, in one view. Before this the landing page was the forms
 // list, which answered none of those questions.
 type OverviewHandler struct {
 	Base
+	Store OverviewStore
 
 	// Limiter is read for the rate-limit panel. It is in-process and resets on
 	// restart; the panel's copy says so rather than implying persistence that

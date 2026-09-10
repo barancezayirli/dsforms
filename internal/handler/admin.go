@@ -19,9 +19,41 @@ import (
 	"github.com/google/uuid"
 )
 
+// AdminStore is what the forms admin needs from storage.
+//
+// This is the widest surface any handler declares, and that is worth reading as
+// a signal about AdminHandler rather than about the store: forms, submissions,
+// read state, bulk delete and the stats queries are a lot for one handler. The
+// routes already draw the line — the forms half and the submissions half share
+// only GetForm. Splitting it is a separate change; naming the surface is the
+// precondition for seeing that it wants splitting.
+type AdminStore interface {
+	CountAllSubmissions() (int, error)
+	CountSubmissions(formID string) (int, error)
+	CreateForm(f store.Form) error
+	DeleteForm(id string) error
+	DeleteSubmission(id string) error
+	DeleteSubmissions(formID string, ids []string) error
+	GetForm(id string) (store.Form, error)
+	GetSubmission(id string) (store.Submission, error)
+	HeldCountForForm(formID string) (int, error)
+	ListForms() ([]store.FormSummary, error)
+	ListSubmissions(formID string) ([]store.Submission, error)
+	ListSubmissionsPaged(formID string, limit, offset int) ([]store.Submission, error)
+	MarkAllRead(formID string) error
+	MarkRead(submissionID string) error
+	Neighbours(formID, subID string) (newerID, olderID string, position, total int, err error)
+	PerFormStats() ([]store.FormStats, error)
+	SubmissionSignals(submissionID string) ([]store.SpamSignal, error)
+	SubmissionsPerFormPerDay(days int) (map[string][]int, error)
+	UnreadCount(formID string) (int, error)
+	UpdateForm(f store.Form) error
+}
+
 // AdminHandler handles admin dashboard and forms management pages.
 type AdminHandler struct {
 	Base
+	Store   AdminStore
 	Webhook WebhookSender
 }
 
