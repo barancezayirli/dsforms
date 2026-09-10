@@ -121,7 +121,6 @@ Add these hidden fields to customize behavior:
 |-------|---------|
 | `_redirect` | URL to redirect the user after submission |
 | `_honeypot` | Hidden spam trap — bots fill it, humans don't |
-| `_subject` | Custom email notification subject line |
 
 **Honeypot example:**
 

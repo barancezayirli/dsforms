@@ -101,6 +101,18 @@ func (h *SubmitHandler) effectiveThreshold(form store.Form) int {
 }
 
 // internalFields lists form field names that are never stored in submission data.
+//
+// _subject is here without being implemented anywhere, deliberately. The README
+// advertised it as a custom notification subject for five months and nothing
+// ever read it, so live forms may still be posting one — it must not suddenly
+// start showing up as an ordinary submission field, in the admin or in a CSV
+// export.
+//
+// It stays unimplemented on purpose. The notification goes to the form's owner,
+// and the value would come from an anonymous submitter, so honouring it hands a
+// stranger the subject line of mail arriving in the operator's inbox: "Your
+// account has been suspended", from their own forms product. That is a
+// phishing primitive, not a feature.
 var internalFields = map[string]bool{
 	"_honeypot": true,
 	"_redirect": true,

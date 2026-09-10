@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	"github.com/barancezayirli/dsforms/internal/auth"
 	"github.com/barancezayirli/dsforms/internal/flash"
@@ -37,6 +38,20 @@ type Base struct {
 	DBPath    string
 	Version   string
 	AssetVer  string // content hash appended to /static URLs for cache busting
+
+	// Journal is the database's actual journal mode, read once at startup.
+	//
+	// It used to be the string literal "WAL", rendered on every admin page as
+	// fact. SQLite silently falls back to `delete` journaling on filesystems
+	// without shared-memory support — a network mount, some container volumes —
+	// and the sidebar would go on claiming WAL. That is the same defect as the
+	// hardcoded "ok" that /healthz used to return, on the page an operator reads
+	// while deciding whether a restore is safe.
+	//
+	// Read at startup rather than per request: it is a property of the file, it
+	// costs a query, and the sidebar renders on every page. Empty renders as
+	// unknown rather than as a guess.
+	Journal   string
 	Templates map[string]*template.Template
 }
 
@@ -129,7 +144,7 @@ func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active strin
 		DB:          b.dbStatus(),
 	}
 
-	if b.Nav == nil {
+	if isNil(b.Nav) {
 		// Unwired rather than failed, but the operator sees the same thing: a
 		// sidebar reading zero everywhere. Nav is an interface, so it is nil
 		// whenever a Base literal simply omits the field — which compiles — and
@@ -150,9 +165,28 @@ func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active strin
 	return data
 }
 
+// isNil reports whether an interface holds nothing usable.
+//
+// `b.Nav == nil` is false for a non-nil interface holding a nil pointer — the
+// classic Go trap — so a Base wired with a (*store.Store)(nil) sailed past the
+// guard and panicked inside NavCounts on the first request. AGENT.md §4: never
+// panic during a request. Unreachable from main, which exits if the store cannot
+// open, but the guard exists precisely for the wiring nobody checked.
+func isNil(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return rv.IsNil()
+	}
+	return false
+}
+
 // dbStatus describes the database file for the sidebar card.
 func (b *Base) dbStatus() DBStatus {
-	status := DBStatus{Name: "dsforms.db", Journal: "WAL"}
+	status := DBStatus{Name: "dsforms.db", Journal: b.Journal}
 	if b.DBPath == "" {
 		return status
 	}

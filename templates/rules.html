@@ -178,6 +178,11 @@
         <input type="hidden" name="type" value="email">
         <input class="input" name="value" placeholder="real.customer@example.com"
                aria-label="Address to allow" required>
+        <!-- Optional, and the only rule list that renders a note. Allowlisting
+             is the entry that most needs a reason attached: it silently skips
+             every check, and six months on nobody remembers why. -->
+        <input class="input" name="note" placeholder="why (optional)"
+               aria-label="Why this address is allowed" style="flex:0 1 180px;min-width:0">
         <button class="btn btn-secondary" type="submit">Allow</button>
       </form>
 

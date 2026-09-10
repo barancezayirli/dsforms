@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -747,5 +749,70 @@ func TestRulesPageDoesNotClaimHealthWhenItCannotLook(t *testing.T) {
 	if w.Code == http.StatusOK {
 		t.Errorf("status = 200 with an unreadable rules table; the page would render " +
 			"an empty, problem-free rule list that the operator has no reason to doubt")
+	}
+}
+
+// TestAddRuleKeepsTheNote covers a field that existed end to end except for the
+// one place it had to start: the input.
+//
+// AddRule reads r.PostFormValue("note"), the store persists it, and rules.html
+// renders it under each allow entry — but none of the three forms on that page
+// posted a note, so it was always empty and the render was dead markup. A column,
+// a parameter and a template branch, none of them reachable.
+func TestAddRuleKeepsTheNote(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupQuarantine(t)
+
+	form := url.Values{
+		"kind":  {"allow"},
+		"type":  {"email"},
+		"value": {"vip@customer.com"},
+		"note":  {"renewal contact, do not filter"},
+	}
+	if w := doAdminRequest(t, s, r, "POST", "/admin/rules", form.Encode()); w.Code != http.StatusSeeOther {
+		t.Fatalf("add status = %d, want 303", w.Code)
+	}
+
+	rules, err := s.ListFilterRules()
+	if err != nil {
+		t.Fatalf("ListFilterRules: %v", err)
+	}
+	var found bool
+	for _, rule := range rules {
+		if rule.Value == "vip@customer.com" {
+			found = true
+			if rule.Note != "renewal contact, do not filter" {
+				t.Errorf("stored note = %q, want the submitted one.\nAn allow rule "+
+					"skips every check; six months on, the note is the only record of "+
+					"why it exists.", rule.Note)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the allow rule was not stored at all")
+	}
+}
+
+// TestRulesPageOffersANoteWhereItRendersOne is the other half: the real template
+// must both collect the note and show it. Asserted against templates/rules.html
+// rather than the stub, because the stub is what made this invisible — it
+// renders neither, so every existing test passed with the input missing.
+func TestRulesPageOffersANoteWhereItRendersOne(t *testing.T) {
+	t.Parallel()
+
+	body, err := os.ReadFile(filepath.Join(templateDir, "rules.html"))
+	if err != nil {
+		t.Fatalf("read rules.html: %v", err)
+	}
+	src := string(body)
+
+	if !strings.Contains(src, "{{.Note}}") {
+		t.Fatal("rules.html renders no note anywhere; if the field is dead, remove " +
+			"the column and the handler's read of it rather than leaving three " +
+			"pieces of a feature lying around")
+	}
+	if !strings.Contains(src, `name="note"`) {
+		t.Error("rules.html renders {{.Note}} but no form on the page posts a note, " +
+			"so it is always empty and the render is dead markup")
 	}
 }
