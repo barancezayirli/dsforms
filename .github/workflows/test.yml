@@ -1,0 +1,74 @@
+name: Tests
+
+# Runs the suite on every push to main and every pull request against it.
+#
+# Until now nothing ran the tests automatically: .github/workflows/ held only
+# auto-tag and docker-publish, so every guard in this repo — the wiring checks,
+# the AST detectors, the contract probes, the mutation-verified regressions —
+# fired only when someone remembered to run them locally. A guard nobody runs is
+# the same as no guard, which is the rule AGENT.md §7 states about tests and
+# applies just as well to the running of them.
+#
+# Free: dsforms is a public repository and this uses a standard GitHub-hosted
+# runner, which GitHub does not bill or meter. Do not switch runs-on to a larger
+# runner (ubuntu-latest-4-core and friends) — those are charged even on public
+# repositories.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# This workflow only reads the code. auto-tag.yml needs contents:write to push a
+# tag; there is no reason for this one to be able to write anything.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run irrelevant. Cancelling it
+# is about feedback latency and the 20-concurrent-job cap, not cost.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          # Read from go.mod rather than pinned here, so the toolchain cannot
+          # drift from what the module declares. A second copy of a version is
+          # how one of them ends up wrong.
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        # Only tracked files. The working tree can hold untracked scratch
+        # directories, and a formatting check that fails on those is a check
+        # people learn to ignore.
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test -race
+        # -race because AGENT.md §7 requires it, and because the store's db
+        # pointer is swapped under live traffic during a restore — the one data
+        # race this repo has had was found this way and is now guarded.
+        #
+        # -count=1 defeats the test cache: a cached pass tells you the code was
+        # green at some point, not that it is green now.
+        run: go test -race -count=1 ./...
