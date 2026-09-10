@@ -215,7 +215,6 @@ Nothing below is caused by the refactor; the narrowing surfaced them.
 
 | Item | Why deferred | Target |
 |---|---|---|
-| `_subject` is documented and read by nobody | `README.md` offers it as the notification subject; `internalFields` strips it before storage and the subject is hardcoded in `mail`. A user following the README loses the value twice, silently — worse than the backup bug, which at least printed something. `submit_test.go` asserts the discard, locking it in. Either implement or delete the row. | A follow-up PR |
 | `sql.ErrNoRows` is an unwritten term of the new interfaces | `AdminHandler` tests `errors.Is(err, sql.ErrNoRows)` against interface results. That was a private arrangement between two concrete types; it is now the load-bearing contract of a published interface, expressed nowhere in it. Any implementation not wrapping a `database/sql` sentinel turns every 404 into a 500. A `store.ErrNotFound` is the fix and touches every handler. | A follow-up PR |
 | Nothing stops the interfaces re-widening | `TestNoHandlerHoldsTheConcreteStore` catches a field typed `*store.Store`; it does not catch `SearchStore` growing to twenty methods nobody calls. Adding unused methods keeps the suite green. A scan asserting every method declared on an `XStore` is actually called through that field closes it, in the direction the drift runs. | A follow-up PR |
 | `AdminStore` (20) and `QuarantineStore` (14) want splitting | `AdminHandler` is two handlers: the forms half and the submissions half share only `GetForm`, and the routes already draw the line. `QuarantineStore` splits into a read-mostly review queue and a three-method rule-mutation surface with zero overlap — worth separating, since a rule write is what can open a fail-open block rule. | A follow-up PR |
@@ -312,7 +311,6 @@ Found by the review sweep, none caused by this branch, none acted on here.
 | `/healthz` pings, which proves less than it looks like | `PingContext` only proves a connection object exists. Measured against a corrupted database it returns nil while `PRAGMA quick_check(1)` reports the damage — and `quick_check` reports it as a *row value* with a nil error, so checking only `err` would repeat the checkpoint mistake in a second place. The endpoint does correctly catch the closed-handle state it was added for, so this is a strengthening, not a hole. | A follow-up PR |
 | Crash between staging and swap litters the data volume | The upload is now staged beside the database, so an interrupted restore leaves `dsforms-import-*.db` (up to 100 MB) on the data volume with nothing to sweep it. A startup cleanup of that glob is the fix. | A follow-up PR |
 | Concurrent restores are not serialized | Two overlapping `Import` calls both close the handle and contend for one fixed park path. Admin-only, so low reach, but there is no mutex and no test. | A follow-up PR |
-| `_subject`, the waitlist honeypot, `note`, and the CSV flush | Carried over from the fifth-pass table above; unchanged by this branch. | A follow-up PR |
 
 ## Accepted risks
 

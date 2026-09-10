@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -745,4 +747,52 @@ func TestSubmitSecondSameIPStillStored(t *testing.T) {
 	if len(subs) != 2 {
 		t.Errorf("submissions = %d, want 2 (repeat threshold is 3rd, not 2nd)", len(subs))
 	}
+}
+
+// TestREADMEDocumentsOnlyFieldsThatExist keeps the hidden-field table honest.
+//
+// The README advertised `_subject` as a custom notification subject line for
+// five months. Nothing read it, and internalFields stripped it before storage —
+// so a user who followed the documentation lost the value twice, with no error
+// anywhere. Worse than the backup field-name bug, which at least printed
+// something.
+//
+// It stays unimplemented deliberately: the notification goes to the form's owner
+// and the value would come from an anonymous submitter, so honouring it hands a
+// stranger the subject line of mail arriving in the operator's inbox. This test
+// stops the row coming back without an implementation behind it.
+func TestREADMEDocumentsOnlyFieldsThatExist(t *testing.T) {
+	t.Parallel()
+
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+
+	// Every `_field` the hidden-field table names must be read somewhere in this
+	// package, or it is documentation for something that does not happen.
+	documented := regexp.MustCompile(`\|\s*`+"`"+`(_\w+)`+"`").FindAllStringSubmatch(string(readme), -1)
+	if len(documented) == 0 {
+		t.Fatal("no hidden fields found in the README table; the scan is no longer matching it")
+	}
+
+	src, err := os.ReadFile("submit.go")
+	if err != nil {
+		t.Fatalf("read submit.go: %v", err)
+	}
+	waitlist, err := os.ReadFile("waitlist_submit.go")
+	if err != nil {
+		t.Fatalf("read waitlist_submit.go: %v", err)
+	}
+	handlers := string(src) + string(waitlist)
+
+	for _, m := range documented {
+		field := m[1]
+		if !regexp.MustCompile(`FormValue\("` + field + `"\)`).MatchString(handlers) {
+			t.Errorf("README documents %q but no handler reads it.\n"+
+				"A user who follows the documentation gets no error and no effect — "+
+				"either implement it or remove the row.", field)
+		}
+	}
+	t.Logf("checked %d documented hidden field(s)", len(documented))
 }
