@@ -119,8 +119,25 @@ Add these hidden fields to customize behavior:
 
 | Field | Purpose |
 |-------|---------|
-| `_redirect` | URL to redirect the user after submission |
+| `_redirect` | Where to send the visitor after submitting — see below |
 | `_honeypot` | Hidden spam trap — bots fill it, humans don't |
+
+**Redirect rules.** `_redirect` is submitted by the browser, so it is not trusted
+on its own. It is accepted when it is:
+
+- a path on this instance, like `/thanks`; or
+- a URL on the same origin as the form's configured **Redirect after submit**; or
+- a URL on the same origin as `BASE_URL`.
+
+Anything else is ignored and the visitor goes to the form's configured redirect,
+or to the built-in success page. The submission is still stored and still
+notified — a redirect the server will not follow is not a reason to lose someone's
+message — and the refusal is logged with the origin that was refused.
+
+The practical consequence: set **Redirect after submit** on the form to your own
+site, and `_redirect` then works for any page on it. Without it, only paths on
+this instance are accepted. Without that rule, anyone could use your form
+endpoint to bounce visitors from your domain to theirs.
 
 **Honeypot example:**
 

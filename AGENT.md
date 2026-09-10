@@ -82,15 +82,16 @@ main.go        config, store, handler construction, routes, CLI — no logic
         ├── backup                      imports nothing from internal/
         ├── store                       every SQL statement in the project
         ├── screen                      the hold/accept decision, sealed
+        ├── urlsafe                     which URLs we hand out or call
         └── ratelimit · flash · safe
 ```
 
 Verified with `go list -f '{{join .Imports "\n"}}'`, not from memory:
 
-- `handler` → auth, backup, flash, ratelimit, safe, screen, store
+- `handler` → auth, backup, flash, ratelimit, safe, screen, store, urlsafe
 - `store` → screen · `config` → screen · `broadcaster` → safe, store
 - `auth`, `mail`, `webhook` → store · `ratelimit` → safe
-- `backup`, `flash` and `safe` import nothing from `internal/`
+- `backup`, `flash`, `safe` and `urlsafe` import nothing from `internal/`
 
 `backup` used to import `store`, for one parameter: `Import(s *store.Store, …)`,
 which called two methods on it. Naming those two in an interface `backup`
