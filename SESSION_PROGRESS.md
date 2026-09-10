@@ -215,8 +215,6 @@ Nothing below is caused by the refactor; the narrowing surfaced them.
 
 | Item | Why deferred | Target |
 |---|---|---|
-| **`backup.Import` leaves the process holding a closed database** | Three exit paths after the live handle is closed return without reopening — stale-WAL removal, `os.Rename` (the realistic one: `os.CreateTemp("")` puts the upload on `/tmp` while the DB is on a volume, so Docker gets `EXDEV`), and `Reopen` itself. `store.Reopen` only assigns on success, so every route 500s until a restart, `/healthz` still says `ok`, and the flash blames the uploaded file — which passed validation. A rollback to the original path recovers cleanly when tried. This is the most destructive operation in the product and deserves its own branch and its own tests, not a rider on a refactor. | **Next session — highest priority** |
-| `/healthz` never touches the database | It is the failure detector for the row above and reports healthy while every real request fails. A `SELECT 1` fixes it. Pairs naturally with that work. | Next session |
 | `_subject` is documented and read by nobody | `README.md` offers it as the notification subject; `internalFields` strips it before storage and the subject is hardcoded in `mail`. A user following the README loses the value twice, silently — worse than the backup bug, which at least printed something. `submit_test.go` asserts the discard, locking it in. Either implement or delete the row. | A follow-up PR |
 | The waitlist snippet omits `_honeypot` | `waitlist_submit.go` reads it and `form_edit.html` emits it for `/f/`, but `waitlist_edit.html` does not. The waitlist route runs no screener, so the honeypot is its only filter — every operator who copies the offered snippet ships a signup form with none. | A follow-up PR |
 | `rules.html` posts no `note` | The handler reads one and the template renders it, so rules added from the quarantine screen carry provenance and identical rules added from the Rules page render bare. | A follow-up PR |
@@ -227,6 +225,47 @@ Nothing below is caused by the refactor; the narrowing surfaced them.
 | `main()`'s wiring and all routes have no executable coverage | `newRouter()` stops after middleware and `/healthz`; every handler construction and route registration lives inline in `main()`, which no test can call. So the AST scan is not the primary check on the wiring, it is the only one. Extracting `func routes(...) *chi.Mux` would let one test drive the real table — and would catch a handler bound to the wrong route, or a route registered outside the auth group, neither of which anything notices today. | A follow-up PR |
 | `store.Reopen` mutates `s.db` under a live server | No synchronisation, while every other method reads that field. Pre-existing; surfaced by reading `backup.Import` closely. Belongs with the restore work above. | With the restore fix |
 | `Base.Shell`'s nil check misses a typed nil | `b.Nav == nil` is false for a non-nil interface holding a nil pointer, so that case panics rather than degrading. Latent: `main` exits fatally if the store cannot open, so `s` is never nil. | A follow-up PR |
+
+## Sixth pass — a failed restore must leave a working database
+
+Branch `fix/restore-leaves-closed-database`.
+
+`backup.Import` closed the live handle and then had three returns before it
+reopened anything, and `store.Reopen` only assigns on success — so any of them
+left the process holding a closed handle. Reproduced directly:
+
+```
+Import returned:                import: reopen: simulated reopen failure
+ListForms after failed Import:  list forms: sql: database is closed
+ListForms, second attempt:      list forms: sql: database is closed
+```
+
+Two things were worse than the review reported. The `Reopen` path was **data
+loss, not downtime** — `os.Rename` had already overwritten the live database, so
+there was no original to go back to. And the cross-device case was **the default
+deployment**: the handler staged uploads in `/tmp` via `os.CreateTemp("", …)`
+while `DB_PATH` defaults to `/data/dsforms.db`, so the rename failed with `EXDEV`
+in any container. It went unnoticed only because the field-name bug meant this
+code never ran.
+
+The previous database is now parked under `.rollback` and deleted only once the
+replacement has actually opened; every failure after the close funnels through
+one `rollBack` helper, and `Import` cannot return without either a working
+database or `ErrUnavailable`. Uploads are staged beside the database, so the
+swap is a same-filesystem rename by construction.
+
+Three sentinels replace one error value, because the three outcomes need
+opposite operator responses — the old single message told an operator whose
+service was down that their file was probably corrupt, sending them to re-export
+against a process that could not answer.
+
+A failed checkpoint is now fatal rather than logged. It used to warn that
+unflushed data may be lost and then delete the WAL, which is what lost it; with
+a rollback in play it would have restored a database stripped of its own
+unflushed frames — a quiet data loss dressed as a recovery.
+
+`/healthz` asks the database instead of reporting that the HTTP server is
+listening. That is the detector this whole class of failure never had.
 
 ## Accepted risks
 
