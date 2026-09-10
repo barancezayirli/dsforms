@@ -124,6 +124,67 @@ func emailFieldValid(data map[string]string) bool {
 	}
 }
 
+// verdict is the outcome of screening one submission: whether to hold it, what
+// it scored, and why.
+type verdict struct {
+	hold    bool
+	score   int
+	signals []spam.Signal
+
+	// matchedRuleID is the operator rule that decided this, or "" if the
+	// content scorer did. The caller counts the hit; decide does not, because
+	// that is a write and this is a pure function.
+	matchedRuleID string
+}
+
+// decide screens one submission against the operator's rules and the content
+// scorer, and is the single place the hold/accept decision is made.
+//
+// Pure: everything it needs is an argument and everything it decided is in the
+// return value. That matters because this decision has been wrong three times,
+// each time in the seam between two packages that each owned part of it — so it
+// is worth being able to characterise, in full, without a request or a database.
+//
+// The order is deliberate. An allow rule wins outright and skips scoring
+// entirely, including the repeat-IP check, which is the point of allowlisting a
+// busy office NAT. A block rule holds whatever the content scores.
+func decide(fields map[string]string, ip string, rules []filter.Rule, threshold int, repeated bool) verdict {
+	matched, ruleHit := filter.Match(rules, fields, ip)
+
+	switch {
+	case ruleHit && matched.Kind == filter.KindAllow:
+		return verdict{matchedRuleID: matched.ID}
+
+	case ruleHit && matched.Kind == filter.KindBlock:
+		// The score is stamped at the threshold so the breakdown still adds up,
+		// and the single signal carries the same weight — the content itself
+		// scored nothing, and the meter should not imply otherwise.
+		//
+		// Field stays empty: it means "the form field whose value matched", and
+		// putting the rule's *type* there rendered "field cidr · matched" to the
+		// operator. The label already says a filter rule fired, and Match
+		// carries the rule value.
+		return verdict{
+			hold:          true,
+			score:         threshold,
+			signals:       []spam.Signal{{Rule: spam.RuleBlocked, Match: matched.Value, Weight: threshold}},
+			matchedRuleID: matched.ID,
+		}
+
+	default:
+		score, signals := spam.DetailWith(fields, filter.Keywords(rules))
+		if repeated {
+			// Repeat-IP is stateful and lives outside the scorer, so it is
+			// stamped here. Weighted at the threshold so it holds on its own —
+			// matching the old behaviour, where a repeat IP was an outright
+			// drop — while keeping the breakdown's weights summing to the score.
+			signals = append(signals, spam.Signal{Rule: spam.RuleRepeatIP, Match: ip, Weight: threshold})
+			score += threshold
+		}
+		return verdict{hold: score >= threshold, score: score, signals: signals}
+	}
+}
+
 // Handle processes a form submission.
 // Flow:
 //  1. Look up form by ID → 404 if missing
@@ -219,46 +280,15 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("submit: form %s: reading filter rules: %v", formID, err)
 	}
-	matched, ruleHit := filter.Match(rules, data, ip)
-
 	threshold := h.effectiveThreshold(form)
-	var (
-		score   int
-		signals []spam.Signal
-		held    bool
-	)
+	v := decide(data, ip, rules, threshold, repeated)
+	score, signals, held := v.score, v.signals, v.hold
 
-	switch {
-	case ruleHit && matched.Kind == filter.KindAllow:
-		// Accepted outright, scoring skipped — including the repeat-IP check,
-		// which is the point of an allowlist entry for a busy office NAT.
-		h.countRuleHit(matched.ID)
-
-	case ruleHit && matched.Kind == filter.KindBlock:
-		// Held whatever the content scores. The score is stamped at the
-		// threshold so the breakdown still adds up, and the single "rule"
-		// signal carries the same weight — the content itself scored nothing,
-		// and the meter should not imply otherwise.
-		held = true
-		score = threshold
-		// Field stays empty: it means "the form field whose value matched", and
-		// putting the rule's *type* there rendered "field cidr · matched" to
-		// the operator. The label already says a filter rule fired, and Match
-		// carries the rule value.
-		signals = []spam.Signal{{Rule: spam.RuleBlocked, Match: matched.Value, Weight: threshold}}
-		h.countRuleHit(matched.ID)
-
-	default:
-		score, signals = spam.DetailWith(data, filter.Keywords(rules))
-		if repeated {
-			// Repeat-IP is stateful and lives outside the scorer, so it is
-			// stamped here. Weighted at the threshold so it holds on its own —
-			// matching the old behaviour, where a repeat IP was an outright
-			// drop — while keeping the breakdown's weights summing to the score.
-			signals = append(signals, spam.Signal{Rule: spam.RuleRepeatIP, Match: ip, Weight: threshold})
-			score += threshold
-		}
-		held = score >= threshold
+	// Counting the hit is a database write, so it stays out of decide: the
+	// decision is a pure function of its arguments and this is a side effect of
+	// having made it.
+	if v.matchedRuleID != "" {
+		h.countRuleHit(v.matchedRuleID)
 	}
 
 	if held {
