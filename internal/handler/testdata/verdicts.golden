@@ -1,0 +1,3130 @@
+=== matrix/empty/no-rules
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/empty/allow-email
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/empty/allow-email-mike
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/empty/allow-domain
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/empty/block-email
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/empty/block-domain
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/empty/block-domain-ru
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/empty/block-ip
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/empty/block-cidr
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/empty/block-keyword
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/empty/allow-beats-block
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/no-rules
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/allow-email
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/allow-email-mike
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/allow-domain
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/block-email
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/block-domain
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/block-domain-ru
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/block-ip
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/clean/block-cidr
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/clean/block-keyword
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean/allow-beats-block
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/no-rules
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/allow-email
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/allow-email-mike
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/allow-domain
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/block-email
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/block-domain
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/block-domain-ru
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/block-ip
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/clean-no-email/block-cidr
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/clean-no-email/block-keyword
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/clean-no-email/allow-beats-block
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/markup/no-rules
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/markup/allow-email
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/markup/allow-email-mike
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/markup/allow-domain
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/markup/block-email
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/markup/block-domain
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/markup/block-domain-ru
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/markup/block-ip
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/markup/block-cidr
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/markup/block-keyword
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/markup/allow-beats-block
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== matrix/bbcode/no-rules
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/bbcode/allow-email
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/bbcode/allow-email-mike
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/bbcode/allow-domain
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/bbcode/block-email
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/bbcode/block-domain
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/bbcode/block-domain-ru
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/bbcode/block-ip
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/bbcode/block-cidr
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/bbcode/block-keyword
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/bbcode/allow-beats-block
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== matrix/keyword-one/no-rules
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-one/allow-email
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-one/allow-email-mike
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-one/allow-domain
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-one/block-email
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-one/block-domain
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-one/block-domain-ru
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-one/block-ip
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/keyword-one/block-cidr
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/keyword-one/block-keyword
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-one/allow-beats-block
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== matrix/keyword-many/no-rules
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/keyword-many/allow-email
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/keyword-many/allow-email-mike
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/keyword-many/allow-domain
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/keyword-many/block-email
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/keyword-many/block-domain
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/keyword-many/block-domain-ru
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/keyword-many/block-ip
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/keyword-many/block-cidr
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/keyword-many/block-keyword
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/keyword-many/allow-beats-block
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== matrix/sql-probe/no-rules
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-probe/allow-email
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-probe/allow-email-mike
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-probe/allow-domain
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-probe/block-email
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-probe/block-domain
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-probe/block-domain-ru
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-probe/block-ip
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/sql-probe/block-cidr
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/sql-probe/block-keyword
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-probe/allow-beats-block
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== matrix/sql-union/no-rules
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/sql-union/allow-email
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/sql-union/allow-email-mike
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/sql-union/allow-domain
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/sql-union/block-email
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/sql-union/block-domain
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/sql-union/block-domain-ru
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/sql-union/block-ip
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/sql-union/block-cidr
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/sql-union/block-keyword
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/sql-union/allow-beats-block
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== matrix/url-in-name/no-rules
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/url-in-name/allow-email
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/url-in-name/allow-email-mike
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/url-in-name/allow-domain
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/url-in-name/block-email
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/url-in-name/block-domain
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/url-in-name/block-domain-ru
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/url-in-name/block-ip
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/url-in-name/block-cidr
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/url-in-name/block-keyword
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/url-in-name/allow-beats-block
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== matrix/extra-links/no-rules
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/extra-links/allow-email
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/extra-links/allow-email-mike
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/extra-links/allow-domain
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/extra-links/block-email
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/extra-links/block-domain
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/extra-links/block-domain-ru
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/extra-links/block-ip
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/extra-links/block-cidr
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/extra-links/block-keyword
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/extra-links/allow-beats-block
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== matrix/gibberish/no-rules
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/gibberish/allow-email
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/gibberish/allow-email-mike
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/gibberish/allow-domain
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/gibberish/block-email
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/gibberish/block-domain
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/gibberish/block-domain-ru
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/gibberish/block-ip
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/gibberish/block-cidr
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/gibberish/block-keyword
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/gibberish/allow-beats-block
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== matrix/pile-up/no-rules
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/pile-up/allow-email
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/pile-up/allow-email-mike
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/pile-up/allow-domain
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/pile-up/block-email
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/pile-up/block-domain
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/pile-up/block-domain-ru
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/pile-up/block-ip
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/pile-up/block-cidr
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/pile-up/block-keyword
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/pile-up/allow-beats-block
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== matrix/bypass-r1-junk-field/no-rules
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r1-junk-field/allow-email
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r1-junk-field/allow-email-mike
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r1-junk-field/allow-domain
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r1-junk-field/block-email
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r1-junk-field/block-domain
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r1-junk-field/block-domain-ru
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r1-junk-field/block-ip
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/bypass-r1-junk-field/block-cidr
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/bypass-r1-junk-field/block-keyword
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r1-junk-field/allow-beats-block
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=6 matchedRule="B7"
+     signal rule field="" match="customer.com" weight=6
+
+=== matrix/bypass-r2-case-variant/no-rules
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r2-case-variant/allow-email
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r2-case-variant/allow-email-mike
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r2-case-variant/allow-domain
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r2-case-variant/block-email
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r2-case-variant/block-domain
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r2-case-variant/block-domain-ru
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r2-case-variant/block-ip
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/bypass-r2-case-variant/block-cidr
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/bypass-r2-case-variant/block-keyword
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r2-case-variant/allow-beats-block
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=6 matchedRule="B7"
+     signal rule field="" match="customer.com" weight=6
+
+=== matrix/bypass-r3-unicode-fold/no-rules
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-unicode-fold/allow-email
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-unicode-fold/allow-email-mike
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-unicode-fold/allow-domain
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-unicode-fold/block-email
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-unicode-fold/block-domain
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-unicode-fold/block-domain-ru
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-unicode-fold/block-ip
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/bypass-r3-unicode-fold/block-cidr
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/bypass-r3-unicode-fold/block-keyword
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-unicode-fold/allow-beats-block
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-kelvin/no-rules
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-kelvin/allow-email
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-kelvin/allow-email-mike
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule="A2"
+     signal (none)
+
+=== matrix/bypass-r3-kelvin/allow-domain
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-kelvin/block-email
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-kelvin/block-domain
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-kelvin/block-domain-ru
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-kelvin/block-ip
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/bypass-r3-kelvin/block-cidr
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/bypass-r3-kelvin/block-keyword
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-kelvin/allow-beats-block
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== matrix/bypass-r3-display-name/no-rules
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/bypass-r3-display-name/allow-email
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/bypass-r3-display-name/allow-email-mike
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/bypass-r3-display-name/allow-domain
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/bypass-r3-display-name/block-email
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> HOLD score=6 matchedRule="B1"
+     signal rule field="" match="bot@example.com" weight=6
+
+=== matrix/bypass-r3-display-name/block-domain
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> HOLD score=6 matchedRule="B2"
+     signal rule field="" match="example.com" weight=6
+
+=== matrix/bypass-r3-display-name/block-domain-ru
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/bypass-r3-display-name/block-ip
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/bypass-r3-display-name/block-cidr
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/bypass-r3-display-name/block-keyword
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/bypass-r3-display-name/allow-beats-block
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-uppercase/no-rules
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-uppercase/allow-email
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-uppercase/allow-email-mike
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule="A2"
+     signal (none)
+
+=== matrix/sender-uppercase/allow-domain
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-uppercase/block-email
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-uppercase/block-domain
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-uppercase/block-domain-ru
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-uppercase/block-ip
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/sender-uppercase/block-cidr
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/sender-uppercase/block-keyword
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-uppercase/allow-beats-block
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/no-rules
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/allow-email
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/allow-email-mike
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/allow-domain
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/block-email
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/block-domain
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/block-domain-ru
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/block-ip
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/sender-empty/block-cidr
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/sender-empty/block-keyword
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-empty/allow-beats-block
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/no-rules
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/allow-email
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/allow-email-mike
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/allow-domain
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/block-email
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/block-domain
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/block-domain-ru
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/block-ip
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/sender-not-an-address/block-cidr
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/sender-not-an-address/block-keyword
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-not-an-address/allow-beats-block
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-subdomain/no-rules
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-subdomain/allow-email
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-subdomain/allow-email-mike
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-subdomain/allow-domain
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-subdomain/block-email
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-subdomain/block-domain
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-subdomain/block-domain-ru
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> HOLD score=6 matchedRule="B3"
+     signal rule field="" match="example.ru" weight=6
+
+=== matrix/sender-subdomain/block-ip
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/sender-subdomain/block-cidr
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/sender-subdomain/block-keyword
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-subdomain/allow-beats-block
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/no-rules
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/allow-email
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/allow-email-mike
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/allow-domain
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/block-email
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/block-domain
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/block-domain-ru
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/block-ip
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== matrix/sender-lookalike-domain/block-cidr
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== matrix/sender-lookalike-domain/block-keyword
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== matrix/sender-lookalike-domain/allow-beats-block
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/empty
+  field (none)
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/clean
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/clean-no-email
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/markup
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== threshold-4/bbcode
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== threshold-4/keyword-one
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== threshold-4/keyword-many
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== threshold-4/sql-probe
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== threshold-4/sql-union
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== threshold-4/url-in-name
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== threshold-4/extra-links
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== threshold-4/gibberish
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== threshold-4/pile-up
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== threshold-4/bypass-r1-junk-field
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-4/bypass-r2-case-variant
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-4/bypass-r3-unicode-fold
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-4/bypass-r3-kelvin
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-4/bypass-r3-display-name
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/sender-uppercase
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/sender-empty
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/sender-not-an-address
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/sender-subdomain
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-4/sender-lookalike-domain
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=4 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/empty
+  field (none)
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/clean
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/clean-no-email
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/markup
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== threshold-9/bbcode
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== threshold-9/keyword-one
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== threshold-9/keyword-many
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> HOLD score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== threshold-9/sql-probe
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> HOLD score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== threshold-9/sql-union
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== threshold-9/url-in-name
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== threshold-9/extra-links
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== threshold-9/gibberish
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== threshold-9/pile-up
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> HOLD score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== threshold-9/bypass-r1-junk-field
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-9/bypass-r2-case-variant
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-9/bypass-r3-unicode-fold
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-9/bypass-r3-kelvin
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-9/bypass-r3-display-name
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/sender-uppercase
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/sender-empty
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/sender-not-an-address
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/sender-subdomain
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-9/sender-lookalike-domain
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=9 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/empty
+  field (none)
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/clean
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/clean-no-email
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/markup
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=6 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+
+=== threshold-20/bbcode
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=6 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+
+=== threshold-20/keyword-one
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=5 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+
+=== threshold-20/keyword-many
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=18 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+
+=== threshold-20/sql-probe
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=12 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+
+=== threshold-20/sql-union
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=6 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+
+=== threshold-20/url-in-name
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=4 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+
+=== threshold-20/extra-links
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=4 matchedRule=""
+     signal extra_links field="" match="" weight=4
+
+=== threshold-20/gibberish
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=3 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+
+=== threshold-20/pile-up
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=18 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+
+=== threshold-20/bypass-r1-junk-field
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-20/bypass-r2-case-variant
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-20/bypass-r3-unicode-fold
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-20/bypass-r3-kelvin
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=10 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+
+=== threshold-20/bypass-r3-display-name
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/sender-uppercase
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/sender-empty
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/sender-not-an-address
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/sender-subdomain
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== threshold-20/sender-lookalike-domain
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=20 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== repeat/empty
+  field (none)
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/clean
+  field email = "jane@real.com"
+  field message = "Hello there"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/clean-no-email
+  field message = "Hello there"
+  field name = "Jane"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/markup
+  field email = "a@x.com"
+  field message = "<a href=http://x>hi</a>"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=12 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/bbcode
+  field email = "a@x.com"
+  field message = "[url=http://x]hi[/url]"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=12 matchedRule=""
+     signal markup field="message" match="[url=" weight=6
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/keyword-one
+  field email = "a@x.com"
+  field message = "cheap viagra"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=11 matchedRule=""
+     signal keyword field="message" match="viagra" weight=5
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/keyword-many
+  field email = "a@x.com"
+  field message = "casino backlinks crypto pump"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=24 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal keyword field="message" match="crypto pump" weight=5
+     signal gibberish field="message" match="crypto" weight=3
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/sql-probe
+  field email = "a@x.com"
+  field message = "' or 1=1 -- -"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=18 matchedRule=""
+     signal sql field="message" match="' or 1=1" weight=6
+     signal sql field="message" match="-- -" weight=6
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/sql-union
+  field email = "a@x.com"
+  field q = "union select 1,2,3"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=12 matchedRule=""
+     signal sql field="q" match="union select" weight=6
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/url-in-name
+  field email = "a@x.com"
+  field name = "http://spam.example"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal url_in_name field="name" match="http://spam.example" weight=4
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/extra-links
+  field email = "a@x.com"
+  field message = "http://a.co http://b.co http://c.co"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=10 matchedRule=""
+     signal extra_links field="" match="" weight=4
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/gibberish
+  field email = "a@x.com"
+  field message = "xkcdqwrtplm zzzxqjvbn"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=9 matchedRule=""
+     signal gibberish field="message" match="xkcdqwrtplm" weight=3
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/pile-up
+  field email = "a@x.com"
+  field message = "<a href=x>casino</a> backlinks http://a.co http://b.co"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=24 matchedRule=""
+     signal markup field="message" match="<a href" weight=6
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal extra_links field="" match="" weight=2
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/bypass-r1-junk-field
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  field zz = "vip@customer.com"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=16 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/bypass-r2-case-variant
+  field Email = "vip@customer.com"
+  field email = "mallory@spam.example"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=16 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/bypass-r3-unicode-fold
+  field email = "MİKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=16 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/bypass-r3-kelvin
+  field email = "MIKE@works.com"
+  field message = "casino backlinks"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=16 matchedRule=""
+     signal keyword field="message" match="casino" weight=5
+     signal keyword field="message" match="backlinks" weight=5
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/bypass-r3-display-name
+  field email = "Bot <bot@example.com>"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/sender-uppercase
+  field email = "MIKE@Works.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/sender-empty
+  field email = ""
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/sender-not-an-address
+  field email = "not-an-email"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/sender-subdomain
+  field email = "a@mail.example.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat/sender-lookalike-domain
+  field email = "a@notexample.ru"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat-with-rules/no-rules
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule (none)
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat-with-rules/allow-email
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule="A1"
+     signal (none)
+
+=== repeat-with-rules/allow-email-mike
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule allow/email "mike@works.com"
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat-with-rules/allow-domain
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule="A3"
+     signal (none)
+
+=== repeat-with-rules/block-email
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule block/email "bot@example.com"
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat-with-rules/block-domain
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule block/domain "example.com"
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat-with-rules/block-domain-ru
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule block/domain "example.ru"
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat-with-rules/block-ip
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule block/ip "203.0.113.5"
+  -> HOLD score=6 matchedRule="B4"
+     signal rule field="" match="203.0.113.5" weight=6
+
+=== repeat-with-rules/block-cidr
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule block/cidr "203.0.113.0/24"
+  -> HOLD score=6 matchedRule="B5"
+     signal rule field="" match="203.0.113.0/24" weight=6
+
+=== repeat-with-rules/block-keyword
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule block/keyword "widget"
+  -> HOLD score=6 matchedRule=""
+     signal repeat_ip field="" match="203.0.113.5" weight=6
+
+=== repeat-with-rules/allow-beats-block
+  field email = "vip@customer.com"
+  field message = "hello"
+  ip="203.0.113.5" threshold=6 repeated=true
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule="A4"
+     signal (none)
+
+=== other-ip/no-rules
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule (none)
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/allow-email
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/allow-email-mike
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule allow/email "mike@works.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/allow-domain
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule allow/domain "customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/block-email
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule block/email "bot@example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/block-domain
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule block/domain "example.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/block-domain-ru
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule block/domain "example.ru"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/block-ip
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule block/ip "203.0.113.5"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/block-cidr
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule block/cidr "203.0.113.0/24"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/block-keyword
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule block/keyword "widget"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
+=== other-ip/allow-beats-block
+  field email = "a@x.com"
+  field message = "hello"
+  ip="198.51.100.9" threshold=6 repeated=false
+  rule block/domain "customer.com"
+  rule allow/email "vip@customer.com"
+  -> accept score=0 matchedRule=""
+     signal (none)
+
