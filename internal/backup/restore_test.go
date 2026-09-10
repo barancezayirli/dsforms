@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/barancezayirli/dsforms/internal/store"
@@ -31,6 +33,51 @@ func (f *flakyStore) Reopen(path string) error {
 		return errors.New("simulated reopen failure")
 	}
 	return f.inner.Reopen(path)
+}
+
+// vanishingUploadStore removes a file the first time DB() is called.
+//
+// The only seams into Import are DB() and Reopen(), and both DB() calls happen
+// before the park — so deleting the upload there makes the *swap* rename fail
+// with the original already parked. That is the one branch that actually renames
+// the previous database back, and nothing else reaches it: making the rename
+// fail through the filesystem breaks Validate first, because integrity_check
+// needs to write.
+type vanishingUploadStore struct {
+	inner  *store.Store
+	remove string
+	calls  int
+}
+
+func (v *vanishingUploadStore) DB() *sql.DB {
+	v.calls++
+	if v.calls == 1 && v.remove != "" {
+		if err := os.Remove(v.remove); err != nil {
+			panic("vanishingUploadStore: " + err.Error())
+		}
+	}
+	return v.inner.DB()
+}
+
+func (v *vanishingUploadStore) Reopen(path string) error { return v.inner.Reopen(path) }
+
+// sabotagingStore fails Reopen and, on the way, removes the parked database.
+//
+// In the Reopen-failure path the order is swap, Reopen, then rename-back — so
+// failing Reopen is the one seam that can reach in before the rename-back and
+// take the parked file away. That branch is where the operator is told their
+// database could not be restored to its place, and it is otherwise unreachable
+// without a filesystem fault injector.
+type sabotagingStore struct {
+	inner    *store.Store
+	parkPath string
+}
+
+func (b *sabotagingStore) DB() *sql.DB { return b.inner.DB() }
+
+func (b *sabotagingStore) Reopen(string) error {
+	_ = os.Remove(b.parkPath)
+	return errors.New("simulated reopen failure")
 }
 
 // restoreFixture builds a live store holding one form, plus a valid backup file
@@ -71,6 +118,29 @@ func restoreFixture(t *testing.T) (live *store.Store, dbPath, uploadPath string)
 		t.Fatalf("writing upload: %v", err)
 	}
 	return live, dbPath, uploadPath
+}
+
+// seedBackupFile writes a valid dsforms database, holding a distinguishable
+// form, to path.
+func seedBackupFile(t *testing.T, path string) {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "seed.db")
+	s, err := store.New(src)
+	if err != nil {
+		t.Fatalf("store.New for backup: %v", err)
+	}
+	if err := s.CreateForm(store.Form{ID: "f2", Name: "Restored", EmailTo: "b@c.com"}); err != nil {
+		t.Fatalf("seeding backup store: %v", err)
+	}
+	s.Close()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("reading backup file: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("writing backup file: %v", err)
+	}
 }
 
 // formNames is the assertion both outcomes turn on: which database is actually
@@ -121,23 +191,121 @@ func TestImportRollsBackWhenReopenFails(t *testing.T) {
 	assertNoRollbackFile(t, dbPath)
 }
 
-// TestImportRollsBackWhenTheSwapFails covers a failure before anything has
-// moved. A directory sitting at the rollback path makes the first rename fail,
-// which stands in for any filesystem refusal at that step.
-func TestImportRollsBackWhenTheSwapFails(t *testing.T) {
+// TestImportRefusesALeftoverParkedDatabase guards the worst sequence this
+// mechanism can produce.
+//
+// The park is a rename, and rename overwrites its destination. A process killed
+// between the park and the swap leaves the real database at .rollback and
+// nothing at dbPath; the container restarts, store.New creates an empty database
+// and re-seeds the default admin, and the operator — seeing an empty instance —
+// restores a backup. Without this check that restore renames the empty database
+// over the last copy of their data, silently and with no error.
+//
+// Verified against the code before the check existed: Import returned nil and
+// the leftover file was simply gone.
+func TestImportRefusesALeftoverParkedDatabase(t *testing.T) {
 	t.Parallel()
 	live, dbPath, uploadPath := restoreFixture(t)
 
-	if err := os.Mkdir(dbPath+rollbackSuffix, 0o755); err != nil {
-		t.Fatalf("blocking the rollback path: %v", err)
+	// A plain file, which is what a crashed restore actually leaves. An earlier
+	// version of this test used a directory — which fails the rename for
+	// unrelated reasons, and so hid that a file succeeds and is destroyed.
+	if err := os.WriteFile(dbPath+rollbackSuffix, []byte("the operator's only database"), 0o644); err != nil {
+		t.Fatalf("writing leftover: %v", err)
 	}
 
 	err := Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	got, readErr := os.ReadFile(dbPath + rollbackSuffix)
+	if readErr != nil {
+		t.Fatalf("the leftover parked database was destroyed: %v", readErr)
+	}
+	if string(got) != "the operator's only database" {
+		t.Errorf("the leftover parked database was overwritten: %q", got)
+	}
+	if got := formNames(t, live); len(got) != 1 || got[0] != "Original" {
+		t.Errorf("live store holds %v, want [Original]", got)
+	}
+}
+
+// TestImportRollsBackWhenTheOriginalCannotBeParked covers a failure before
+// anything has moved, so nothing needs putting back.
+func TestImportRollsBackWhenTheOriginalCannotBeParked(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// A directory at the park path: os.Stat sees it, so the preflight refuses.
+	if err := os.Mkdir(dbPath+rollbackSuffix, 0o755); err != nil {
+		t.Fatalf("blocking the park path: %v", err)
+	}
+
+	err := Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if got := formNames(t, live); len(got) != 1 || got[0] != "Original" {
+		t.Errorf("live store holds %v, want [Original]", got)
+	}
+}
+
+// TestImportRollsBackWhenTheSwapFails exercises the branch that actually puts the
+// previous database back, which nothing covered before.
+//
+// The earlier test of this name did not test the swap at all: it blocked the
+// park path, so the failure happened one step earlier and took the
+// nothing-has-moved branch. The swap's own failure — the one where the original
+// is already parked and must be renamed back — was reachable only by reverting
+// the fix, which the whole suite then still passed.
+//
+// The upload is staged in its own directory, made read-only after validation, so
+// the rename cannot unlink it. That is the same class of refusal as the EXDEV
+// failure this staging location was changed to avoid.
+func TestImportRollsBackWhenTheSwapFails(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+	s := &vanishingUploadStore{inner: live, remove: uploadPath}
+
+	err := Import(s, uploadPath, dbPath)
 	if !errors.Is(err, ErrRolledBack) {
 		t.Fatalf("Import returned %v, want ErrRolledBack", err)
 	}
 	if got := formNames(t, live); len(got) != 1 || got[0] != "Original" {
-		t.Errorf("live store holds %v, want [Original]", got)
+		t.Errorf("after the swap failed the live store holds %v, want [Original] — "+
+			"the previous database was not put back", got)
+	}
+	assertNoRollbackFile(t, dbPath)
+}
+
+// TestImportReportsUnavailableWhenTheDatabaseIsGone pins the case where Reopen
+// would otherwise invent a replacement.
+//
+// SQLite creates the file if it is missing, so store.Reopen on an absent dbPath
+// opens a brand-new empty database and returns nil. Import used to treat that as
+// proof the previous database was back, and reported ErrRolledBack — telling the
+// operator "your existing database is unchanged and still in use" while serving
+// zero forms and zero users, so nobody could even log in to discover it.
+func TestImportReportsUnavailableWhenTheDatabaseIsGone(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// Flush and remove the main file, leaving the handle open.
+	if _, err := live.DB().Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if err := os.Remove(dbPath); err != nil {
+		t.Fatalf("removing the database: %v", err)
+	}
+
+	err := Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Import returned %v, want ErrUnavailable.\nReopen will happily create "+
+			"an empty database, so openability is not evidence that anything was "+
+			"rolled back.", err)
+	}
+	if errors.Is(err, ErrRolledBack) {
+		t.Error("this must not report as a rollback — nothing was rolled back")
 	}
 }
 
@@ -249,5 +417,73 @@ func TestImportRefusesWhenTheWALCannotBeFullyFlushed(t *testing.T) {
 	}
 	if got := formNames(t, live); len(got) == 0 {
 		t.Error("the live store is not serving after a refused restore")
+	}
+}
+
+// TestImportSaysWhereTheDatabaseIsWhenItCannotBePutBack covers the worst state
+// the function can reach, and the message is the point of the test.
+//
+// The replacement failed, and the previous database could not be renamed back.
+// Telling the operator only "restart the service" is actively harmful here:
+// starting with no database at dbPath makes store.New create an empty one and
+// re-seed the default admin login, on a public URL, while their real data sits
+// under a suffix nothing else in the codebase mentions.
+func TestImportSaysWhereTheDatabaseIsWhenItCannotBePutBack(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+	s := &sabotagingStore{inner: live, parkPath: dbPath + rollbackSuffix}
+
+	err := Import(s, uploadPath, dbPath)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Import returned %v, want ErrUnavailable", err)
+	}
+	if errors.Is(err, ErrRolledBack) {
+		t.Fatal("nothing was rolled back; reporting this as a rollback tells the " +
+			"operator their database is still in use when it is not")
+	}
+	for _, want := range []string{rollbackSuffix, "default admin"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not mention %q, so the operator is not told where "+
+				"their database is or why restarting is dangerous:\n  %v", want, err)
+		}
+	}
+}
+
+// TestImportDoesNotRaceWithReaders is the regression test for a data race this
+// line of work made continuous.
+//
+// store.Reopen replaces Store.db while the server is serving, and every store
+// method reads that field. Before the health check it was a coincidence — a race
+// only when a request happened to overlap a restore. /healthz reads it every few
+// seconds forever, and a restore is precisely when the write lands.
+//
+// Verified failing before the lock: -race reported a write at store.go:470
+// against a read at store.go:435.
+func TestImportDoesNotRaceWithReaders(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				// Exactly what the health check does on every probe.
+				_ = live.DB()
+			}
+		}
+	}()
+
+	err := Import(live, uploadPath, dbPath)
+	close(stop)
+	wg.Wait()
+
+	if err != nil {
+		t.Fatalf("Import: %v", err)
 	}
 }

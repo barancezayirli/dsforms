@@ -111,12 +111,12 @@ type Store interface {
 // Import replaces the live database with an uploaded one, and guarantees that a
 // failure leaves a working database behind.
 //
-// The old implementation closed the live handle and then had three returns
-// before it reopened anything. store.Reopen only assigns on success, so any of
-// them left the process holding a closed handle: every route 500s until someone
-// restarts the container, while /healthz still reported ok. The Reopen path was
-// worse than downtime — the rename had already overwritten the live database, so
-// there was no original left to go back to.
+// The old implementation closed the live handle and then returned from several
+// failure sites before it reopened anything. store.Reopen only assigns on
+// success, so any of them left the process holding a closed handle: every route
+// 500s until someone restarts the container, while /healthz still reported ok.
+// The Reopen path was worse than downtime — the rename had already overwritten
+// the live database, so there was no original left to go back to.
 //
 // So the previous database is parked under rollbackSuffix and only deleted once
 // the replacement has actually opened. Every failure after the handle is closed
@@ -125,6 +125,28 @@ type Store interface {
 func Import(s Store, uploadedPath, dbPath string) error {
 	if err := Validate(uploadedPath); err != nil {
 		return fmt.Errorf("%w: %w", ErrRejected, err)
+	}
+
+	// Refuse if a previous restore left its parked database behind.
+	//
+	// The park below is a rename, and rename overwrites its destination, so
+	// without this check the next restore silently destroys that file. That is
+	// the whole disaster: a process killed between the park and the swap leaves
+	// the real database at .rollback and nothing at dbPath; the container
+	// restarts, store.New creates an empty database and re-seeds admin/admin, and
+	// the operator — seeing an empty instance — restores a backup, which renames
+	// that empty database over the last copy of their data.
+	//
+	// Nothing else in the codebase looks at this file, so refusing here is what
+	// makes it survivable.
+	if _, err := os.Stat(dbPath + rollbackSuffix); err == nil {
+		return fmt.Errorf("%w: %s already exists, which means a previous restore did "+
+			"not finish. That file may be your database — move it somewhere safe (or "+
+			"back to %s) before restoring again",
+			ErrRejected, dbPath+rollbackSuffix, dbPath)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("%w: cannot check for a leftover %s: %w",
+			ErrRejected, dbPath+rollbackSuffix, err)
 	}
 
 	// Flush the write-ahead log into the main database before anything is
@@ -167,17 +189,35 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	// Not named recover — that is a builtin, and shadowing it inside a function
 	// that may one day want a deferred recover is a trap for the next reader.
 	rollBack := func(cause error, parked bool) error {
+		parkPath := dbPath + rollbackSuffix
 		if parked {
-			// The replacement is in place and did not work. Remove it before
-			// moving the original back, or the rename has nowhere to land.
-			if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
-				log.Printf("import: rollback: removing failed replacement: %v", err)
-			}
-			if err := os.Rename(dbPath+rollbackSuffix, dbPath); err != nil {
+			// One atomic rename, straight over the failed replacement.
+			//
+			// An earlier version removed dbPath first, on the theory that the
+			// rename needed somewhere to land. It does not — rename replaces its
+			// destination — and the removal opened the worst window in the
+			// function: between it and a rename that then failed, there was no
+			// database at dbPath at all and the operator's only copy was a file
+			// nothing mentions.
+			if err := os.Rename(parkPath, dbPath); err != nil {
 				return fmt.Errorf("%w: restore failed (%w) and the previous database "+
-					"could not be moved back from %s: %w",
-					ErrUnavailable, cause, dbPath+rollbackSuffix, err)
+					"could not be moved back: it is still at %s. Do not restart until "+
+					"it has been moved back to %s — a restart with no database there "+
+					"creates an empty one and re-enables the default admin login: %w",
+					ErrUnavailable, cause, parkPath, dbPath, err)
 			}
+		}
+
+		// Reopen alone is not evidence the previous database is back. SQLite
+		// creates the file if it is missing, so Reopen on an absent dbPath
+		// manufactures an empty database, returns nil, and this would report a
+		// successful rollback while serving zero forms and zero users — nobody
+		// could even log in to notice. Verified before trusting it.
+		if _, err := os.Stat(dbPath); err != nil {
+			return fmt.Errorf("%w: restore failed (%w) and there is no database at %s. "+
+				"Check for %s before restarting, since starting with no database "+
+				"creates an empty one and re-enables the default admin login: %w",
+				ErrUnavailable, cause, dbPath, parkPath, err)
 		}
 		if err := s.Reopen(dbPath); err != nil {
 			return fmt.Errorf("%w: restore failed (%w) and the previous database "+
