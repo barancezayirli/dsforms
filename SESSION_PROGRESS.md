@@ -392,7 +392,22 @@ the check to 12 and removed the number from the markup: both hints call
 `data-strength-min` instead of keeping its own copy of 12. Prerequisite commit
 collapsed five `template.FuncMap` literals into `handler.TemplateFuncs()`.
 
-**Still open — the other three, with a plan approved and written up:**
+**Landed: the database size counts the write-ahead log.** The card read "4.0 KB"
+while the main file was 4,096 bytes and the WAL held 2,084,752. It reports disk
+footprint now, which is an upper bound: SQLite's automatic checkpoint reuses the
+WAL rather than truncating it, so the file stays at its high-water mark
+(measured — every frame checkpointed, file unchanged at 4,165,352 bytes). Over-
+reporting disk use is the mild error; under-reporting is the one that tells an
+operator their submissions are gone. Also fixed a panic in `humanBytes` past a
+terabyte — an unguarded index in a function that runs on every page render.
+
+Review caught the same shape as the previous branch: every test stopped at
+`dbStatus`, so hardcoding the status in `Shell` left the fix dead with the suite
+green. There is a rendered-page test now. It also caught that my justification
+for excluding `-shm` ("a fixed size would dominate a small database") applies to
+the WAL itself at 128x the scale — the fix was right, the reasoning was not.
+
+**Still open — the other two, with a plan approved and written up:**
 
 - `_redirect` is an open redirect. `determineRedirect` returns the submitter's
   value verbatim; confirmed live against a running instance. POST-only, so it
@@ -400,8 +415,6 @@ collapsed five `template.FuncMap` literals into `handler.TemplateFuncs()`.
   is a new `internal/urlsafe` making the operator-configured `Redirect` the trust
   anchor, and it carries a deliberate upgrade break for anyone who pasted the
   snippet's `_redirect` without setting the form's own redirect field.
-- The database size figure ignores the WAL. The card read 4.0 KB while the
-  database held 172 KB, all of it in the write-ahead log.
 - Accepted submissions report `score 0`. Score and signals are persisted only on
   the held path, so the detail drawer prints a number the app never computed for
   that row.
