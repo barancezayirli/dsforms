@@ -1,6 +1,6 @@
 # Session Progress — Nocturne Admin Redesign
 
-Branch: `feat/nocturne-redesign`
+Branch: `refactor/seal-screening-decision` (merged from `feat/nocturne-redesign`)
 Spec: `docs/design/specs/2026-09-09-nocturne-admin-redesign-design.md`
 Handoff: `reference/design_handoff_dsforms_admin/`
 
@@ -9,7 +9,7 @@ Handoff: `reference/design_handoff_dsforms_admin/`
 | Phase | Content | Status |
 |---|---|---|
 | 0 | Vendored assets (Inter, Phosphor), Nocturne tokens, `base.html` shell | **done** |
-| 1 | `spam.Detail`/`Signal`/`DefaultThreshold`, `config.SpamThreshold`, schema, store methods | **done** |
+| 1 | `screen.Decide`/`Signal`/`DefaultThreshold`, `config.SpamThreshold`, schema, store methods | **done** |
 | 2 | Submit-handler rewiring (allow → block → honeypot → score → hold) | not started |
 | 3 | Forms, form detail, reader drawer | **done** |
 | 4 | Quarantine + breakdown, Filter rules | **done** |
@@ -49,7 +49,7 @@ closed.
 The pattern is worth keeping: the first pass fixed each finding *as reported*
 rather than fixing the mechanism behind it, and each regression test enumerated
 the report rather than the mechanism, so the tests passed against code that was
-still open. `filter.SenderAddress` is now the single definition of "the sender",
+still open. the sender now has a single definition (now `screen`-sealed) of "the sender",
 shared with the submit handler, and returns none/one/**ambiguous** — ambiguity
 stays unresolved, because every tie-break has a side an attacker can land on.
 
@@ -70,8 +70,8 @@ dropping `waitlist_entries` makes the degraded banner appear on all three pages
 that previously read zero in silence.
 
 Three of the AGENT.md corrections were errors written in that same session,
-including a `spam.Rule` "compile-time prompt" guarantee that Go does not
-provide. `spam.AllRules` plus an AST-derived completeness test now builds the
+including a `Check` "compile-time prompt" guarantee that Go does not
+provide. `AllChecks` plus an AST-derived completeness test now builds the
 guarantee that was previously only asserted.
 
 ## Third review pass
@@ -92,7 +92,7 @@ Two live bypasses, both reproduced, both closed:
   being invisible to every block rule, because the shape test rejected any value
   containing a space.
 
-`canonicalAddress` is now the single definition, folding ASCII-only. The
+a single `Canonical` is now the definition (now `screen`-sealed), folding ASCII-only. The
 regression test is a property — no byte-distinct value may canonicalise onto an
 honest address — rather than the list of confusables known today, which is what
 left it open twice.
@@ -121,6 +121,53 @@ Two rules added to AGENT.md §4: **in a switch over a closed value set the safe
 outcome is never `default`** (three instances on this branch), and **close the
 mechanism, not the reported instance**.
 
+## Fourth pass — sealing the decision, and reviewing the seal
+
+`feat/nocturne-redesign` was merged to local `main`, unpushed. Three review
+rounds had each found a live filter bypass one layer beneath the previous fix,
+so the next step was structural rather than another fix pass.
+
+**The refactor.** `internal/filter` and `internal/spam` are gone. The hold/accept
+decision now lives behind one entry point in `internal/screen`, with the
+implementation under `internal/screen/internal/{addr,rules,score,repeat}` — which
+Go forbids any other package from importing. The three-way split that produced a
+bypass in three consecutive rounds does not fail review now; it fails to compile.
+
+Behaviour is unchanged and that is proved, not asserted: a 367-case golden
+recorded before any code moved is byte-identical after. `spam.Rule` became
+`screen.Check`, because `filter.Rule` (the operator's rule) already owned `Rule`
+and one package cannot have two.
+
+**The fourth review round** ran six agents. Three completed; I stopped the rest
+because they were mutation-testing in the shared working tree, which destabilised
+it and set off the security scanner repeatedly. That accident was the round's
+best evidence: six regressions were injected into live code and the defences
+caught five, including both historical bypasses. The sixth — the repeat-IP
+threshold — produced no golden diff, which is a real hole and is now closed.
+
+Fixed this pass:
+
+- `matches()` logged "unknown type" for *every* non-matching email or domain
+  rule, burying the one event that line exists to make loud. The email and
+  domain cases fell out of their loops without returning.
+- A zero threshold held every submission with an empty breakdown. `Decide` now
+  clamps, and `MinThreshold`/`MaxThreshold` live in `screen` instead of being
+  restated in the settings handler and in config. The fuzzer's own threshold
+  clamp is deleted — it was only ever checking the space where callers were
+  already correct.
+- **Filter rules that can never match are now surfaced.** A rule stored under an
+  older normalisation (`bot@localhost`, accepted before the address definition
+  was unified) is permanently inert, and a *block* rule in that state fails open
+  while appearing active. `screen.CheckRules` round-trips each stored value
+  through the validator; the rules screen names the affected rules and the
+  startup log reports a count.
+- The golden now samples both sides of the repeat boundary.
+- `Verdict.Matched` distinguishes "a rule decided this" from "the rule had an
+  empty ID", so a lost hit count is loud.
+- AGENT.md described a deleted architecture in seven places, including the
+  defined-type rule, which pointed at `screen.Rule` — a different type from the
+  one it means.
+
 ## Accepted risks
 
 | Risk | Why accepted |
@@ -131,7 +178,7 @@ mechanism, not the reported instance**.
 
 | Item | Why deferred | Target |
 |---|---|---|
-| Retyping `filter.Rule.Kind` / `.Type` as defined types | They are the "documented string set" AGENT.md §4 names, and `matches` fails open on an unknown type — an in-memory rule with a typo'd Type silently matches nothing, which for a *block* rule is a bypass rather than a no-op. The DB `CHECK` constraints make it unreachable today, so the invariant lives in SQLite rather than in Go. The constants already exist; the change is mechanical. | A follow-up PR |
+| Retyping `screen.Rule.Kind` / `.Type` as defined types (was `filter.Rule`) | They are the "documented string set" AGENT.md §4 names, and `matches` fails open on an unknown type — an in-memory rule with a typo'd Type silently matches nothing, which for a *block* rule is a bypass rather than a no-op. The DB `CHECK` constraints make it unreachable today, so the invariant lives in SQLite rather than in Go. The constants already exist; the change is mechanical. | A follow-up PR |
 | Deriving the SVG viewBox strings from the geometry constants | `SparkViewBox()` and friends return hand-written literals (`"0 0 220 40"`) while the paths are generated from `sparkWidth`/`sparkHeight`. Changing a constant updates every path and leaves the viewBox behind — the exact drift the function's own comment says it prevents. Three lines. | A follow-up PR |
 | A "resend notification" action for restored submissions | `notified = 0` on a restored row records a notification that was never sent, but nothing reads the column — no sweep, no retry, no admin action — so a failed send is not retried. Needs UI design. The misleading comment claiming otherwise has been removed. | A follow-up PR |
 | Wiring `docs/screenshots/` into the landing page | The five captures (dashboard, reader, submission, form-edit, login) are committed, but `docs/index.html` references none of them — the Admin UI section still describes the screens in cards instead of showing them. Only the page markup is outstanding. | A follow-up PR |
