@@ -36,6 +36,18 @@
         </div>
         {{end}}
 
+        {{if .LogoutIncomplete}}
+        <!-- The browser forgot the session; the server did not. Says what to do
+             rather than that something went wrong, because changing the password
+             is the only action that revokes the token that is still live. -->
+        <div class="notice" style="margin-bottom:14px">
+          <svg class="i"><use href="#ph-warning"/></svg>
+          <span>You were signed out of this browser, but the session could not be
+            ended on the server and stays valid until it expires. Sign in and
+            change your password to revoke it.</span>
+        </div>
+        {{end}}
+
         <label class="field">
           <span>Username</span>
           <input class="input" name="username" required autofocus autocomplete="username">

@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"bytes"
+	"errors"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -237,5 +240,157 @@ func TestAdminGuardTamperedCookie(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
+	}
+}
+
+// failingSessionStore deletes nothing and says so.
+type failingSessionStore struct {
+	AuthStore
+	err error
+}
+
+func (f failingSessionStore) DeleteSession(string) error { return f.err }
+
+// TestLogoutSaysSoWhenTheSessionSurvives is the regression test for a silent
+// security failure.
+//
+// Logout called DeleteSession and discarded the error. The cookie was cleared
+// either way, so the operator saw a completely normal logout — while the session
+// row survived and RequireAuth kept accepting that token for up to 30 days.
+// Anyone holding it (a shared machine, a captured cookie, a browser backup)
+// stayed authenticated, and nothing anywhere said otherwise.
+//
+// Clearing the cookie is still right on the failure path — it is strictly better
+// than leaving it — but it must not be the whole response, because it is the part
+// that makes the failure invisible.
+func TestLogoutSaysSoWhenTheSessionSurvives(t *testing.T) {
+	t.Parallel()
+	s, _ := setupAuth(t)
+
+	ah := &AuthHandler{
+		Store: failingSessionStore{AuthStore: s, err: errors.New("database is unavailable")},
+		Base:  Base{Nav: s, SecretKey: testSecretKey, BaseURL: "https://example.com"},
+	}
+
+	admin, err := s.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("admin user: %v", err)
+	}
+	token, err := s.CreateSession(admin.ID, 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/admin/logout", nil)
+	req.AddCookie(auth.CreateSessionCookie(token, "https://example.com"))
+	w := httptest.NewRecorder()
+	ah.Logout(w, req)
+
+	// The cookie must still be cleared: it costs nothing and it is the only part
+	// of the logout that definitely worked.
+	cleared := false
+	for _, c := range w.Result().Cookies() {
+		if c.Name == auth.CookieName && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("the session cookie was not cleared; a failed delete must not also " +
+			"leave the browser holding the token")
+	}
+
+	// And it must not look like a clean logout.
+	loc := w.Header().Get("Location")
+	if loc == "/admin/login" {
+		t.Fatal("a failed logout redirected exactly like a successful one.\n" +
+			"The session is still valid on the server for up to 30 days and the " +
+			"operator has no way to know, so they cannot change their password in " +
+			"response.")
+	}
+	if !strings.Contains(loc, "logout=incomplete") {
+		t.Errorf("Location = %q, want the incomplete-logout signal", loc)
+	}
+}
+
+// TestLogoutSucceedsQuietly is the other half: the normal path must not start
+// warning people for no reason, or the warning stops meaning anything.
+func TestLogoutSucceedsQuietly(t *testing.T) {
+	t.Parallel()
+	s, _ := setupAuth(t)
+	ah := &AuthHandler{
+		Store: s,
+		Base:  Base{Nav: s, SecretKey: testSecretKey, BaseURL: "https://example.com"},
+	}
+
+	admin, _ := s.GetUserByUsername("admin")
+	token, err := s.CreateSession(admin.ID, 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/admin/logout", nil)
+	req.AddCookie(auth.CreateSessionCookie(token, "https://example.com"))
+	w := httptest.NewRecorder()
+	ah.Logout(w, req)
+
+	if loc := w.Header().Get("Location"); loc != "/admin/login" {
+		t.Errorf("Location = %q, want a clean /admin/login", loc)
+	}
+	// And the session really is gone.
+	if _, err := s.GetSession(token); err == nil {
+		t.Error("the session still resolves to a user after a successful logout")
+	}
+}
+
+// TestLoginPageRendersTheIncompleteLogoutWarning closes the seam, not just the
+// handler's half of it.
+//
+// Logout signals a failed invalidation with ?logout=incomplete, and LoginPage
+// turns that into LogoutIncomplete. None of that reaches the operator unless the
+// real template renders the field — and a warning nobody sees is the same as no
+// warning, which is the state this whole fix exists to leave behind.
+//
+// This repo has shipped that exact shape twice: a template posting a field name
+// no handler read, and a Degraded flag the template could not reach. Both halves
+// were individually correct; nothing owned the join.
+func TestLoginPageRendersTheIncompleteLogoutWarning(t *testing.T) {
+	t.Parallel()
+
+	// Parsed with the sprite, the way main.go loads it: login.html includes
+	// {{template "icons"}}, so on its own it cannot execute at all.
+	tmpl, err := template.ParseFiles(
+		filepath.Join(templateDir, "login.html"),
+		filepath.Join(templateDir, "icons.html"),
+	)
+	if err != nil {
+		t.Fatalf("parsing the real login.html: %v", err)
+	}
+
+	// Whitespace-normalised, because the copy wraps across lines in the template
+	// and an assertion that breaks on re-indentation is a test that fails for the
+	// wrong reason.
+	render := func(data LoginData) string {
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, data); err != nil {
+			t.Fatalf("executing login.html: %v", err)
+		}
+		return strings.Join(strings.Fields(buf.String()), " ")
+	}
+
+	warned := render(LoginData{LogoutIncomplete: true})
+	if !strings.Contains(warned, "could not be ended on the server") {
+		t.Error("login.html renders nothing for LogoutIncomplete.\n" +
+			"The handler sets it, the redirect carries it, and the operator still " +
+			"never learns their session is live.")
+	}
+	// It must say what to do, not merely that something failed.
+	if !strings.Contains(warned, "change your password") {
+		t.Error("the warning does not tell the operator to change their password, " +
+			"which is the only action that revokes the session that is still valid")
+	}
+
+	if quiet := render(LoginData{}); strings.Contains(quiet, "could not be ended on the server") {
+		t.Error("the warning renders on an ordinary login, so it will be ignored " +
+			"by the time it matters")
 	}
 }
