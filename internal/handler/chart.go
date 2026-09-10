@@ -173,11 +173,23 @@ const (
 
 // SparkViewBox and friends expose the geometry to templates so the viewBox in
 // the markup cannot drift from the coordinates the paths were generated in.
-func SparkViewBox() string     { return "0 0 220 40" }
-func FormSparkViewBox() string { return "0 0 220 34" }
+//
+// Derived from the same constants the generators use, which is what makes that
+// sentence true. They used to return hand-written literals — "0 0 220 40" beside
+// a sparkWidth of 220 — so changing a constant moved every path and left the
+// viewBox behind, silently cropping or shrinking the drawing. The function whose
+// stated purpose is preventing that drift was the one place it could happen.
+func SparkViewBox() string     { return viewBox(sparkWidth, sparkHeight) }
+func FormSparkViewBox() string { return viewBox(sparkWidth, formSparkHeight) }
 
 // ChartViewBox is the coordinate space StackedBars emits into.
-func ChartViewBox() string { return "0 0 620 100" }
+func ChartViewBox() string { return viewBox(ChartWidth, ChartHeight) }
+
+// viewBox renders an SVG viewBox anchored at the origin. %g so whole numbers
+// stay whole: "0 0 220 40", not "0 0 220.000000 40.000000".
+func viewBox(w, h float64) string {
+	return fmt.Sprintf("0 0 %g %g", w, h)
+}
 
 // ChartWidth and ChartHeight are those dimensions as numbers, for callers
 // generating the bars.
