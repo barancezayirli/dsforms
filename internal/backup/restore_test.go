@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/barancezayirli/dsforms/internal/store"
 	_ "modernc.org/sqlite"
@@ -80,6 +81,32 @@ func (b *sabotagingStore) Reopen(string) error {
 	return errors.New("simulated reopen failure")
 }
 
+// slowReopenStore holds the first Reopen open until released.
+//
+// Reopen is the last step of a swap and the only slow one, so pausing there
+// parks a restore with the previous database already renamed to .rollback and
+// the replacement already in place at dbPath. A second restore entering during
+// that window is exactly the interleaving the mutex exists to prevent, and
+// nothing else in Import is slow enough to produce it reliably — two plain
+// concurrent calls simply finish one after the other, which is why the first
+// version of this test passed with the mutex removed.
+type slowReopenStore struct {
+	inner   *store.Store
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *slowReopenStore) DB() *sql.DB { return b.inner.DB() }
+
+func (b *slowReopenStore) Reopen(path string) error {
+	b.once.Do(func() {
+		close(b.entered)
+		<-b.release
+	})
+	return b.inner.Reopen(path)
+}
+
 // restoreFixture builds a live store holding one form, plus a valid backup file
 // holding a different one, so a successful restore is visibly distinguishable
 // from a rolled-back one.
@@ -122,7 +149,7 @@ func restoreFixture(t *testing.T) (live *store.Store, dbPath, uploadPath string)
 
 // seedBackupFile writes a valid dsforms database, holding a distinguishable
 // form, to path.
-func seedBackupFile(t *testing.T, path string) {
+func seedBackupFile(t *testing.T, path string, formName ...string) {
 	t.Helper()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "seed.db")
@@ -130,7 +157,11 @@ func seedBackupFile(t *testing.T, path string) {
 	if err != nil {
 		t.Fatalf("store.New for backup: %v", err)
 	}
-	if err := s.CreateForm(store.Form{ID: "f2", Name: "Restored", EmailTo: "b@c.com"}); err != nil {
+	name := "Restored"
+	if len(formName) > 0 {
+		name = formName[0]
+	}
+	if err := s.CreateForm(store.Form{ID: "f2", Name: name, EmailTo: "b@c.com"}); err != nil {
 		t.Fatalf("seeding backup store: %v", err)
 	}
 	s.Close()
@@ -486,4 +517,117 @@ func TestImportDoesNotRaceWithReaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
+}
+
+// TestSweepStagedUploadsRemovesOnlyAbandonedUploads covers the cleanup for a
+// file the restore path now deliberately leaves on the data volume.
+//
+// Staging beside the database is what makes the final rename same-filesystem, so
+// it fixed EXDEV — at the cost that a process killed between staging and the
+// swap leaves the upload there, up to the 100 MB limit, with nothing to remove
+// it. Several interrupted restores fill the disk the database needs.
+//
+// The discrimination matters as much as the removal: a sweep that took the
+// database, its WAL, or an operator's own backup file with it would be a far
+// worse bug than the litter.
+func TestSweepStagedUploadsRemovesOnlyAbandonedUploads(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	stale := []string{"dsforms-import-123.db", "dsforms-import-abc.db"}
+	keep := []string{
+		"dsforms.db", "dsforms.db-wal", "dsforms.db-shm",
+		"dsforms.db.rollback",      // a parked database: the last copy of real data
+		"my-backup.db",             // an operator's own file
+		"dsforms-import-notes.txt", // right prefix, wrong kind
+	}
+	for _, n := range append(append([]string{}, stale...), keep...) {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
+			t.Fatalf("seeding %s: %v", n, err)
+		}
+	}
+
+	removed, err := SweepStagedUploads(dir)
+	if err != nil {
+		t.Fatalf("SweepStagedUploads: %v", err)
+	}
+	if removed != len(stale) {
+		t.Errorf("removed %d files, want %d", removed, len(stale))
+	}
+
+	for _, n := range stale {
+		if _, err := os.Stat(filepath.Join(dir, n)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the sweep", n)
+		}
+	}
+	for _, n := range keep {
+		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
+			t.Errorf("the sweep removed %s, which it must never touch: %v", n, err)
+		}
+	}
+}
+
+// TestImportSerializesConcurrentRestores pins that two restores cannot interleave.
+//
+// Both close the live handle and then contend for one fixed park path: the
+// second can rename the first's parked database away, or swap its upload into
+// place between the first's swap and its reopen. Every interleaving is some
+// combination of two half-finished swaps over one file, and the loser is the
+// only copy of the operator's data.
+func TestImportSerializesConcurrentRestores(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// A distinguishable payload. The first version of this test seeded both
+	// uploads with the same form name, so it could not tell which restore won —
+	// and removing the mutex left it passing, which is the exact shape of guard
+	// this repo keeps having to fix.
+	second := filepath.Join(filepath.Dir(dbPath), "upload2.db")
+	seedBackupFile(t, second, "SecondRestore")
+
+	s := &slowReopenStore{
+		inner:   live,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- Import(s, uploadPath, dbPath) }()
+
+	// Wait until the first restore is parked inside Reopen: its previous database
+	// is at .rollback and its replacement is already at dbPath.
+	<-s.entered
+
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- Import(s, second, dbPath) }()
+
+	// With the mutex, the second restore is still blocked at the top of Import
+	// and cannot have touched anything. Without it, it has had a clear run at the
+	// same three files.
+	select {
+	case err := <-secondDone:
+		t.Fatalf("a second restore ran to completion (%v) while the first was "+
+			"mid-swap.\nBoth close the live handle and contend for one park path, so "+
+			"whatever is on disk now is some interleaving of two half-finished "+
+			"swaps.", err)
+	case <-time.After(250 * time.Millisecond):
+		// Correctly blocked.
+	}
+
+	close(s.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first restore: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second restore: %v", err)
+	}
+
+	// Whatever order they ran in, the process must be serving exactly one of the
+	// two uploads — never a mixture, never the original, never nothing.
+	got := formNames(t, live)
+	if len(got) != 1 || (got[0] != "Restored" && got[0] != "SecondRestore") {
+		t.Errorf("after two restores the live store holds %v, want exactly one of "+
+			"[Restored] or [SecondRestore]", got)
+	}
+	assertNoRollbackFile(t, dbPath)
 }

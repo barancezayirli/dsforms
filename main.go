@@ -606,6 +606,15 @@ func main() {
 		log.Println("email notifications disabled (SMTP_HOST or SMTP_FROM not set)")
 	}
 
+	// Clear any restore uploads left behind by a process that died mid-swap.
+	// Startup is the one moment nothing can be in flight, so every match here is
+	// certainly stale — see backup.SweepStagedUploads.
+	if n, err := backup.SweepStagedUploads(filepath.Dir(cfg.DBPath)); err != nil {
+		log.Printf("startup: %v", err)
+	} else if n > 0 {
+		log.Printf("startup: removed %d leftover restore upload(s) from a previous run", n)
+	}
+
 	webhookSender := webhook.NewSender()
 
 	worker := &broadcaster.Worker{
@@ -724,7 +733,20 @@ func main() {
 	}
 
 	r := newRouter(func(ctx context.Context) error {
-		return s.DB().PingContext(ctx)
+		// A real query, not Ping. Ping proves a connection object exists;
+		// SELECT 1 proves the pool can actually execute, which is the difference
+		// between "the handle is there" and "the handle works".
+		//
+		// Deliberately NOT PRAGMA quick_check, which was the obvious next step
+		// and is the wrong one. quick_check reads the whole database, so it costs
+		// more every probe as the data grows — and, more importantly, corruption
+		// is not something a restart fixes. Failing a liveness probe on it turns
+		// a damaged-but-serving instance into a crash loop, which is strictly
+		// worse than serving errors with the damage in the log. This endpoint
+		// exists for the state a restart DOES fix: a database handle closed by a
+		// failed restore.
+		var ok int
+		return s.DB().QueryRowContext(ctx, "SELECT 1").Scan(&ok)
 	})
 	errorPages(r, templates)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
