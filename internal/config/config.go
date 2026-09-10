@@ -76,7 +76,7 @@ func spamThreshold() int {
 	if n == 0 {
 		return screen.DefaultThreshold
 	}
-	clamped := clampInt(n, 1, 20)
+	clamped := clampInt(n, screen.MinThreshold, screen.MaxThreshold)
 	if clamped != n {
 		// Say so. An operator who sets 100 meaning "effectively off" gets 20,
 		// which quarantines everything scoring 20 or more — the opposite of

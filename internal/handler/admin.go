@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -262,7 +263,7 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 	// or out-of-range value falls back to — never a literal threshold of zero,
 	// which would hold every submission the form ever received.
 	spamThreshold := 0
-	if v, err := strconv.Atoi(r.FormValue("spam_threshold")); err == nil && v > 0 && v <= 20 {
+	if v, err := strconv.Atoi(r.FormValue("spam_threshold")); err == nil && v >= screen.MinThreshold && v <= screen.MaxThreshold {
 		spamThreshold = v
 	}
 

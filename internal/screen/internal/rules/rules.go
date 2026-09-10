@@ -164,6 +164,8 @@ func matches(r Rule, addrs []string, ip string) bool {
 				return true
 			}
 		}
+		return false
+
 	case TypeDomain:
 		for _, addr := range addrs {
 			at := strings.LastIndex(addr, "@")
@@ -177,6 +179,8 @@ func matches(r Rule, addrs []string, ip string) bool {
 				return true
 			}
 		}
+		return false
+
 	case TypeIP:
 		if ip == "" {
 			return false
@@ -204,7 +208,13 @@ func matches(r Rule, addrs []string, ip string) bool {
 	// rather than left as a bare fallthrough because returning false here is
 	// fail-open for a *block* rule: a rule the operator believes is protecting
 	// them would silently match nothing.
-	log.Printf("filter: rule %s has unknown type %q; matched nothing", r.ID, r.Type)
+	//
+	// Every case above returns explicitly so that only a genuinely unknown type
+	// arrives here. The email and domain cases used to fall out of their loops on
+	// an ordinary non-match, so this fired once per rule per submission and
+	// buried the one event it exists to make loud. Pinned by
+	// TestMatchLogsOnlyForAGenuinelyUnknownType.
+	log.Printf("screen: rule %s has unknown type %q; matched nothing", r.ID, r.Type)
 	return false
 }
 

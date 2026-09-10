@@ -190,8 +190,14 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	// Counting the hit is a database write, so it stays out of the decision:
 	// screening is pure and this is a side effect of having made it.
-	if v.MatchedRuleID != "" {
-		h.countRuleHit(v.MatchedRuleID)
+	if v.Matched {
+		if v.MatchedRuleID == "" {
+			// A rule decided this and we cannot say which. Loud, because the
+			// silent version loses the operator's "N blocked" count.
+			log.Printf("submit: form %s: a filter rule matched with no ID; hit not counted", formID)
+		} else {
+			h.countRuleHit(v.MatchedRuleID)
+		}
 	}
 
 	if held {

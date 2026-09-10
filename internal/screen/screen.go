@@ -31,6 +31,24 @@ import (
 // cross it, because a false positive is expensive to recover.
 const DefaultThreshold = score.DefaultThreshold
 
+// MinThreshold and MaxThreshold bound what an operator may set, per instance or
+// per form.
+//
+// They live here rather than at the two places that used to restate the range —
+// the form settings handler and config's SPAM_THRESHOLD parsing — because a
+// threshold is policy belonging to the decision, and two copies of a policy
+// constant is how one of them drifts. Decide clamps to them regardless, so a
+// value that reaches it from anywhere else still cannot produce a nonsensical
+// verdict.
+//
+// The floor is 1, not 0: at zero every submission scores at or above the
+// threshold and is held with an empty breakdown, which is both useless and
+// unexplainable to the operator reading it.
+const (
+	MinThreshold = 1
+	MaxThreshold = 20
+)
+
 // Rule kinds and types. These strings are also the CHECK constraint values on
 // the filter_rules table, so changing one means a migration.
 const (
@@ -98,9 +116,17 @@ type Verdict struct {
 	Score   int
 	Signals []Signal
 
-	// MatchedRuleID is the operator rule that decided this, or "" if the content
-	// scorer did. The caller counts the hit; screening does not, because that is
-	// a database write and this is a pure decision.
+	// Matched reports that an operator rule decided this, and MatchedRuleID names
+	// it. The caller counts the hit; screening does not, because that is a
+	// database write and this is a pure decision.
+	//
+	// Two fields rather than testing MatchedRuleID for "": the handler used to
+	// gate the hit count on a non-empty id, so a rule with an empty ID would have
+	// stopped incrementing the operator's "N blocked" column silently. Unreachable
+	// today, since ids are UUIDs — but a lost count is exactly the class of
+	// silent wrong number this codebase keeps producing, and a bool makes it a
+	// visible bug instead.
+	Matched       bool
 	MatchedRuleID string
 }
 
@@ -137,6 +163,7 @@ func (s *Screener) SenderOK(fields map[string]string) bool {
 // Calling this records the submission against its IP, so it must be called once
 // per submission and not, for example, twice to "check" and then "apply".
 func (s *Screener) Decide(in Input) Verdict {
+	in.Threshold = clampThreshold(in.Threshold)
 	// Recorded unconditionally, before any short-circuit: the tally is also the
 	// record, so skipping it behind a content check would undercount an IP
 	// whenever scoring caught the submission first.
@@ -144,14 +171,34 @@ func (s *Screener) Decide(in Input) Verdict {
 	return decide(in, repeated)
 }
 
+// clampThreshold bounds a caller-supplied threshold into the range a verdict can
+// be sensibly produced for.
+//
+// Callers already clamp — the settings form and config both do — but the
+// decision cannot rely on that, because "the callers are correct" is exactly the
+// assumption that made the fuzzer's earlier threshold clamp hide this: a zero
+// threshold holds everything with no signals, violating the invariant the same
+// fuzzer asserts two properties later.
+func clampThreshold(t int) int {
+	switch {
+	case t < MinThreshold:
+		return DefaultThreshold
+	case t > MaxThreshold:
+		return MaxThreshold
+	default:
+		return t
+	}
+}
+
 // decide is the pure core, split out so it can be fuzzed and characterised
 // without the tracker's state.
 func decide(in Input, repeated bool) Verdict {
+	in.Threshold = clampThreshold(in.Threshold)
 	matched, ruleHit := rules.Match(in.Rules, in.Fields, in.IP)
 
 	switch {
 	case ruleHit && matched.Kind == rules.KindAllow:
-		return Verdict{MatchedRuleID: matched.ID}
+		return Verdict{Matched: true, MatchedRuleID: matched.ID}
 
 	case ruleHit && matched.Kind == rules.KindBlock:
 		// The score is stamped at the threshold so the breakdown still adds up,
@@ -166,6 +213,7 @@ func decide(in Input, repeated bool) Verdict {
 			Hold:          true,
 			Score:         in.Threshold,
 			Signals:       []Signal{{Check: CheckBlocked, Match: matched.Value, Weight: in.Threshold}},
+			Matched:       true,
 			MatchedRuleID: matched.ID,
 		}
 
@@ -182,7 +230,3 @@ func decide(in Input, repeated bool) Verdict {
 		return Verdict{Hold: sc >= in.Threshold, Score: sc, Signals: signals}
 	}
 }
-
-// Keywords returns the custom blocking keywords in a rule set, for callers that
-// display them. Matching uses them internally without being asked.
-func Keywords(rs []Rule) []string { return rules.Keywords(rs) }

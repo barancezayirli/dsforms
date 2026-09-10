@@ -64,9 +64,12 @@ func FuzzDecide(f *testing.F) {
 		default:
 			typ = TypeEmail
 		}
-		if threshold < 1 || threshold > 100 {
-			threshold = DefaultThreshold
-		}
+		// Deliberately NOT clamped. An earlier version bounded this to [1,100],
+		// which meant the properties below were only ever checked over the input
+		// space where the callers already happened to be correct — and a zero
+		// threshold holding every submission with an empty breakdown, violating
+		// property 4, sat just outside it. Decide clamps internally now, so the
+		// fuzzer's job is to prove that, not to assume it.
 
 		var rs []Rule
 		// Only a rule the operator could really have created. Validate is the
