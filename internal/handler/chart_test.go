@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"math"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -309,5 +311,88 @@ func TestPaginationFromQuery(t *testing.T) {
 	}
 	if got := NewPagination(1, 25, 10).Sizes(); len(got) == 0 {
 		t.Error("Sizes() returned nothing; the rows-per-page selector would be empty")
+	}
+}
+
+// TestViewBoxesContainWhatIsDrawnInThem is the invariant the viewBox functions
+// claim to protect, asserted instead of assumed.
+//
+// They used to return hand-written literals — "0 0 220 40" sitting beside a
+// sparkWidth of 220 — while every path was generated from the constants. Change
+// a constant and the drawing moves while the viewBox stays, so the browser
+// silently crops or rescales it. The function whose stated purpose is preventing
+// that drift was the one place it could happen.
+//
+// Deriving the strings is the fix; this checks the thing that actually matters,
+// which is that the coordinates land inside the box. That holds however the
+// constants change, and a test comparing the string to the same constants that
+// built it would prove nothing.
+func TestViewBoxesContainWhatIsDrawnInThem(t *testing.T) {
+	t.Parallel()
+
+	// Deliberately awkward series: a flat one takes the pinned-to-the-middle
+	// branch, a single value takes the no-span branch, and a spiky one pushes the
+	// extremes.
+	series := [][]int{
+		{5, 5, 5, 5, 5},
+		{0, 100, 0, 100, 0},
+		{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+		{42},
+	}
+
+	num := regexp.MustCompile(`-?\d+(?:\.\d+)?`)
+
+	// inBox checks every coordinate pair in an SVG path against a viewBox.
+	inBox := func(t *testing.T, name, box, path string) {
+		t.Helper()
+		var ox, oy, w, h float64
+		if _, err := fmt.Sscanf(box, "%g %g %g %g", &ox, &oy, &w, &h); err != nil {
+			t.Fatalf("%s viewBox %q is not four numbers: %v", name, box, err)
+		}
+		coords := num.FindAllString(path, -1)
+		if len(coords) < 2 {
+			t.Fatalf("%s path %q has no coordinates; the scan is not reading it", name, path)
+		}
+		for i := 0; i+1 < len(coords); i += 2 {
+			x, _ := strconv.ParseFloat(coords[i], 64)
+			y, _ := strconv.ParseFloat(coords[i+1], 64)
+			if x < ox || x > ox+w || y < oy || y > oy+h {
+				t.Errorf("%s draws at (%g, %g), outside its viewBox %q.\n"+
+					"The browser crops or rescales silently, so this shows up as a "+
+					"chart that looks subtly wrong rather than as an error.\npath: %s",
+					name, x, y, box, path)
+				return
+			}
+		}
+	}
+
+	for _, vals := range series {
+		sp := Sparkline(vals, sparkWidth, sparkHeight, 4)
+		inBox(t, "Sparkline.Line", SparkViewBox(), sp.Line)
+		inBox(t, "Sparkline.Fill", SparkViewBox(), sp.Fill)
+
+		fs := Sparkline(vals, sparkWidth, formSparkHeight, 4)
+		inBox(t, "FormSparkline.Line", FormSparkViewBox(), fs.Line)
+	}
+
+	// StackedBars emits rectangles; the far corner of each is what has to fit.
+	var ox, oy, w, h float64
+	if _, err := fmt.Sscanf(ChartViewBox(), "%g %g %g %g", &ox, &oy, &w, &h); err != nil {
+		t.Fatalf("ChartViewBox %q is not four numbers: %v", ChartViewBox(), err)
+	}
+	bars := StackedBars([]int{1, 5, 3, 9}, []int{0, 2, 1, 4}, ChartWidth, ChartHeight)
+	if len(bars) == 0 {
+		t.Fatal("StackedBars produced nothing; the assertion below is vacuous")
+	}
+	for i, b := range bars {
+		right, bottom := b.X+BarWidth(), b.Y+b.H
+		if b.X < ox || right > ox+w || b.Y < oy || bottom > oy+h {
+			t.Errorf("bar %d spans x=[%g,%g] y=[%g,%g], outside viewBox %q",
+				i, b.X, right, b.Y, bottom, ChartViewBox())
+		}
+		if heldBottom := b.HeldY + b.HeldH; b.HeldH > 0 && (b.HeldY < oy || heldBottom > oy+h) {
+			t.Errorf("bar %d held segment spans y=[%g,%g], outside viewBox %q",
+				i, b.HeldY, heldBottom, ChartViewBox())
+		}
 	}
 }
