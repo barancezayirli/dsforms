@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -473,4 +474,92 @@ func TestRecoveryRendersStyled500(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "Something went wrong") {
 		t.Errorf("styled 500 not rendered; got %.160q", w.Body.String())
 	}
+}
+
+// TestFileUploadNamesReachAHandler catches a mismatch that no other test can see
+// and that the browser reports as a plausible-looking error message.
+//
+// templates/backups.html posted its file as name="backup"; BackupHandler.Import
+// read r.FormFile("file"). Restore therefore failed every single time it was
+// used, from the feature's first commit — the operator picked a .db file,
+// confirmed the "this cannot be undone" prompt, and got "No file uploaded."
+//
+// The handler test suite was green throughout, because it builds its own
+// multipart body and posts "file": it encoded the handler's side of the contract
+// and never the template's, so the two halves could disagree indefinitely with
+// nothing to notice. That is the shape this repo keeps rediscovering — both ends
+// individually tested, the seam between them owned by no one.
+//
+// Checked in the direction the bug runs: a template offering a field nobody
+// reads is dead UI. The reverse is fine — a handler may read an upload posted by
+// something other than a template.
+func TestFileUploadNamesReachAHandler(t *testing.T) {
+	t.Parallel()
+
+	handlerSrc, err := os.ReadDir("internal/handler")
+	if err != nil {
+		t.Fatalf("read handler dir: %v", err)
+	}
+	read := map[string]bool{}
+	formFile := regexp.MustCompile(`FormFile\("([^"]+)"\)`)
+	for _, e := range handlerSrc {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile("internal/handler/" + e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, m := range formFile.FindAllStringSubmatch(string(body), -1) {
+			read[m[1]] = true
+		}
+	}
+	if len(read) == 0 {
+		t.Fatal("found no FormFile call sites; the scan is no longer matching them")
+	}
+
+	entries, err := templateFS.ReadDir("templates")
+	if err != nil {
+		t.Fatalf("read templates dir: %v", err)
+	}
+	input := regexp.MustCompile(`<input[^>]*type="file"[^>]*>`)
+	nameAttr := regexp.MustCompile(`name="([^"]+)"`)
+
+	checked := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		body, err := templateFS.ReadFile("templates/" + e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, tag := range input.FindAllString(string(body), -1) {
+			m := nameAttr.FindStringSubmatch(tag)
+			if m == nil {
+				t.Errorf("templates/%s has a file input with no name attribute, so it "+
+					"posts nothing: %s", e.Name(), tag)
+				continue
+			}
+			checked++
+			if !read[m[1]] {
+				t.Errorf("templates/%s posts its upload as name=%q, which no handler reads.\n"+
+					"Handlers read: %v\nThe upload silently arrives empty and the operator "+
+					"is told the file is missing.", e.Name(), m[1], keysOf(read))
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no file inputs found in templates; the scan is no longer matching them")
+	}
+	t.Logf("checked %d file input(s) against %d FormFile name(s)", checked, len(read))
+}
+
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
