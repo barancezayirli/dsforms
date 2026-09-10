@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -282,6 +283,38 @@ func (h *WaitlistHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/waitlists/"+id, http.StatusFound)
 }
 
+// writeCSV writes a header and rows, and reports whether the download the client
+// received is complete.
+//
+// csv.Writer buffers, so a write failure surfaces either on a later Write or not
+// until Flush — which means the last chunk of a large export can fail after the
+// handler has already decided everything went well. The forms export called
+// Flush and never asked, so a truncated CSV was served as a clean 200 and the
+// operator got a short file with no indication it was short. The waitlist export
+// checked; nothing kept the two in step, which is how one of two copies ends up
+// wrong.
+//
+// The response cannot be un-sent — status and part of the body have already
+// gone — so the error exists to be logged and correlated, not recovered from.
+// Returning it rather than logging inside keeps that decision at the call site,
+// which is the only place that knows which export this was.
+func writeCSV(w io.Writer, header []string, rows [][]string) error {
+	cw := csv.NewWriter(w)
+	if err := cw.Write(header); err != nil {
+		return fmt.Errorf("writing header: %w", err)
+	}
+	for i, row := range rows {
+		if err := cw.Write(row); err != nil {
+			return fmt.Errorf("writing row %d of %d: %w", i+1, len(rows), err)
+		}
+	}
+	cw.Flush()
+	if err := cw.Error(); err != nil {
+		return fmt.Errorf("flushing after %d rows: %w", len(rows), err)
+	}
+	return nil
+}
+
 // csvSafe neutralizes CSV formula injection by prefixing values that begin with
 // a formula trigger character with a single quote. Entry data comes from public
 // signups, so it is untrusted.
@@ -326,29 +359,22 @@ func (h *WaitlistHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-waitlist.csv"`, wl.ID))
 
-	cw := csv.NewWriter(w)
 	safeKeys := make([]string, len(keys))
 	for i, k := range keys {
 		safeKeys[i] = csvSafe(k)
 	}
 	header := append([]string{"position", "email", "joined_at"}, safeKeys...)
-	if err := cw.Write(header); err != nil {
-		log.Printf("waitlist export: write header: %v", err)
-		return
-	}
+	rows := make([][]string, 0, len(entries))
 	for _, e := range entries {
 		row := []string{strconv.Itoa(e.Position), csvSafe(e.Email), e.CreatedAt.Format("2006-01-02T15:04:05Z")}
 		for _, k := range keys {
 			row = append(row, csvSafe(e.Data[k]))
 		}
-		if err := cw.Write(row); err != nil {
-			log.Printf("waitlist export: write row: %v", err)
-			return
-		}
+		rows = append(rows, row)
 	}
-	cw.Flush()
-	if err := cw.Error(); err != nil {
-		log.Printf("waitlist export: flush %s: %v", id, err)
+
+	if err := writeCSV(w, header, rows); err != nil {
+		log.Printf("waitlist export: waitlist %s download is truncated: %v", id, err)
 	}
 }
 

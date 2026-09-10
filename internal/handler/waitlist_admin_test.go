@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -530,4 +533,95 @@ func TestWaitlistEntryDeleteWrongWaitlist(t *testing.T) {
 	if n, _ := s.CountEntries("wlB"); n != 1 {
 		t.Errorf("wlB entry should survive; count = %d, want 1", n)
 	}
+}
+
+// failAfter is an io.Writer that accepts n bytes and then refuses, standing in
+// for a client that disconnects or a socket that errors mid-download.
+type failAfter struct {
+	n     int
+	wrote int
+}
+
+func (f *failAfter) Write(p []byte) (int, error) {
+	if f.wrote >= f.n {
+		return 0, errors.New("connection reset by peer")
+	}
+	f.wrote += len(p)
+	return len(p), nil
+}
+
+// TestWriteCSVReportsATruncatedDownload covers the error path that used to be
+// unreachable.
+//
+// csv.Writer buffers, so a failed write surfaces on a later Write or not until
+// Flush. The forms export called Flush and never asked whether it worked, so a
+// truncated CSV went out as a clean 200 and the operator got a short file with
+// nothing saying it was short. The waitlist export checked; nothing kept the two
+// in step.
+//
+// The response cannot be recovered — status and part of the body are already
+// gone — so the whole value of the error is that it gets logged and correlated.
+// That only happens if it is returned at all.
+func TestWriteCSVReportsATruncatedDownload(t *testing.T) {
+	t.Parallel()
+
+	header := []string{"id", "email"}
+	rows := make([][]string, 200)
+	for i := range rows {
+		rows[i] = []string{fmt.Sprintf("id-%d", i), "someone@example.com"}
+	}
+
+	t.Run("a writer that fails partway is reported", func(t *testing.T) {
+		t.Parallel()
+		err := writeCSV(&failAfter{n: 64}, header, rows)
+		if err == nil {
+			t.Fatal("writeCSV reported success for a download that was cut short.\n" +
+				"The client keeps a truncated file and the server logs nothing, which " +
+				"is exactly the state this returns an error to prevent.")
+		}
+		// The message has to be diagnosable — how far it got, out of how many.
+		// Which of the two failure points reports it depends on buffering:
+		// csv.Writer holds ~4KB, so a small export fails at Flush and a large one
+		// on a Write. Both carry the count; the assertion is on that, not on
+		// which path ran.
+		if !strings.Contains(err.Error(), "200") {
+			t.Errorf("error %q does not say how many rows were involved, so a short "+
+				"file cannot be correlated with anything", err)
+		}
+	})
+
+	t.Run("a writer that fails immediately is reported", func(t *testing.T) {
+		t.Parallel()
+		if err := writeCSV(&failAfter{n: 0}, header, rows); err == nil {
+			t.Error("writeCSV reported success having written nothing at all")
+		}
+	})
+
+	t.Run("a failure past the buffer names the row", func(t *testing.T) {
+		t.Parallel()
+		// Enough data to force real writes through, so the mid-loop Write error
+		// path runs rather than only the final Flush.
+		big := make([][]string, 4000)
+		for i := range big {
+			big[i] = []string{fmt.Sprintf("id-%d", i), strings.Repeat("x", 64)}
+		}
+		err := writeCSV(&failAfter{n: 4096}, header, big)
+		if err == nil {
+			t.Fatal("writeCSV reported success for a download cut short mid-stream")
+		}
+		if !strings.Contains(err.Error(), "of 4000") {
+			t.Errorf("error %q does not name the row it stopped at", err)
+		}
+	})
+
+	t.Run("a healthy writer succeeds and writes every row", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		if err := writeCSV(&buf, header, rows); err != nil {
+			t.Fatalf("writeCSV: %v", err)
+		}
+		if got := strings.Count(strings.TrimSpace(buf.String()), "\n") + 1; got != len(rows)+1 {
+			t.Errorf("wrote %d lines, want %d (header + %d rows)", got, len(rows)+1, len(rows))
+		}
+	})
 }

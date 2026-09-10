@@ -2,7 +2,6 @@ package handler
 
 import (
 	"database/sql"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -824,14 +823,8 @@ func (h *AdminHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 
-	cw := csv.NewWriter(w)
-	// Write header: id, submitted_at, ip, read, then data keys
 	header := append([]string{"id", "submitted_at", "ip", "read"}, keys...)
-	if err := cw.Write(header); err != nil {
-		log.Printf("export csv: write header error: %v", err)
-		return
-	}
-
+	rows := make([][]string, 0, len(subs))
 	for _, s := range subs {
 		readVal := "false"
 		if s.Read {
@@ -841,10 +834,13 @@ func (h *AdminHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		for _, k := range keys {
 			row = append(row, csvSafe(s.Data[k]))
 		}
-		if err := cw.Write(row); err != nil {
-			log.Printf("export csv: write row error: %v", err)
-			return
-		}
+		rows = append(rows, row)
 	}
-	cw.Flush()
+
+	if err := writeCSV(w, header, rows); err != nil {
+		// Nothing can be done for this response — a 200 and part of the body have
+		// already gone out. Logged with the form and the counts so a short file
+		// is diagnosable instead of a mystery. It used to be neither.
+		log.Printf("export csv: form %s download is truncated: %v", id, err)
+	}
 }
