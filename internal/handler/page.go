@@ -198,7 +198,44 @@ func (b *Base) dbStatus() DBStatus {
 		// rather than something wrong.
 		return status
 	}
-	status.Size = humanBytes(info.Size())
+
+	// The write-ahead log counts. In WAL mode a commit lands in dsforms.db-wal
+	// and stays there until a checkpoint folds it into the main file, so on a
+	// young database the main file is not the database. Measured on a running
+	// instance after 40 submissions: main file 4,096 bytes, WAL 2,084,752. This
+	// card read "4.0 KB". It exists for an operator asking whether their data is
+	// still there, and it was answering no.
+	//
+	// What this reports is disk footprint, and it is an upper bound rather than
+	// the size of the data. Two reasons, both measured rather than assumed:
+	//
+	//   - SQLite's automatic checkpoint reuses the WAL instead of truncating it,
+	//     so the file stays at its high-water mark. After a PASSIVE checkpoint
+	//     moved every frame (busy=0 log=449 checkpointed=449), a 4,165,352-byte
+	//     WAL was still 4,165,352 bytes beside a 606 KB database. Only
+	//     wal_checkpoint(TRUNCATE) zeroes it, and this codebase issues that only
+	//     during a restore.
+	//   - A WAL holds superseded page images, so `Download snapshot` legitimately
+	//     produces a much smaller file: VACUUM INTO writes a compacted copy.
+	//
+	// That asymmetry is deliberate. Over-reporting disk use is the mild error;
+	// under-reporting is the one that tells an operator their submissions are
+	// gone, which is what this replaces. Reporting the compacted size instead
+	// would mean a VACUUM on every page render.
+	//
+	// A missing -wal contributes zero rather than suppressing the figure, so a
+	// non-WAL database still reports its size.
+	//
+	// -shm is not counted because it is a reconstructable shared-memory index
+	// rather than data — it is rebuilt on open and carries nothing a restore
+	// would need. Its fixed ~32 KB would also read as 36 KB for an empty
+	// database.
+	total := info.Size()
+	if wal, err := os.Stat(b.DBPath + "-wal"); err == nil {
+		total += wal.Size()
+	}
+
+	status.Size = humanBytes(total)
 	return status
 }
 
@@ -206,15 +243,22 @@ func (b *Base) dbStatus() DBStatus {
 // card is a glance, not a metric.
 func humanBytes(n int64) string {
 	const unit = 1024
+	// The suffixes this can name. Indexing it was previously unguarded, and
+	// humanBytes(1<<50) panicked with "index out of range [4] with length 4" —
+	// in a function called on every admin page render. A petabyte SQLite file is
+	// not a real scenario, but an unguarded index in a request path is worth two
+	// lines regardless: the failure mode is a 500 on every page, not a wrong
+	// number on one.
+	const suffixes = "KMGT"
 	if n < unit {
 		return fmt.Sprintf("%d B", n)
 	}
 	div, exp := int64(unit), 0
-	for size := n / unit; size >= unit; size /= unit {
+	for size := n / unit; size >= unit && exp < len(suffixes)-1; size /= unit {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGT"[exp])
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), suffixes[exp])
 }
 
 // Render executes a page template through the shell and handles the error in
