@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,14 +70,14 @@ func TestDefaultUserNotReseeded(t *testing.T) {
 		t.Fatalf("first New() error = %v", err)
 	}
 	u, _ := s1.GetUserByUsername("admin")
-	_ = s1.UpdatePassword(u.ID, "newpass")
+	_ = s1.UpdatePassword(u.ID, "newpassphrase")
 
 	s2, err := New(path)
 	if err != nil {
 		t.Fatalf("second New() error = %v", err)
 	}
 	u2, _ := s2.GetUserByUsername("admin")
-	err = bcrypt.CompareHashAndPassword([]byte(u2.passwordHash), []byte("newpass"))
+	err = bcrypt.CompareHashAndPassword([]byte(u2.passwordHash), []byte("newpassphrase"))
 	if err != nil {
 		t.Error("admin password was re-seeded, expected it to remain changed")
 	}
@@ -129,7 +130,7 @@ func TestGetUserByID(t *testing.T) {
 func TestListUsers(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	_ = s.CreateUser("alice", "pass")
+	_ = s.CreateUser("alice", "passphrase")
 	users, err := s.ListUsers()
 	if err != nil {
 		t.Fatalf("error = %v", err)
@@ -143,7 +144,7 @@ func TestUpdatePassword(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	admin, _ := s.GetUserByUsername("admin")
-	err := s.UpdatePassword(admin.ID, "newpass")
+	err := s.UpdatePassword(admin.ID, "newpassphrase")
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -156,7 +157,7 @@ func TestUpdatePassword(t *testing.T) {
 func TestDeleteUserNonLast(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	_ = s.CreateUser("alice", "pass")
+	_ = s.CreateUser("alice", "passphrase")
 	alice, _ := s.GetUserByUsername("alice")
 	err := s.DeleteUser(alice.ID)
 	if err != nil {
@@ -191,7 +192,7 @@ func TestHasDefaultPassword(t *testing.T) {
 		t.Error("HasDefaultPassword = false, want true on fresh DB")
 	}
 
-	_ = s.UpdatePassword(admin.ID, "newpass")
+	_ = s.UpdatePassword(admin.ID, "newpassphrase")
 	has, _ = s.HasDefaultPassword(admin.ID)
 	if has {
 		t.Error("HasDefaultPassword = true, want false after password update")
@@ -201,7 +202,7 @@ func TestHasDefaultPassword(t *testing.T) {
 func TestCreateUserDuplicate(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	err := s.CreateUser("admin", "pass")
+	err := s.CreateUser("admin", "passphrase")
 	if err == nil {
 		t.Fatal("expected error creating duplicate username, got nil")
 	}
@@ -820,7 +821,7 @@ func TestReopenRunsMigrations(t *testing.T) {
 	}
 
 	// Should be able to create users (migrations ran)
-	if err := sA.CreateUser("test", "pass"); err != nil {
+	if err := sA.CreateUser("test", "passphrase"); err != nil {
 		t.Errorf("CreateUser after reopen failed: %v", err)
 	}
 }
@@ -1302,5 +1303,58 @@ func TestCreateSessionStoresQueryableExpiry(t *testing.T) {
 	}
 	if _, err := s.GetSession(token); err != nil {
 		t.Errorf("the cleanup sweep deleted a live session: %v", err)
+	}
+}
+
+// TestPasswordsHaveAMinimumLength covers a gap found by running the product
+// rather than by reading it.
+//
+// Nothing anywhere enforced a password length. An account could be created with
+// an empty password — through the admin form, through `dsforms user add`, or by
+// changing an existing password to "" — and it would then log in normally with
+// full admin rights. Verified against a running instance: username "empty",
+// password "", HTTP 200 on /admin and /admin/users.
+//
+// Enforced in the store because that is where all four paths converge. Checking
+// it in the handler would leave the CLI open, and checking it in both leaves two
+// copies of a rule to drift.
+//
+// Deliberately NOT enforced on login: an existing short password must keep
+// working, or an upgrade locks people out of their own instance.
+func TestPasswordsHaveAMinimumLength(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+
+	tooShort := []string{"", " ", "x", "1234567"}
+	for _, p := range tooShort {
+		if err := s.CreateUser("u"+p, p); err == nil {
+			t.Errorf("CreateUser accepted the %d-character password %q.\n"+
+				"An account with no usable password logs in normally and has every "+
+				"permission the admin has.", len(p), p)
+		} else if !errors.Is(err, ErrPasswordTooShort) {
+			t.Errorf("CreateUser(%q) returned %v, want ErrPasswordTooShort", p, err)
+		}
+	}
+
+	long := strings.Repeat("a", MinPasswordLength)
+	if err := s.CreateUser("valid", long); err != nil {
+		t.Fatalf("CreateUser rejected a %d-character password: %v", len(long), err)
+	}
+
+	u, err := s.GetUserByUsername("valid")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	for _, p := range tooShort {
+		if err := s.UpdatePassword(u.ID, p); err == nil {
+			t.Errorf("UpdatePassword accepted %q; the create path is not the only "+
+				"way to end up with an unusable password", p)
+		}
+	}
+
+	// And an existing account still authenticates — the rule guards writes, not
+	// logins.
+	if _, err := s.CheckPassword("valid", long); err != nil {
+		t.Errorf("CheckPassword failed for a valid account: %v", err)
 	}
 }

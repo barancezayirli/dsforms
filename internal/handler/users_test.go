@@ -181,7 +181,7 @@ func TestCreateUserEmptyUsername(t *testing.T) {
 func TestDeleteUser(t *testing.T) {
 	t.Parallel()
 	s, r := setupUsers(t)
-	_ = s.CreateUser("alice", "pass")
+	_ = s.CreateUser("alice", "passphrase")
 	alice, _ := s.GetUserByUsername("alice")
 	w := doUserRequest(t, s, r, "POST", "/admin/users/"+alice.ID+"/delete", "")
 	if w.Code != http.StatusFound {
@@ -216,7 +216,7 @@ func TestDeleteUserLast(t *testing.T) {
 	// Create a second user, login as them, then try to delete admin (the last-user check is in store)
 	// Actually: admin IS the only user, trying to delete admin hits both self-check and last-user check
 	// Let's create alice, then delete admin (not self, but last-user check still applies to store)
-	_ = s.CreateUser("alice", "pass")
+	_ = s.CreateUser("alice", "passphrase")
 	// Delete alice first
 	alice, _ := s.GetUserByUsername("alice")
 	doUserRequest(t, s, r, "POST", "/admin/users/"+alice.ID+"/delete", "")
@@ -252,13 +252,13 @@ func TestAccountPage(t *testing.T) {
 func TestUpdatePasswordValid(t *testing.T) {
 	t.Parallel()
 	s, r := setupUsers(t)
-	form := url.Values{"current_password": {"admin"}, "new_password": {"newpass"}, "confirm_password": {"newpass"}}
+	form := url.Values{"current_password": {"admin"}, "new_password": {"newpassphrase"}, "confirm_password": {"newpassphrase"}}
 	w := doUserRequest(t, s, r, "POST", "/admin/account/password", form.Encode())
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
 	}
 	// Verify new password works
-	_, err := s.CheckPassword("admin", "newpass")
+	_, err := s.CheckPassword("admin", "newpassphrase")
 	if err != nil {
 		t.Errorf("new password doesn't work: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestUpdatePasswordValid(t *testing.T) {
 func TestUpdatePasswordWrongCurrent(t *testing.T) {
 	t.Parallel()
 	s, r := setupUsers(t)
-	form := url.Values{"current_password": {"wrong"}, "new_password": {"newpass"}, "confirm_password": {"newpass"}}
+	form := url.Values{"current_password": {"wrong"}, "new_password": {"newpassphrase"}, "confirm_password": {"newpassphrase"}}
 	w := doUserRequest(t, s, r, "POST", "/admin/account/password", form.Encode())
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -299,7 +299,7 @@ func TestUpdatePasswordClearsDefault(t *testing.T) {
 	if !has {
 		t.Fatal("admin should have default password initially")
 	}
-	form := url.Values{"current_password": {"admin"}, "new_password": {"newpass"}, "confirm_password": {"newpass"}}
+	form := url.Values{"current_password": {"admin"}, "new_password": {"newpassphrase"}, "confirm_password": {"newpassphrase"}}
 	doUserRequest(t, s, r, "POST", "/admin/account/password", form.Encode())
 	has, _ = s.HasDefaultPassword(admin.ID)
 	if has {
@@ -314,7 +314,7 @@ func TestUpdatePasswordInvalidatesSessions(t *testing.T) {
 	// Create a session (simulating another device)
 	otherToken, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
 	// Change password
-	form := url.Values{"current_password": {"admin"}, "new_password": {"newpass"}, "confirm_password": {"newpass"}}
+	form := url.Values{"current_password": {"admin"}, "new_password": {"newpassphrase"}, "confirm_password": {"newpassphrase"}}
 	doUserRequest(t, s, r, "POST", "/admin/account/password", form.Encode())
 	// Other session should be invalid
 	_, err := s.GetSession(otherToken)
@@ -337,7 +337,7 @@ func TestWarnBannerAbsentAfterUpdate(t *testing.T) {
 	t.Parallel()
 	s, r := setupUsers(t)
 	// Change password first
-	form := url.Values{"current_password": {"admin"}, "new_password": {"newpass"}, "confirm_password": {"newpass"}}
+	form := url.Values{"current_password": {"admin"}, "new_password": {"newpassphrase"}, "confirm_password": {"newpassphrase"}}
 	doUserRequest(t, s, r, "POST", "/admin/account/password", form.Encode())
 	// Now re-login with new password and check account page
 	admin, _ := s.GetUserByUsername("admin")

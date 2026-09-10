@@ -379,7 +379,8 @@ dsforms/
 
 - Session tokens stored as SHA-256 hashes in the database (cookie leak doesn't expose sessions)
 - Password change invalidates all sessions across all devices
-- bcrypt at cost 12 for all passwords
+- bcrypt at cost 12 for all passwords, minimum 8 characters (enforced on every
+  path that sets one: the admin form, the account page, and both CLI commands)
 - HMAC-SHA256 signed flash cookies
 - Rate limiting on form submissions (per-IP token bucket)
 - Login brute-force protection (5 attempts, 15-minute lockout)
