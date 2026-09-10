@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
@@ -937,8 +936,8 @@ func TestDeleteWaitlistNotFound(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	err := s.DeleteWaitlist("missing")
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("DeleteWaitlist(missing) error = %v, want sql.ErrNoRows", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("DeleteWaitlist(missing) error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -946,8 +945,8 @@ func TestUpdateWaitlistNotFound(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	err := s.UpdateWaitlist(Waitlist{ID: "missing", Name: "X"})
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("UpdateWaitlist(missing) error = %v, want sql.ErrNoRows", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("UpdateWaitlist(missing) error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -1055,8 +1054,8 @@ func TestDeleteEntryWrongWaitlist(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	// Deleting under the wrong waitlist must not delete and must report ErrNoRows.
-	if err := s.DeleteEntry("other", "e1"); !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("DeleteEntry wrong waitlist err = %v, want sql.ErrNoRows", err)
+	if err := s.DeleteEntry("other", "e1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("DeleteEntry wrong waitlist err = %v, want ErrNotFound", err)
 	}
 	if n, _ := s.CountEntries("wl"); n != 1 {
 		t.Errorf("entry should remain; count = %d, want 1", n)

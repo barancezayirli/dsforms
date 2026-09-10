@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -138,7 +137,7 @@ func (h *WaitlistHandler) render(w http.ResponseWriter, name string, data any) {
 func (h *WaitlistHandler) getWaitlistOr404(w http.ResponseWriter, id string) (store.Waitlist, bool) {
 	wl, err := h.Store.GetWaitlist(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "waitlist not found", http.StatusNotFound)
 			return store.Waitlist{}, false
 		}
@@ -201,7 +200,7 @@ func (h *WaitlistHandler) Edit(w http.ResponseWriter, r *http.Request) {
 func (h *WaitlistHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.Store.DeleteWaitlist(id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "waitlist not found", http.StatusNotFound)
 			return
 		}
@@ -272,7 +271,7 @@ func (h *WaitlistHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	entryID := chi.URLParam(r, "entryID")
 	if err := h.Store.DeleteEntry(id, entryID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "entry not found", http.StatusNotFound)
 			return
 		}
@@ -508,7 +507,7 @@ func (h *WaitlistHandler) BroadcastDetail(w http.ResponseWriter, r *http.Request
 	}
 	sum, err := h.Store.GetBroadcastSummary(bid)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "broadcast not found", http.StatusNotFound)
 			return
 		}

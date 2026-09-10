@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
@@ -45,7 +44,7 @@ func (h *WaitlistSubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	waitlistID := chi.URLParam(r, "waitlistID")
 	wl, err := h.Store.GetWaitlist(waitlistID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "waitlist not found", http.StatusNotFound)
 			return
 		}

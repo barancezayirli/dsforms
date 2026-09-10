@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -260,7 +259,7 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 			gone()
 			return
 		}
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			alreadyRestored()
 			return
 		}
@@ -285,7 +284,7 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 			gone()
 			return
 		}
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			alreadyRestored()
 			return
 		}
@@ -383,7 +382,7 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 		// Both reasons a held row can be missing are a 404 here: there is
 		// nothing to report on either way. Restore has to tell them apart
 		// because its two messages differ; this one does not.
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, store.ErrSubmissionGone) {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSubmissionGone) {
 			http.Error(w, "submission not found", http.StatusNotFound)
 			return
 		}

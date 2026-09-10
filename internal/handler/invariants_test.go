@@ -452,3 +452,36 @@ type ifaceOwner struct{ typ, field string }
 
 // storeInterface names the per-handler storage surfaces.
 var storeInterface = regexp.MustCompile(`^(\w+Store|NavCounter)$`)
+
+// TestHandlersDoNotDependOnDatabaseSQL pins the contract the store interfaces
+// used to leave unwritten.
+//
+// Handlers tested every not-found against sql.ErrNoRows. That was a private
+// arrangement between two concrete types in one binary — and then the per-handler
+// interfaces made the store pluggable, so "returns a database/sql sentinel"
+// became a load-bearing term of eleven published interfaces that stated it
+// nowhere. Any implementation not built on database/sql would turn every 404
+// into a 500, and nothing in the type system said so.
+//
+// store.ErrNotFound names it in the package whose contract it is. This keeps
+// handler out of database/sql entirely, so the next not-found check cannot
+// quietly reintroduce the dependency.
+func TestHandlersDoNotDependOnDatabaseSQL(t *testing.T) {
+	t.Parallel()
+	_, files := astcheck.Package(t, ".")
+
+	var checked int
+	for path, f := range files {
+		checked++
+		if names := astcheck.ImportedAs(f, "database/sql"); len(names) > 0 {
+			t.Errorf("%s imports database/sql.\nHandlers reach the store through "+
+				"interfaces; depending on the driver's sentinels makes those "+
+				"interfaces implementable only by something built on database/sql, "+
+				"which is the opposite of why they exist. Use store.ErrNotFound.", path)
+		}
+	}
+	if checked < 10 {
+		t.Fatalf("only %d files scanned; the scan is not reading the package", checked)
+	}
+	t.Logf("scanned %d files", checked)
+}

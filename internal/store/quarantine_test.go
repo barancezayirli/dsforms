@@ -918,7 +918,7 @@ func TestGetHeldSubmission(t *testing.T) {
 		if !errors.Is(err, ErrSubmissionGone) {
 			t.Errorf("err = %v, want ErrSubmissionGone", err)
 		}
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrNotFound) {
 			t.Errorf("err = %v must not also read as 'not held' — the two mean opposite things to the operator", err)
 		}
 	})
@@ -943,7 +943,7 @@ func TestGetHeldSubmission(t *testing.T) {
 			t.Fatalf("RestoreSubmission: %v", err)
 		}
 		_, err := s.GetHeldSubmission("h1")
-		if !errors.Is(err, sql.ErrNoRows) {
+		if !errors.Is(err, ErrNotFound) {
 			t.Errorf("err = %v, want ErrNoRows for a restored submission", err)
 		}
 		if errors.Is(err, ErrSubmissionGone) {
