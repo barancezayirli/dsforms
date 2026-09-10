@@ -408,3 +408,58 @@ func TestCanonicalAddressAcceptsEveryFormValidateAccepts(t *testing.T) {
 		})
 	}
 }
+
+// TestMatchesFailsClosedOnDegenerateInput pins the boundaries a mutation sweep
+// found unguarded.
+//
+// Each of these was a surviving mutant: flipping the return kept the whole suite
+// green. They are the returns that decide what happens when input is not what
+// the matcher expects, and for an *allow* rule "match" is the dangerous
+// direction — an allow rule matching skips the block list and all scoring.
+func TestMatchesFailsClosedOnDegenerateInput(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an unrecognised rule type matches nothing", func(t *testing.T) {
+		t.Parallel()
+		// The severe case is an allow rule: if an unknown type matched, every
+		// submission would be allowlisted and the filter would be off entirely.
+		allow := []Rule{{ID: "A", Kind: KindAllow, Type: "nonsense", Value: "whatever"}}
+		if r, ok := Match(allow, map[string]string{"email": "spammer@bad.example"}, "203.0.113.5"); ok {
+			t.Errorf("an unknown-type allow rule matched (%+v) — that allowlists everything", r)
+		}
+		block := []Rule{{ID: "B", Kind: KindBlock, Type: "nonsense", Value: "whatever"}}
+		if _, ok := Match(block, map[string]string{"email": "a@b.com"}, "203.0.113.5"); ok {
+			t.Error("an unknown-type block rule matched")
+		}
+	})
+
+	t.Run("an unparseable client IP matches no ip or cidr rule", func(t *testing.T) {
+		t.Parallel()
+		// ExtractIP takes the first X-Forwarded-For entry, which is submitter
+		// input, so a value net.ParseIP rejects is reachable.
+		rs := []Rule{
+			{ID: "A", Kind: KindAllow, Type: TypeCIDR, Value: "203.0.113.0/24"},
+			{ID: "B", Kind: KindAllow, Type: TypeIP, Value: "203.0.113.5"},
+		}
+		for _, ip := range []string{"", "not-an-ip", "999.999.999.999", "203.0.113.5, 10.0.0.1"} {
+			if r, ok := Match(rs, map[string]string{"email": "a@b.com"}, ip); ok {
+				t.Errorf("ip %q matched rule %s — a malformed address must not allowlist", ip, r.ID)
+			}
+		}
+		// and a well-formed one still matches, or the guard is just breaking the feature
+		if _, ok := Match(rs, map[string]string{"email": "a@b.com"}, "203.0.113.5"); !ok {
+			t.Error("a valid in-range IP no longer matches")
+		}
+	})
+
+	t.Run("a keyword rule never matches here", func(t *testing.T) {
+		t.Parallel()
+		// Keyword rules feed the scorer at the usual weight. If they matched
+		// here they would hold outright, which is the behaviour the weighting
+		// deliberately avoids.
+		rs := []Rule{{ID: "K", Kind: KindBlock, Type: TypeKeyword, Value: "casino"}}
+		if _, ok := Match(rs, map[string]string{"message": "best casino ever"}, "203.0.113.5"); ok {
+			t.Error("a keyword rule matched in Match; it should reach the scorer instead")
+		}
+	})
+}
