@@ -551,6 +551,19 @@ func main() {
 	// only state the hold/accept decision keeps.
 	screener := screen.New(10000)
 
+	// A rule stored under an older normalisation can be permanently unmatchable,
+	// and a block rule in that state fails open while still appearing on the
+	// rules screen. Said once at boot so it is visible without anyone visiting
+	// that page; the page itself names the individual rules.
+	if rules, err := s.ListFilterRules(); err != nil {
+		log.Printf("startup: could not check filter rules: %v", err)
+	} else if problems := screen.CheckRules(rules); len(problems) > 0 {
+		log.Printf("⚠  %d filter rule(s) can never match and are protecting nothing — see /admin/rules", len(problems))
+		for _, p := range problems {
+			log.Printf("   rule %s (%q): %s", p.RuleID, p.Value, p.Reason)
+		}
+	}
+
 	submitHandler := &handler.SubmitHandler{
 		Store:            s,
 		Notifier:         mailer,

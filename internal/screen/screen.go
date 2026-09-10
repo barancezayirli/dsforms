@@ -20,6 +20,8 @@
 package screen
 
 import (
+	"strconv"
+
 	"github.com/barancezayirli/dsforms/internal/screen/internal/addr"
 	"github.com/barancezayirli/dsforms/internal/screen/internal/repeat"
 	"github.com/barancezayirli/dsforms/internal/screen/internal/rules"
@@ -99,6 +101,55 @@ var AllChecks = score.AllChecks
 // the address it contains.
 func ValidateRule(ruleType, value string) (string, error) {
 	return rules.Validate(ruleType, value)
+}
+
+// RuleProblem is a stored rule that can never fire.
+type RuleProblem struct {
+	RuleID string
+	Value  string
+	Reason string
+}
+
+// CheckRules reports stored rules that can never match anything.
+//
+// Matching compares a submission's reduced value against a rule's stored value,
+// so a rule stored in a form this binary cannot produce is inert — and inert in
+// the worst direction, because a *block* rule that matches nothing fails open
+// while the operator sees it listed and believes they are protected.
+//
+// That is reachable in practice. A rule stored before the address definition was
+// unified could hold "bot@localhost", which the old validator accepted and the
+// current one rejects outright, or a value folded by strings.ToLower rather than
+// ASCII-only. Neither can ever come out of the matcher.
+//
+// The test is a round trip: a healthy rule's stored value is exactly what
+// ValidateRule produces from it. Anything else — including an unrecognised Kind,
+// which Match skips silently — cannot fire. This detects any *future*
+// normalisation change too, which a one-off migration would not.
+func CheckRules(rs []Rule) []RuleProblem {
+	var out []RuleProblem
+	for _, r := range rs {
+		switch r.Kind {
+		case KindAllow, KindBlock:
+		default:
+			out = append(out, RuleProblem{r.ID, r.Value,
+				"unrecognised kind " + strconv.Quote(r.Kind) + "; this rule is never consulted"})
+			continue
+		}
+
+		norm, err := ValidateRule(r.Type, r.Value)
+		if err != nil {
+			out = append(out, RuleProblem{r.ID, r.Value,
+				"no longer a valid " + r.Type + " value: " + err.Error()})
+			continue
+		}
+		if norm != r.Value {
+			out = append(out, RuleProblem{r.ID, r.Value,
+				"stored as " + strconv.Quote(r.Value) + " but matching produces " +
+					strconv.Quote(norm) + "; this rule can never match"})
+		}
+	}
+	return out
 }
 
 // Input is everything the decision needs.

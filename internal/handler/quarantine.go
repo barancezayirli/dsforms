@@ -451,6 +451,11 @@ type filterRulesData struct {
 	Keywords  []screen.Rule
 	Threshold int
 	Error     string
+
+	// Problems are stored rules that can never fire — typically written under an
+	// older normalisation. A block rule in that state fails open while looking
+	// active, so the operator is told rather than left to discover it.
+	Problems []screen.RuleProblem
 }
 
 // RulesPage renders the operator's block/allow lists and custom keywords.
@@ -466,10 +471,16 @@ func (h *QuarantineHandler) renderRules(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	problems := screen.CheckRules(rules)
+	if len(problems) > 0 {
+		log.Printf("rules: %d rule(s) can never match; see the filter rules screen", len(problems))
+	}
+
 	data := filterRulesData{
 		PageData:  h.Shell(w, r, "Filter rules", "rules"),
 		Threshold: h.DefaultThreshold,
 		Error:     errMsg,
+		Problems:  problems,
 	}
 	for _, rule := range rules {
 		// Every column is named explicitly. A rule with an unrecognised Kind used
