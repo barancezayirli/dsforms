@@ -423,6 +423,31 @@ template never ran. Fixtures must be populated enough to take each branch.
 **Prove a fix with the reproduction.** For a bug found in review, reproduce it
 first, then show the reproduction flipping.
 
+**A guard nobody has watched fail is not a guard.** Structural tests — the AST
+scans, the wiring checks — pass in two different worlds: the property holds, or
+the matcher has stopped matching. A count floor tells the two apart only when the
+floor is right; it measures how many nodes were visited, so it is blind to a
+predicate that has quietly died. On this repo one scan reported "inspected 47
+structs" while being unable to see an aliased import, and an earlier one
+inspected *zero* queries because it looked for string literals when every query
+is a concatenation.
+
+So: express the predicate as a function, give it fixtures that must trip it and
+fixtures that must not, and run them — `internal/astcheck` has the harness. Then
+break the production code deliberately and watch the named test fail with the
+right message before you commit. Every guard on this branch that skipped that
+step turned out hollow; every one that did it caught a real regression later.
+
+**Characterise what you depend on, not just what you wrote.** A test that pins
+an assumption about SQLite or the filesystem is worth as much as one that pins
+our own behaviour, because the sealed packages are exactly the ones whose
+correctness rests entirely outside them. `PRAGMA wal_checkpoint` reports
+contention as a *row value* with a nil error; `os.Rename` overwrites its
+destination; opening a missing SQLite file creates it. Each of those was assumed
+wrongly here, in reviewed and committed code, and each is four lines to pin —
+see `internal/backup/contracts_test.go`. Isolation bounds what can be wrong
+*together*; it does nothing about what you have to get right *alone*.
+
 ---
 
 ## 8. Project layout
