@@ -3,6 +3,7 @@ package handler
 import (
 	"go/ast"
 	"go/token"
+	"regexp"
 	"strconv"
 	"testing"
 
@@ -309,3 +310,145 @@ func holdsConcreteStore(f *ast.File) bool {
 	})
 	return found
 }
+
+// TestEveryStoreInterfaceMethodIsCalled stops the narrowed interfaces silently
+// growing back.
+//
+// TestNoHandlerHoldsTheConcreteStore catches a field typed *store.Store. It does
+// not catch SearchStore quietly growing from one method to twenty that nobody
+// calls — and a reviewer demonstrated exactly that, adding ListUsers, DeleteForm
+// and DB() to SearchStore with the whole suite green. Repeat seventy-five more
+// times and the handler is back to reaching the entire store, with every guard
+// passing and both interface doc comments still in place looking meaningful.
+//
+// Checked per owning field, not per package. The first version of this test
+// asked only whether a method name was called *somewhere* in package handler,
+// which meant adding ListUsers to SearchStore went unnoticed because
+// UsersHandler calls it — the widening that matters is precisely the one that
+// borrows another handler's method. So: for each type owning a storage
+// interface, only calls of the form recv.Field.Method() inside that type's own
+// methods count.
+func TestEveryStoreInterfaceMethodIsCalled(t *testing.T) {
+	t.Parallel()
+	_, files := astcheck.Package(t, ".")
+
+	ifaceMethods := map[string][]string{} // interface -> declared methods
+	owner := map[string]ifaceOwner{}      // interface -> who holds it
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			switch typ := ts.Type.(type) {
+			case *ast.InterfaceType:
+				if !storeInterface.MatchString(ts.Name.Name) {
+					return true
+				}
+				for _, m := range typ.Methods.List {
+					for _, name := range m.Names {
+						ifaceMethods[ts.Name.Name] = append(ifaceMethods[ts.Name.Name], name.Name)
+					}
+				}
+			case *ast.StructType:
+				for _, field := range typ.Fields.List {
+					id, ok := field.Type.(*ast.Ident)
+					if !ok || !storeInterface.MatchString(id.Name) {
+						continue
+					}
+					for _, fn := range field.Names {
+						owner[id.Name] = ifaceOwner{ts.Name.Name, fn.Name}
+					}
+				}
+			}
+			return true
+		})
+	}
+	if len(ifaceMethods) < 10 {
+		t.Fatalf("found only %d storage interfaces; the scan is not reading them",
+			len(ifaceMethods))
+	}
+
+	// calls[type][field] is every method invoked through that field inside that
+	// type's own methods.
+	calls := map[string]map[string]map[string]bool{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 || fn.Body == nil {
+				continue
+			}
+			rt := fn.Recv.List[0].Type
+			if star, ok := rt.(*ast.StarExpr); ok {
+				rt = star.X
+			}
+			recvType, ok := rt.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			var recvName string
+			if len(fn.Recv.List[0].Names) > 0 {
+				recvName = fn.Recv.List[0].Names[0].Name
+			}
+
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				// recv.Field.Method(...)
+				method, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				field, ok := method.X.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				base, ok := field.X.(*ast.Ident)
+				if !ok || base.Name != recvName {
+					return true
+				}
+				if calls[recvType.Name] == nil {
+					calls[recvType.Name] = map[string]map[string]bool{}
+				}
+				if calls[recvType.Name][field.Sel.Name] == nil {
+					calls[recvType.Name][field.Sel.Name] = map[string]bool{}
+				}
+				calls[recvType.Name][field.Sel.Name][method.Sel.Name] = true
+				return true
+			})
+		}
+	}
+
+	var checked int
+	for iface, methods := range ifaceMethods {
+		o, ok := owner[iface]
+		if !ok {
+			t.Errorf("%s is declared but no struct field holds it, so it constrains "+
+				"nothing at all", iface)
+			continue
+		}
+		used := calls[o.typ][o.field]
+		for _, m := range methods {
+			checked++
+			if !used[m] {
+				t.Errorf("%s declares %s, but %s.%s never calls it.\n"+
+					"An interface method the owner does not invoke is store surface "+
+					"granted for nothing, and it is how a one-method interface grows "+
+					"back into the whole store while every other guard stays green.",
+					iface, m, o.typ, o.field)
+			}
+		}
+	}
+	if checked < 50 {
+		t.Fatalf("only %d interface methods inspected; the scan has stopped matching", checked)
+	}
+	t.Logf("inspected %d methods across %d storage interfaces", checked, len(ifaceMethods))
+}
+
+// ifaceOwner is the struct field a storage interface is held in.
+type ifaceOwner struct{ typ, field string }
+
+// storeInterface names the per-handler storage surfaces.
+var storeInterface = regexp.MustCompile(`^(\w+Store|NavCounter)$`)
