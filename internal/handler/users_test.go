@@ -57,8 +57,9 @@ func setupUsers(t *testing.T) (*store.Store, *chi.Mux) {
 	templates["dashboard.html"] = dashTmpl
 
 	uh := &UsersHandler{
+		Store: s,
 		Base: Base{
-			Store:     s,
+			Nav:       s,
 			SecretKey: "test-secret-key-32-chars-long!!",
 			BaseURL:   "https://example.com",
 			Templates: templates,

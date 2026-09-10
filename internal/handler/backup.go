@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -12,9 +13,21 @@ import (
 	"github.com/barancezayirli/dsforms/internal/flash"
 )
 
+// BackupStore is what the backup screen needs from storage.
+//
+// Both methods hand out or replace the database itself, which is exactly why
+// the interface is worth having: these two are the most dangerous methods on
+// the store, and this names the one handler allowed to reach them. Import needs
+// the same pair — see backup.Store, which this satisfies.
+type BackupStore interface {
+	DB() *sql.DB
+	Reopen(path string) error
+}
+
 // BackupHandler handles backup export and import.
 type BackupHandler struct {
 	Base
+	Store BackupStore
 }
 
 // backupPageData holds the data passed to backups.html.

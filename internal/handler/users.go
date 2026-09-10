@@ -12,9 +12,26 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// UsersStore is what user administration needs from storage.
+//
+// It overlaps AuthStore on CheckPassword and CreateSession, deliberately:
+// changing your own password reauthenticates and reissues a session, so the two
+// really do share those two operations.
+type UsersStore interface {
+	CheckPassword(username, password string) (store.User, error)
+	CreateSession(userID string, expiry time.Duration) (string, error)
+	CreateUser(username, password string) error
+	DeleteUser(id string) error
+	DeleteUserSessions(userID string) error
+	GetUserByID(id string) (store.User, error)
+	ListUsers() ([]store.User, error)
+	UpdatePassword(userID, newPassword string) error
+}
+
 // UsersHandler handles user management pages.
 type UsersHandler struct {
 	Base
+	Store UsersStore
 }
 
 // UserWithYou embeds store.User and adds an IsYou flag for list display.

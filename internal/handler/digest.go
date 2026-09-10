@@ -17,6 +17,17 @@ type DigestMailer interface {
 	SendMail(to, subject, body string) error
 }
 
+// DigestStore is what the quarantine digest needs from storage.
+//
+// Read-only. The digest reports what is held; MarkNotified and the restore path
+// belong to the operator acting on the screen, not to the mail that tells them
+// to look.
+type DigestStore interface {
+	HeldCount() (int, error)
+	HeldSubmissions(limit, offset int) ([]store.Submission, error)
+	SubmissionSignals(submissionID string) ([]store.SpamSignal, error)
+}
+
 // Digest emails an operator once a day about what quarantine is holding.
 //
 // One message per day, never one per held submission: a spam run produces
@@ -24,7 +35,7 @@ type DigestMailer interface {
 // from the spam it is reporting. The digest is off unless a recipient is
 // configured.
 type Digest struct {
-	Store     *store.Store
+	Store     DigestStore
 	Mailer    DigestMailer
 	To        string
 	BaseURL   string

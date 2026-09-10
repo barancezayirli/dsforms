@@ -68,8 +68,9 @@ func setupQuarantineWithMailer(t *testing.T, m *mail.MockMailer) (*store.Store, 
 
 	wh := newMockWebhookSender()
 	h := &QuarantineHandler{
+		Store: s,
 		Base: Base{
-			Store:     s,
+			Nav:       s,
 			SecretKey: testSecretKey,
 			BaseURL:   "https://example.com",
 			Templates: map[string]*template.Template{"quarantine.html": page, "rules.html": rules},
@@ -337,10 +338,12 @@ func TestSubmissionReaderRejectsHeldSubmissions(t *testing.T) {
 		`{{define "content"}}<span class="read">{{.Submission.ID}}</span>{{end}}` +
 			`{{define "drawer"}}<span class="drawer">{{.Submission.ID}}</span>{{end}}`))
 
-	ah := &AdminHandler{Base: Base{
-		Store: s, SecretKey: testSecretKey, BaseURL: "https://example.com",
-		Templates: map[string]*template.Template{"submission_detail.html": page},
-	}}
+	ah := &AdminHandler{
+		Store: s,
+		Base: Base{
+			Nav: s, SecretKey: testSecretKey, BaseURL: "https://example.com",
+			Templates: map[string]*template.Template{"submission_detail.html": page},
+		}}
 	r := chi.NewRouter()
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth(s))

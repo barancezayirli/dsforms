@@ -22,9 +22,18 @@ type ConfirmationMailer interface {
 	SendMail(to, subject, body string) error
 }
 
+// WaitlistSubmitStore is what the public waitlist endpoint needs from storage.
+//
+// Two methods, both scoped to one waitlist by id. Like SubmitStore this is
+// unauthenticated-request surface.
+type WaitlistSubmitStore interface {
+	CreateEntry(e store.WaitlistEntry) (position int, alreadyJoined bool, err error)
+	GetWaitlist(id string) (store.Waitlist, error)
+}
+
 // WaitlistSubmitHandler handles public waitlist signups via POST /w/{waitlistID}.
 type WaitlistSubmitHandler struct {
-	Store   *store.Store
+	Store   WaitlistSubmitStore
 	Mailer  ConfirmationMailer
 	BaseURL string
 }

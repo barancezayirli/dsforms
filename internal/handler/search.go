@@ -8,9 +8,15 @@ import (
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
+// SearchStore is what search needs from storage: one query.
+type SearchStore interface {
+	SearchSubmissions(query string, limit int) ([]store.SearchResult, error)
+}
+
 // SearchHandler serves the header search field and ⌘K.
 type SearchHandler struct {
 	Base
+	Store SearchStore
 }
 
 type searchRow struct {

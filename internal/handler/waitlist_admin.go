@@ -22,9 +22,31 @@ type BroadcastNotifier interface {
 	Notify()
 }
 
+// WaitlistStore is what the waitlist admin needs from storage.
+//
+// Disjoint from the forms and quarantine side entirely — not one of these twelve
+// appears on any other admin handler's surface, which is the isolation this
+// declaration makes true rather than merely intended. Its only overlap anywhere
+// is GetWaitlist, shared with the public WaitlistSubmitStore.
+type WaitlistStore interface {
+	CountEntries(waitlistID string) (int, error)
+	CreateBroadcast(b store.Broadcast, emails []string) error
+	CreateWaitlist(wl store.Waitlist) error
+	DeleteEntry(waitlistID, id string) error
+	DeleteWaitlist(id string) error
+	GetBroadcastSummary(id string) (store.BroadcastSummary, error)
+	GetWaitlist(id string) (store.Waitlist, error)
+	ListBroadcasts(waitlistID string) ([]store.BroadcastSummary, error)
+	ListEntries(waitlistID string) ([]store.WaitlistEntry, error)
+	ListEntriesPaged(waitlistID string, limit, offset int) ([]store.WaitlistEntry, error)
+	ListWaitlists() ([]store.WaitlistSummary, error)
+	UpdateWaitlist(wl store.Waitlist) error
+}
+
 // WaitlistHandler handles admin waitlist pages.
 type WaitlistHandler struct {
 	Base
+	Store       WaitlistStore
 	Broadcaster BroadcastNotifier
 }
 

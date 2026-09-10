@@ -41,8 +41,9 @@ func overviewRouter(t *testing.T, s *store.Store) *chi.Mux {
 	page := template.Must(template.Must(base.Clone()).Parse(overviewTestTemplate))
 
 	h := &OverviewHandler{
+		Store: s,
 		Base: Base{
-			Store:     s,
+			Nav:       s,
 			SecretKey: testSecretKey,
 			BaseURL:   "https://example.com",
 			Templates: map[string]*template.Template{"home.html": page},

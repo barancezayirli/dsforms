@@ -16,6 +16,29 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// QuarantineStore is what the quarantine screen needs from storage.
+//
+// It is the only surface that can both read held submissions and *edit* the
+// rules that hold them, because reviewing what was caught and adjusting what
+// catches it are the same operator task on the same screen. SubmitStore also
+// reads the rules, but cannot add or delete one.
+type QuarantineStore interface {
+	AddFilterRule(kind, ruleType, value, note string) (screen.Rule, error)
+	DeleteAllHeld() (int, error)
+	DeleteFilterRule(id string) (bool, error)
+	DeleteHeld(ids []string) (int, error)
+	GetForm(id string) (store.Form, error)
+	GetHeldSubmission(id string) (store.Submission, error)
+	HeldCount() (int, error)
+	HeldSince(days int) (held, total int, err error)
+	HeldSubmissions(limit, offset int) ([]store.Submission, error)
+	ListFilterRules() ([]screen.Rule, error)
+	ListForms() ([]store.FormSummary, error)
+	MarkNotified(id string) error
+	RestoreSubmission(id string) (store.Submission, error)
+	SubmissionSignals(submissionID string) ([]store.SpamSignal, error)
+}
+
 // QuarantineHandler serves the spam review queue and the filter rules screen.
 //
 // The queue exists because the pre-quarantine scorer used to drop a matching submission
@@ -24,6 +47,7 @@ import (
 // confirm it was right.
 type QuarantineHandler struct {
 	Base
+	Store QuarantineStore
 
 	// Notifier and Webhook send what was withheld while a submission sat in
 	// quarantine. The hold path withholds *both*, so restoring must make good on

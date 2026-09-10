@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/barancezayirli/dsforms/internal/store"
 	_ "modernc.org/sqlite"
 )
 
@@ -64,8 +63,21 @@ func Validate(path string) error {
 	return nil
 }
 
+// Store is what Import needs to swap the database file underneath a running
+// process: the handle to close, and the way to open the replacement.
+//
+// Declared here rather than taking *store.Store because those two methods are
+// the whole dependency. Naming them removes this package's import of store
+// altogether, so backup and store are now siblings that share no types — and
+// the pair is small enough to read as what it is, which matters when the
+// operation is "replace the database".
+type Store interface {
+	DB() *sql.DB
+	Reopen(path string) error
+}
+
 // Import validates the file, atomically renames it to dbPath, and reopens the store.
-func Import(s *store.Store, uploadedPath, dbPath string) error {
+func Import(s Store, uploadedPath, dbPath string) error {
 	if err := Validate(uploadedPath); err != nil {
 		return fmt.Errorf("import: %w", err)
 	}

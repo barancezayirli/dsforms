@@ -46,6 +46,30 @@ var (
 	_ handler.WebhookSender     = (*webhook.Sender)(nil)
 	_ handler.BroadcastNotifier = (*broadcaster.Worker)(nil)
 	_ auth.SessionStore         = (*store.Store)(nil)
+
+	// One store, eleven narrow views of it. Each handler declares only the
+	// methods it calls, so what a handler *can* reach is what it does reach;
+	// before this, every handler held *store.Store and could reach all of it.
+	//
+	// Asserted here rather than left to the wiring because a store method
+	// renamed out from under an interface should fail with "does not implement",
+	// naming the method, not with a struct-literal error forty lines further on.
+	_ handler.NavCounter          = (*store.Store)(nil)
+	_ handler.AdminStore          = (*store.Store)(nil)
+	_ handler.QuarantineStore     = (*store.Store)(nil)
+	_ handler.WaitlistStore       = (*store.Store)(nil)
+	_ handler.UsersStore          = (*store.Store)(nil)
+	_ handler.SubmitStore         = (*store.Store)(nil)
+	_ handler.OverviewStore       = (*store.Store)(nil)
+	_ handler.AuthStore           = (*store.Store)(nil)
+	_ handler.WaitlistSubmitStore = (*store.Store)(nil)
+	_ handler.BackupStore         = (*store.Store)(nil)
+	_ handler.SearchStore         = (*store.Store)(nil)
+	_ handler.DigestStore         = (*store.Store)(nil)
+
+	// backup.Import swaps the database file underneath the process; it names the
+	// two methods that takes rather than importing store at all.
+	_ backup.Store = (*store.Store)(nil)
 )
 
 //go:embed templates/*
@@ -579,11 +603,16 @@ func main() {
 	loginGuard := ratelimit.NewLoginGuard(5, 15*time.Minute, time.Now)
 	loginGuard.StartCleanup(30*time.Minute, 30*time.Minute)
 
-	// Every admin handler shares the same store, secret, templates and shell
-	// state, so they share one Base rather than repeating the same field list in
-	// every handler, where the copies could drift apart.
+	// Every admin handler shares the same secret, templates and shell state, so
+	// they share one Base rather than repeating the same field list in every
+	// handler, where the copies could drift apart.
+	//
+	// Base carries no store handle. It needs the nav badge counts and nothing
+	// else, and holding the whole store here would have handed every embedding
+	// handler a second, unrestricted route to the database beside the narrow one
+	// it declares.
 	base := handler.Base{
-		Store:     s,
+		Nav:       s,
 		SecretKey: cfg.SecretKey,
 		BaseURL:   cfg.BaseURL,
 		DBPath:    cfg.DBPath,
@@ -592,25 +621,27 @@ func main() {
 		Templates: templates,
 	}
 
-	authHandler := &handler.AuthHandler{Base: base, LoginGuard: loginGuard}
+	authHandler := &handler.AuthHandler{Base: base, Store: s, LoginGuard: loginGuard}
 	overviewHandler := &handler.OverviewHandler{
 		Base:          base,
+		Store:         s,
 		Limiter:       limiter,
 		RateBurst:     cfg.RateBurst,
 		RatePerMinute: cfg.RatePerMinute,
 		RetentionDays: int(quarantineRetention / (24 * time.Hour)),
 	}
-	searchHandler := &handler.SearchHandler{Base: base}
+	searchHandler := &handler.SearchHandler{Base: base, Store: s}
 	quarantineHandler := &handler.QuarantineHandler{
 		Base:             base,
+		Store:            s,
 		Notifier:         mailer,
 		Webhook:          webhookSender,
 		RetentionDays:    int(quarantineRetention / (24 * time.Hour)),
 		DefaultThreshold: cfg.SpamThreshold,
 	}
-	adminHandler := &handler.AdminHandler{Base: base, Webhook: webhookSender}
-	usersHandler := &handler.UsersHandler{Base: base}
-	backupHandler := &handler.BackupHandler{Base: base}
+	adminHandler := &handler.AdminHandler{Base: base, Store: s, Webhook: webhookSender}
+	usersHandler := &handler.UsersHandler{Base: base, Store: s}
+	backupHandler := &handler.BackupHandler{Base: base, Store: s}
 
 	waitlistSubmitHandler := &handler.WaitlistSubmitHandler{
 		Store:   s,
@@ -620,7 +651,7 @@ func main() {
 		waitlistSubmitHandler.Mailer = sendMailer
 	}
 
-	waitlistHandler := &handler.WaitlistHandler{Base: base, Broadcaster: worker}
+	waitlistHandler := &handler.WaitlistHandler{Base: base, Store: s, Broadcaster: worker}
 
 	// Daily quarantine digest. Opt-in via DIGEST_TO, and silently inert without
 	// SMTP — the only background timer this redesign adds.

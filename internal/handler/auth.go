@@ -7,11 +7,24 @@ import (
 
 	"github.com/barancezayirli/dsforms/internal/auth"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
+
+// AuthStore is what login and logout need from storage.
+//
+// Three methods, and no way to read or write a user record beyond checking a
+// password. An auth handler holding CreateUser is how a login page grows a
+// registration path nobody asked for.
+type AuthStore interface {
+	CheckPassword(username, password string) (store.User, error)
+	CreateSession(userID string, expiry time.Duration) (string, error)
+	DeleteSession(token string) error
+}
 
 // AuthHandler handles login and logout.
 type AuthHandler struct {
 	Base
+	Store      AuthStore
 	LoginGuard *ratelimit.LoginGuard
 }
 
