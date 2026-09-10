@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,9 @@ import (
 
 // Store wraps the SQLite database connection.
 type Store struct {
+	// mu guards db, which Reopen replaces while the server is serving. Read
+	// through conn(); write only in Reopen.
+	mu sync.RWMutex
 	db *sql.DB
 }
 
@@ -427,11 +431,30 @@ func New(path string) (*Store, error) {
 
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
-	return s.db.Close()
+	return s.conn().Close()
 }
 
 // DB returns the underlying *sql.DB for backup operations.
 func (s *Store) DB() *sql.DB {
+	return s.conn()
+}
+
+// conn reads the current handle under the lock.
+//
+// Every access to s.db goes through here, because Reopen replaces it while the
+// server is live. Reading the field directly is a data race in the plain Go
+// sense — verified with -race between Reopen's write and a concurrent read — and
+// the /healthz probe turned it from a coincidence into something exercised every
+// few seconds rather than only when a request happened to overlap a restore.
+//
+// The lock covers the pointer read, not the query that follows. A request that
+// takes the handle immediately before a restore swaps it will use the old one
+// and get "sql: database is closed" — an honest error, and unavoidable when the
+// database is being replaced underneath live traffic. What it will not do is
+// read a half-written pointer.
+func (s *Store) conn() *sql.DB {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.db
 }
 
@@ -463,6 +486,9 @@ func (s *Store) Reopen(path string) error {
 		newDB.Close()
 		return fmt.Errorf("reopen: %w", err)
 	}
+	// Swap under the write lock, so no reader can observe the field mid-change.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Close old connection; ignore error — may already be closed by Import.
 	if s.db != nil {
 		s.db.Close()
@@ -475,7 +501,7 @@ func (s *Store) Reopen(path string) error {
 func (s *Store) GetUserByUsername(username string) (User, error) {
 	var u User
 	var isDefault int
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT id, username, password, is_default_password, created_at FROM users WHERE username = ?",
 		username,
 	).Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt)
@@ -490,7 +516,7 @@ func (s *Store) GetUserByUsername(username string) (User, error) {
 func (s *Store) GetUserByID(id string) (User, error) {
 	var u User
 	var isDefault int
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT id, username, password, is_default_password, created_at FROM users WHERE id = ?",
 		id,
 	).Scan(&u.ID, &u.Username, &u.passwordHash, &isDefault, &u.CreatedAt)
@@ -503,7 +529,7 @@ func (s *Store) GetUserByID(id string) (User, error) {
 
 // ListUsers returns all users.
 func (s *Store) ListUsers() ([]User, error) {
-	rows, err := s.db.Query(
+	rows, err := s.conn().Query(
 		"SELECT id, username, password, is_default_password, created_at FROM users ORDER BY created_at",
 	)
 	if err != nil {
@@ -534,7 +560,7 @@ func (s *Store) CreateUser(username, password string) error {
 		return fmt.Errorf("create user: %w", err)
 	}
 	id := uuid.New().String()
-	_, err = s.db.Exec(
+	_, err = s.conn().Exec(
 		"INSERT INTO users (id, username, password, is_default_password) VALUES (?, ?, ?, 0)",
 		id, username, string(hash),
 	)
@@ -550,7 +576,7 @@ func (s *Store) UpdatePassword(userID, newPassword string) error {
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
-	result, err := s.db.Exec(
+	result, err := s.conn().Exec(
 		"UPDATE users SET password = ?, is_default_password = 0 WHERE id = ?",
 		string(hash), userID,
 	)
@@ -566,7 +592,7 @@ func (s *Store) UpdatePassword(userID, newPassword string) error {
 
 // DeleteUser deletes a user. Fails if it's the last remaining user.
 func (s *Store) DeleteUser(id string) error {
-	tx, err := s.db.Begin()
+	tx, err := s.conn().Begin()
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
@@ -593,7 +619,7 @@ func (s *Store) DeleteUser(id string) error {
 // HasDefaultPassword checks if a user still has the default password.
 func (s *Store) HasDefaultPassword(userID string) (bool, error) {
 	var isDefault int
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT is_default_password FROM users WHERE id = ?",
 		userID,
 	).Scan(&isDefault)
@@ -617,7 +643,7 @@ func (s *Store) CheckPassword(username, password string) (User, error) {
 
 // CreateForm creates a new form.
 func (s *Store) CreateForm(f Form) error {
-	_, err := s.db.Exec(
+	_, err := s.conn().Exec(
 		"INSERT INTO forms (id, name, email_to, redirect, webhook_url, webhook_format, spam_threshold) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		f.ID, f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.SpamThreshold,
 	)
@@ -630,7 +656,7 @@ func (s *Store) CreateForm(f Form) error {
 // GetForm returns a form by ID.
 func (s *Store) GetForm(id string) (Form, error) {
 	var f Form
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT id, name, email_to, redirect, webhook_url, webhook_format, created_at, spam_threshold FROM forms WHERE id = ?",
 		id,
 	).Scan(&f.ID, &f.Name, &f.EmailTo, &f.Redirect, &f.WebhookURL, &f.WebhookFormat, &f.CreatedAt, &f.SpamThreshold)
@@ -642,7 +668,7 @@ func (s *Store) GetForm(id string) (Form, error) {
 
 // ListForms returns all forms with unread counts.
 func (s *Store) ListForms() ([]FormSummary, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at, f.spam_threshold,
 		       COUNT(CASE WHEN s.read = 0 AND s.is_held = 0 THEN 1 END) as unread_count
 		FROM forms f
@@ -671,7 +697,7 @@ func (s *Store) ListForms() ([]FormSummary, error) {
 
 // UpdateForm updates a form's fields.
 func (s *Store) UpdateForm(f Form) error {
-	_, err := s.db.Exec(
+	_, err := s.conn().Exec(
 		"UPDATE forms SET name = ?, email_to = ?, redirect = ?, webhook_url = ?, webhook_format = ?, spam_threshold = ? WHERE id = ?",
 		f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.SpamThreshold, f.ID,
 	)
@@ -684,7 +710,7 @@ func (s *Store) UpdateForm(f Form) error {
 // DeleteForm deletes a form and its submissions.
 // Returns sql.ErrNoRows if no form with the given ID exists.
 func (s *Store) DeleteForm(id string) error {
-	result, err := s.db.Exec("DELETE FROM forms WHERE id = ?", id)
+	result, err := s.conn().Exec("DELETE FROM forms WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete form: %w", err)
 	}
@@ -727,7 +753,7 @@ func (s *Store) CreateSubmission(sub Submission) error {
 	if createdAt.IsZero() {
 		createdAt = time.Now()
 	}
-	_, err := s.db.Exec(
+	_, err := s.conn().Exec(
 		"INSERT INTO submissions (id, form_id, data, ip, created_at) VALUES (?, ?, ?, ?, ?)",
 		sub.ID, sub.FormID, sub.RawData, sub.IP, sqliteTimestamp(createdAt),
 	)
@@ -746,7 +772,7 @@ func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
 
 // MarkRead marks a submission as read.
 func (s *Store) MarkRead(submissionID string) error {
-	_, err := s.db.Exec("UPDATE submissions SET read = 1 WHERE id = ?", submissionID)
+	_, err := s.conn().Exec("UPDATE submissions SET read = 1 WHERE id = ?", submissionID)
 	if err != nil {
 		return fmt.Errorf("mark read: %w", err)
 	}
@@ -756,7 +782,7 @@ func (s *Store) MarkRead(submissionID string) error {
 // CountAllSubmissions returns the total count of all submissions across all forms.
 func (s *Store) CountAllSubmissions() (int, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE is_held = 0").Scan(&count)
+	err := s.conn().QueryRow("SELECT COUNT(*) FROM submissions WHERE is_held = 0").Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count all submissions: %w", err)
 	}
@@ -765,7 +791,7 @@ func (s *Store) CountAllSubmissions() (int, error) {
 
 // MarkAllRead marks all submissions for a form as read.
 func (s *Store) MarkAllRead(formID string) error {
-	_, err := s.db.Exec("UPDATE submissions SET read = 1 WHERE form_id = ? AND is_held = 0", formID)
+	_, err := s.conn().Exec("UPDATE submissions SET read = 1 WHERE form_id = ? AND is_held = 0", formID)
 	if err != nil {
 		return fmt.Errorf("mark all read: %w", err)
 	}
@@ -774,7 +800,7 @@ func (s *Store) MarkAllRead(formID string) error {
 
 // DeleteSubmission deletes a submission.
 func (s *Store) DeleteSubmission(id string) error {
-	_, err := s.db.Exec("DELETE FROM submissions WHERE id = ?", id)
+	_, err := s.conn().Exec("DELETE FROM submissions WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete submission: %w", err)
 	}
@@ -796,7 +822,7 @@ func (s *Store) DeleteSubmissions(formID string, ids []string) error {
 		args = append(args, id)
 	}
 	query := "DELETE FROM submissions WHERE form_id = ? AND id IN (" + strings.Join(placeholders, ",") + ")"
-	if _, err := s.db.Exec(query, args...); err != nil {
+	if _, err := s.conn().Exec(query, args...); err != nil {
 		return fmt.Errorf("delete submissions: %w", err)
 	}
 	return nil
@@ -810,7 +836,7 @@ func (s *Store) GetSubmission(id string) (Submission, error) {
 	// reader renders SpamScore beside the stored signal breakdown, so a restored
 	// submission showed "score 0" above weights summing to 11. A handler guard
 	// written against IsHeld would likewise have been a silent no-op.
-	sub, err := scanHeld(s.db.QueryRow("SELECT "+heldColumns+" FROM submissions WHERE id = ?", id))
+	sub, err := scanHeld(s.conn().QueryRow("SELECT "+heldColumns+" FROM submissions WHERE id = ?", id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Callers distinguish "no such submission" from a real failure.
@@ -831,7 +857,7 @@ func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submis
 // CountSubmissions returns the total number of submissions for a form.
 func (s *Store) CountSubmissions(formID string) (int, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ? AND is_held = 0", formID).Scan(&count)
+	err := s.conn().QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ? AND is_held = 0", formID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count submissions: %w", err)
 	}
@@ -841,7 +867,7 @@ func (s *Store) CountSubmissions(formID string) (int, error) {
 // UnreadCount returns the number of unread submissions for a form.
 func (s *Store) UnreadCount(formID string) (int, error) {
 	var count int
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT COUNT(*) FROM submissions WHERE form_id = ? AND read = 0 AND is_held = 0",
 		formID,
 	).Scan(&count)
@@ -873,7 +899,7 @@ func (s *Store) CreateSession(userID string, expiry time.Duration) (string, erro
 	// offset — neither parses nor compares against correctly, so expires_at is
 	// read as a plain string that sorts by the wrong digits.
 	expiresAt := sqliteTimestamp(time.Now().Add(expiry))
-	_, err := s.db.Exec(
+	_, err := s.conn().Exec(
 		"INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
 		tokenHash, userID, expiresAt,
 	)
@@ -887,7 +913,7 @@ func (s *Store) CreateSession(userID string, expiry time.Duration) (string, erro
 func (s *Store) GetSession(token string) (string, error) {
 	tokenHash := hashToken(token)
 	var userID string
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT user_id FROM sessions WHERE token_hash = ? AND expires_at > datetime('now')",
 		tokenHash,
 	).Scan(&userID)
@@ -900,7 +926,7 @@ func (s *Store) GetSession(token string) (string, error) {
 // DeleteSession removes the session with the given raw token.
 func (s *Store) DeleteSession(token string) error {
 	tokenHash := hashToken(token)
-	_, err := s.db.Exec("DELETE FROM sessions WHERE token_hash = ?", tokenHash)
+	_, err := s.conn().Exec("DELETE FROM sessions WHERE token_hash = ?", tokenHash)
 	if err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
@@ -909,7 +935,7 @@ func (s *Store) DeleteSession(token string) error {
 
 // DeleteUserSessions removes all sessions for the given user.
 func (s *Store) DeleteUserSessions(userID string) error {
-	_, err := s.db.Exec("DELETE FROM sessions WHERE user_id = ?", userID)
+	_, err := s.conn().Exec("DELETE FROM sessions WHERE user_id = ?", userID)
 	if err != nil {
 		return fmt.Errorf("delete user sessions: %w", err)
 	}
@@ -918,7 +944,7 @@ func (s *Store) DeleteUserSessions(userID string) error {
 
 // CleanExpiredSessions removes all expired sessions from the database.
 func (s *Store) CleanExpiredSessions() error {
-	_, err := s.db.Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
+	_, err := s.conn().Exec("DELETE FROM sessions WHERE expires_at <= datetime('now')")
 	if err != nil {
 		return fmt.Errorf("clean expired sessions: %w", err)
 	}
@@ -927,7 +953,7 @@ func (s *Store) CleanExpiredSessions() error {
 
 // CreateWaitlist creates a new waitlist.
 func (s *Store) CreateWaitlist(wl Waitlist) error {
-	_, err := s.db.Exec(
+	_, err := s.conn().Exec(
 		"INSERT INTO waitlists (id, name, redirect, confirm_subject, confirm_body) VALUES (?, ?, ?, ?, ?)",
 		wl.ID, wl.Name, wl.Redirect, wl.ConfirmSubject, wl.ConfirmBody,
 	)
@@ -940,7 +966,7 @@ func (s *Store) CreateWaitlist(wl Waitlist) error {
 // GetWaitlist returns a waitlist by ID.
 func (s *Store) GetWaitlist(id string) (Waitlist, error) {
 	var wl Waitlist
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT id, name, redirect, confirm_subject, confirm_body, created_at FROM waitlists WHERE id = ?",
 		id,
 	).Scan(&wl.ID, &wl.Name, &wl.Redirect, &wl.ConfirmSubject, &wl.ConfirmBody, &wl.CreatedAt)
@@ -952,7 +978,7 @@ func (s *Store) GetWaitlist(id string) (Waitlist, error) {
 
 // ListWaitlists returns all waitlists with entry counts.
 func (s *Store) ListWaitlists() ([]WaitlistSummary, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT w.id, w.name, w.redirect, w.confirm_subject, w.confirm_body, w.created_at,
 		       COUNT(e.id) AS entry_count
 		FROM waitlists w
@@ -982,7 +1008,7 @@ func (s *Store) ListWaitlists() ([]WaitlistSummary, error) {
 // UpdateWaitlist updates a waitlist's editable fields.
 // Returns sql.ErrNoRows if no waitlist with the given ID exists.
 func (s *Store) UpdateWaitlist(wl Waitlist) error {
-	result, err := s.db.Exec(
+	result, err := s.conn().Exec(
 		"UPDATE waitlists SET name = ?, redirect = ?, confirm_subject = ?, confirm_body = ? WHERE id = ?",
 		wl.Name, wl.Redirect, wl.ConfirmSubject, wl.ConfirmBody, wl.ID,
 	)
@@ -999,7 +1025,7 @@ func (s *Store) UpdateWaitlist(wl Waitlist) error {
 // DeleteWaitlist deletes a waitlist and its entries/broadcasts (cascade).
 // Returns sql.ErrNoRows if no waitlist with the given ID exists.
 func (s *Store) DeleteWaitlist(id string) error {
-	result, err := s.db.Exec("DELETE FROM waitlists WHERE id = ?", id)
+	result, err := s.conn().Exec("DELETE FROM waitlists WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete waitlist: %w", err)
 	}
@@ -1020,7 +1046,7 @@ func (s *Store) CreateEntry(e WaitlistEntry) (position int, alreadyJoined bool, 
 	if rawData == "" {
 		rawData = "{}"
 	}
-	res, err := s.db.Exec(
+	res, err := s.conn().Exec(
 		`INSERT INTO waitlist_entries (id, waitlist_id, email, data, ip)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(waitlist_id, email) DO NOTHING`,
@@ -1050,7 +1076,7 @@ func (s *Store) CreateEntry(e WaitlistEntry) (position int, alreadyJoined bool, 
 // entryPosition returns the signup rank (1-based) of an email within a waitlist.
 func (s *Store) entryPosition(waitlistID, email string) (int, error) {
 	var pos int
-	err := s.db.QueryRow(`
+	err := s.conn().QueryRow(`
 		SELECT COUNT(*) FROM waitlist_entries
 		WHERE waitlist_id = ?
 		  AND rowid <= (SELECT rowid FROM waitlist_entries WHERE waitlist_id = ? AND email = ?)
@@ -1064,7 +1090,7 @@ func (s *Store) entryPosition(waitlistID, email string) (int, error) {
 // CountEntries returns the number of entries on a waitlist.
 func (s *Store) CountEntries(waitlistID string) (int, error) {
 	var n int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM waitlist_entries WHERE waitlist_id = ?", waitlistID).Scan(&n)
+	err := s.conn().QueryRow("SELECT COUNT(*) FROM waitlist_entries WHERE waitlist_id = ?", waitlistID).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count entries: %w", err)
 	}
@@ -1106,7 +1132,7 @@ const entrySelectWithPosition = `
 
 // ListEntriesPaged returns a page of entries (newest first) with positions.
 func (s *Store) ListEntriesPaged(waitlistID string, limit, offset int) ([]WaitlistEntry, error) {
-	rows, err := s.db.Query(entrySelectWithPosition+" LIMIT ? OFFSET ?", waitlistID, limit, offset)
+	rows, err := s.conn().Query(entrySelectWithPosition+" LIMIT ? OFFSET ?", waitlistID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list entries paged: %w", err)
 	}
@@ -1116,7 +1142,7 @@ func (s *Store) ListEntriesPaged(waitlistID string, limit, offset int) ([]Waitli
 
 // ListEntries returns all entries for a waitlist (newest first) with positions.
 func (s *Store) ListEntries(waitlistID string) ([]WaitlistEntry, error) {
-	rows, err := s.db.Query(entrySelectWithPosition, waitlistID)
+	rows, err := s.conn().Query(entrySelectWithPosition, waitlistID)
 	if err != nil {
 		return nil, fmt.Errorf("list entries: %w", err)
 	}
@@ -1127,7 +1153,7 @@ func (s *Store) ListEntries(waitlistID string) ([]WaitlistEntry, error) {
 // DeleteEntry deletes a single waitlist entry scoped to its waitlist.
 // Returns sql.ErrNoRows if no matching entry exists.
 func (s *Store) DeleteEntry(waitlistID, id string) error {
-	result, err := s.db.Exec("DELETE FROM waitlist_entries WHERE id = ? AND waitlist_id = ?", id, waitlistID)
+	result, err := s.conn().Exec("DELETE FROM waitlist_entries WHERE id = ? AND waitlist_id = ?", id, waitlistID)
 	if err != nil {
 		return fmt.Errorf("delete entry: %w", err)
 	}
@@ -1141,7 +1167,7 @@ func (s *Store) DeleteEntry(waitlistID, id string) error {
 // CreateBroadcast inserts a broadcast (always created with status 'sending';
 // the b.Status field is ignored) plus one pending delivery per email, atomically.
 func (s *Store) CreateBroadcast(b Broadcast, emails []string) error {
-	tx, err := s.db.Begin()
+	tx, err := s.conn().Begin()
 	if err != nil {
 		return fmt.Errorf("create broadcast: %w", err)
 	}
@@ -1169,7 +1195,7 @@ func (s *Store) CreateBroadcast(b Broadcast, emails []string) error {
 // GetBroadcast returns a broadcast by ID.
 func (s *Store) GetBroadcast(id string) (Broadcast, error) {
 	var b Broadcast
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT id, waitlist_id, subject, body, status, created_at FROM broadcasts WHERE id = ?",
 		id,
 	).Scan(&b.ID, &b.WaitlistID, &b.Subject, &b.Body, &b.Status, &b.CreatedAt)
@@ -1186,7 +1212,7 @@ func (s *Store) GetBroadcastSummary(id string) (BroadcastSummary, error) {
 		return BroadcastSummary{}, err
 	}
 	sum := BroadcastSummary{Broadcast: b}
-	err = s.db.QueryRow(`
+	err = s.conn().QueryRow(`
 		SELECT
 			COUNT(*),
 			COUNT(CASE WHEN status = 'sent' THEN 1 END),
@@ -1202,7 +1228,7 @@ func (s *Store) GetBroadcastSummary(id string) (BroadcastSummary, error) {
 
 // ListBroadcasts returns all broadcasts for a waitlist (newest first) with counts.
 func (s *Store) ListBroadcasts(waitlistID string) ([]BroadcastSummary, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT b.id, b.waitlist_id, b.subject, b.body, b.status, b.created_at,
 			COUNT(d.id),
 			COUNT(CASE WHEN d.status = 'sent' THEN 1 END),
@@ -1235,7 +1261,7 @@ func (s *Store) ListBroadcasts(waitlistID string) ([]BroadcastSummary, error) {
 
 // NextPendingDeliveries returns up to limit pending deliveries (oldest first).
 func (s *Store) NextPendingDeliveries(limit int) ([]Delivery, error) {
-	rows, err := s.db.Query(
+	rows, err := s.conn().Query(
 		"SELECT id, broadcast_id, email, status, error, attempts, updated_at FROM deliveries WHERE status = 'pending' ORDER BY rowid LIMIT ?",
 		limit,
 	)
@@ -1260,7 +1286,7 @@ func (s *Store) NextPendingDeliveries(limit int) ([]Delivery, error) {
 
 // MarkDeliverySent marks a delivery as sent.
 func (s *Store) MarkDeliverySent(id string) error {
-	_, err := s.db.Exec(
+	_, err := s.conn().Exec(
 		"UPDATE deliveries SET status = 'sent', error = '', updated_at = datetime('now') WHERE id = ?",
 		id,
 	)
@@ -1273,7 +1299,7 @@ func (s *Store) MarkDeliverySent(id string) error {
 // MarkDeliveryFailed records a failed attempt. The delivery stays 'pending'
 // (eligible for retry) until attempts reach maxAttempts, then becomes 'failed'.
 func (s *Store) MarkDeliveryFailed(id, errMsg string, maxAttempts int) error {
-	_, err := s.db.Exec(`
+	_, err := s.conn().Exec(`
 		UPDATE deliveries
 		SET attempts = attempts + 1,
 		    error = ?,
@@ -1289,7 +1315,7 @@ func (s *Store) MarkDeliveryFailed(id, errMsg string, maxAttempts int) error {
 // HasPendingDeliveries reports whether a broadcast still has pending deliveries.
 func (s *Store) HasPendingDeliveries(broadcastID string) (bool, error) {
 	var n int
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		"SELECT COUNT(*) FROM deliveries WHERE broadcast_id = ? AND status = 'pending'",
 		broadcastID,
 	).Scan(&n)
@@ -1301,7 +1327,7 @@ func (s *Store) HasPendingDeliveries(broadcastID string) (bool, error) {
 
 // ListSendingBroadcasts returns the IDs of broadcasts still in 'sending' state.
 func (s *Store) ListSendingBroadcasts() ([]string, error) {
-	rows, err := s.db.Query("SELECT id FROM broadcasts WHERE status = 'sending'")
+	rows, err := s.conn().Query("SELECT id FROM broadcasts WHERE status = 'sending'")
 	if err != nil {
 		return nil, fmt.Errorf("list sending broadcasts: %w", err)
 	}
@@ -1322,7 +1348,7 @@ func (s *Store) ListSendingBroadcasts() ([]string, error) {
 
 // MarkBroadcastDone marks a broadcast as done.
 func (s *Store) MarkBroadcastDone(id string) error {
-	_, err := s.db.Exec("UPDATE broadcasts SET status = 'done' WHERE id = ?", id)
+	_, err := s.conn().Exec("UPDATE broadcasts SET status = 'done' WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("mark broadcast done: %w", err)
 	}

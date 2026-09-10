@@ -30,7 +30,7 @@ func (s *Store) SubmissionsPerDay(days int) ([]DayCounts, error) {
 	}
 	start := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -(days - 1))
 
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT date(created_at) AS day,
 		       COUNT(CASE WHEN is_held = 0 THEN 1 END),
 		       COUNT(CASE WHEN is_held = 1 THEN 1 END)
@@ -76,7 +76,7 @@ func (s *Store) SubmissionsPerFormPerDay(days int) (map[string][]int, error) {
 	}
 	start := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -(days - 1))
 
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT form_id, date(created_at) AS day, COUNT(*)
 		FROM submissions
 		WHERE created_at >= ? AND is_held = 0
@@ -125,7 +125,7 @@ type FormStats struct {
 
 // PerFormStats returns per-form totals for the overview table.
 func (s *Store) PerFormStats() ([]FormStats, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT f.id, f.name,
 		       COUNT(CASE WHEN s.is_held = 0 THEN 1 END),
 		       COUNT(CASE WHEN s.is_held = 1 THEN 1 END),
@@ -162,7 +162,7 @@ type RecentSubmission struct {
 
 // RecentSubmissions returns the newest accepted submissions across every form.
 func (s *Store) RecentSubmissions(n int) ([]RecentSubmission, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT `+heldColumnsWithFormName("s")+`
 		FROM submissions s
 		JOIN forms f ON f.id = s.form_id
@@ -203,7 +203,7 @@ type SignalTally struct {
 // re-scoring old submissions would report reasons that were never applied.
 func (s *Store) TopSpamSignals(days int) ([]SignalTally, error) {
 	start := time.Now().UTC().AddDate(0, 0, -days)
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT g.rule, COUNT(*), MAX(g.weight)
 		FROM spam_signals g
 		JOIN submissions s ON s.id = g.submission_id
@@ -233,7 +233,7 @@ func (s *Store) TopSpamSignals(days int) ([]SignalTally, error) {
 // traffic" style stats.
 func (s *Store) HeldSince(days int) (held, total int, err error) {
 	start := time.Now().UTC().AddDate(0, 0, -days)
-	row := s.db.QueryRow(`
+	row := s.conn().QueryRow(`
 		SELECT COUNT(CASE WHEN is_held = 1 THEN 1 END), COUNT(*)
 		FROM submissions WHERE created_at >= ?`, sqliteTimestamp(start))
 	if err := row.Scan(&held, &total); err != nil {

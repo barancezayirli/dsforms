@@ -47,7 +47,7 @@ var ErrSubmissionGone = errors.New("submission does not exist")
 // back empty.
 func (s *Store) classifyMissingHeld(id string) error {
 	var isHeld int
-	switch err := s.db.QueryRow("SELECT is_held FROM submissions WHERE id = ?", id).Scan(&isHeld); {
+	switch err := s.conn().QueryRow("SELECT is_held FROM submissions WHERE id = ?", id).Scan(&isHeld); {
 	case errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("submission %s: %w", id, ErrSubmissionGone)
 	case err != nil:
@@ -131,7 +131,7 @@ func scanHeldExtra(sc rowScanner, extra ...any) (Submission, error) {
 // the third copy of a shape the modularity rule says to consolidate at the
 // second. what prefixes the wrapped error, so each caller keeps its own context.
 func (s *Store) querySubmissions(what, query string, args ...any) ([]Submission, error) {
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.conn().Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", what, err)
 	}
@@ -183,7 +183,7 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 	}
 	createdAt = createdAt.UTC()
 
-	tx, err := s.db.Begin()
+	tx, err := s.conn().Begin()
 	if err != nil {
 		return fmt.Errorf("create held submission: begin: %w", err)
 	}
@@ -222,7 +222,7 @@ func (s *Store) HeldSubmissions(limit, offset int) ([]Submission, error) {
 
 // GetHeldSubmission returns one held submission by id.
 func (s *Store) GetHeldSubmission(id string) (Submission, error) {
-	sub, err := scanHeld(s.db.QueryRow(
+	sub, err := scanHeld(s.conn().QueryRow(
 		"SELECT "+heldColumns+" FROM submissions WHERE id = ? AND is_held = 1", id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -239,7 +239,7 @@ func (s *Store) GetHeldSubmission(id string) (Submission, error) {
 // HeldCount returns the number of submissions currently awaiting review.
 func (s *Store) HeldCount() (int, error) {
 	var n int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE is_held = 1").Scan(&n); err != nil {
+	if err := s.conn().QueryRow("SELECT COUNT(*) FROM submissions WHERE is_held = 1").Scan(&n); err != nil {
 		return 0, fmt.Errorf("held count: %w", err)
 	}
 	return n, nil
@@ -249,7 +249,7 @@ func (s *Store) HeldCount() (int, error) {
 // order — which is the order internal/screen emitted them, and the order the
 // quarantine panel renders them.
 func (s *Store) SubmissionSignals(submissionID string) ([]SpamSignal, error) {
-	rows, err := s.db.Query(
+	rows, err := s.conn().Query(
 		"SELECT rule, field, match_text, weight FROM spam_signals WHERE submission_id = ? ORDER BY id",
 		submissionID,
 	)
@@ -288,7 +288,7 @@ func (s *Store) RestoreSubmission(id string) (Submission, error) {
 	// The AND is_held = 1 guard is what makes this idempotent: a double-click or
 	// a resubmitted POST affects no rows and returns sql.ErrNoRows rather than
 	// restoring twice and sending the withheld notification twice.
-	sub, err := scanHeld(s.db.QueryRow(
+	sub, err := scanHeld(s.conn().QueryRow(
 		"UPDATE submissions SET is_held = 0, read = 0, held_at = '' WHERE id = ? AND is_held = 1 "+
 			"RETURNING "+heldColumns, id))
 	if err != nil {
@@ -305,7 +305,7 @@ func (s *Store) RestoreSubmission(id string) (Submission, error) {
 // MarkNotified records that a restored submission's withheld notification has
 // been sent, so a second restore cannot send it twice.
 func (s *Store) MarkNotified(id string) error {
-	if _, err := s.db.Exec("UPDATE submissions SET notified = 1 WHERE id = ?", id); err != nil {
+	if _, err := s.conn().Exec("UPDATE submissions SET notified = 1 WHERE id = ?", id); err != nil {
 		return fmt.Errorf("mark notified: %w", err)
 	}
 	return nil
@@ -351,7 +351,7 @@ func (s *Store) DeleteHeld(ids []string) (int, error) {
 		// first two permanently deleted — and returning 0 there tells the
 		// operator nothing went when a thousand rows did. That is the same
 		// untruth this function's count was added to prevent, inverted.
-		res, err := s.db.Exec(query, args...)
+		res, err := s.conn().Exec(query, args...)
 		if err != nil {
 			return total, fmt.Errorf("delete held: after %d rows: %w", total, err)
 		}
@@ -372,7 +372,7 @@ func (s *Store) DeleteHeld(ids []string) (int, error) {
 // what the operator is shown, so it must be the real RowsAffected rather than
 // the length of a list we happened to fetch first.
 func (s *Store) DeleteAllHeld() (int, error) {
-	res, err := s.db.Exec("DELETE FROM submissions WHERE is_held = 1")
+	res, err := s.conn().Exec("DELETE FROM submissions WHERE is_held = 1")
 	if err != nil {
 		return 0, fmt.Errorf("delete all held: %w", err)
 	}
@@ -387,7 +387,7 @@ func (s *Store) DeleteAllHeld() (int, error) {
 // how many went. The caller supplies the cutoff rather than a duration so the
 // sweep is testable without sleeping.
 func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
-	res, err := s.db.Exec("DELETE FROM submissions WHERE is_held = 1 AND created_at < ?", sqliteTimestamp(cutoff))
+	res, err := s.conn().Exec("DELETE FROM submissions WHERE is_held = 1 AND created_at < ?", sqliteTimestamp(cutoff))
 	if err != nil {
 		return 0, fmt.Errorf("purge held: %w", err)
 	}
@@ -403,7 +403,7 @@ func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
 // nothing more.
 func (s *Store) NavCounts() (NavCounts, error) {
 	var n NavCounts
-	if err := s.db.QueryRow(`
+	if err := s.conn().QueryRow(`
 		SELECT
 			(SELECT COUNT(*) FROM submissions WHERE read = 0 AND is_held = 0),
 			(SELECT COUNT(*) FROM submissions WHERE is_held = 1),
@@ -418,7 +418,7 @@ func (s *Store) NavCounts() (NavCounts, error) {
 // quarantine, for the "Held" stat on the form detail page.
 func (s *Store) HeldCountForForm(formID string) (int, error) {
 	var n int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ? AND is_held = 1", formID).Scan(&n)
+	err := s.conn().QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ? AND is_held = 1", formID).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("held count for form: %w", err)
 	}
@@ -433,7 +433,7 @@ func (s *Store) HeldCountForForm(formID string) (int, error) {
 // from the table behind them. Newer is the row above (a lower row number).
 func (s *Store) Neighbours(formID, subID string) (newerID, olderID string, position, total int, err error) {
 	var newer, older *string
-	err = s.db.QueryRow(`
+	err = s.conn().QueryRow(`
 		WITH ordered AS (
 			SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC, id) AS rn
 			FROM submissions WHERE form_id = ? AND is_held = 0

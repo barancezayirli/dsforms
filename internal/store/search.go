@@ -97,7 +97,7 @@ func (s *Store) SearchSubmissions(query string, limit int) ([]SearchResult, erro
 		limit = 25
 	}
 
-	rows, err := s.db.Query(`
+	rows, err := s.conn().Query(`
 		SELECT `+heldColumnsWithFormName("s")+`
 		FROM submissions_fts x
 		JOIN submissions s ON s.rowid = x.rowid

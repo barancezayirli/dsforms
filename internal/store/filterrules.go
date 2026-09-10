@@ -34,7 +34,7 @@ func (s *Store) AddFilterRule(kind, ruleType, value, note string) (screen.Rule, 
 		CreatedAt: time.Now().UTC().Truncate(time.Second),
 	}
 
-	_, err = s.db.Exec(
+	_, err = s.conn().Exec(
 		"INSERT INTO filter_rules (id, kind, type, value, note, hits, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
 		rule.ID, rule.Kind, rule.Type, rule.Value, rule.Note, sqliteTimestamp(rule.CreatedAt),
 	)
@@ -53,7 +53,7 @@ func (s *Store) AddFilterRule(kind, ruleType, value, note string) (screen.Rule, 
 // tens of rows, not thousands — and the submit path needs all of it on every
 // submission anyway to decide allow-before-block.
 func (s *Store) ListFilterRules() ([]screen.Rule, error) {
-	rows, err := s.db.Query(
+	rows, err := s.conn().Query(
 		"SELECT id, kind, type, value, note, hits, created_at FROM filter_rules ORDER BY kind, created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("list filter rules: %w", err)
@@ -82,7 +82,7 @@ func (s *Store) ListFilterRules() ([]screen.Rule, error) {
 // Same defect DeleteHeld was fixed for, on the screen where the consequence is
 // about what gets through the filter.
 func (s *Store) DeleteFilterRule(id string) (bool, error) {
-	res, err := s.db.Exec("DELETE FROM filter_rules WHERE id = ?", id)
+	res, err := s.conn().Exec("DELETE FROM filter_rules WHERE id = ?", id)
 	if err != nil {
 		return false, fmt.Errorf("delete filter rule: %w", err)
 	}
@@ -96,7 +96,7 @@ func (s *Store) DeleteFilterRule(id string) (bool, error) {
 // IncrementRuleHits records that a rule matched a submission, so the operator
 // can see which rules are doing work and which are stale.
 func (s *Store) IncrementRuleHits(id string) error {
-	if _, err := s.db.Exec("UPDATE filter_rules SET hits = hits + 1 WHERE id = ?", id); err != nil {
+	if _, err := s.conn().Exec("UPDATE filter_rules SET hits = hits + 1 WHERE id = ?", id); err != nil {
 		return fmt.Errorf("increment rule hits: %w", err)
 	}
 	return nil
