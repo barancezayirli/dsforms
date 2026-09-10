@@ -223,7 +223,6 @@ Nothing below is caused by the refactor; the narrowing surfaced them.
 | `AdminStore` (20) and `QuarantineStore` (14) want splitting | `AdminHandler` is two handlers: the forms half and the submissions half share only `GetForm`, and the routes already draw the line. `QuarantineStore` splits into a read-mostly review queue and a three-method rule-mutation surface with zero overlap — worth separating, since a rule write is what can open a fail-open block rule. | A follow-up PR |
 | `screen.Rule`'s invariant has no owner | `Rule.Value` is documented as normalised by `Validate` before storage, and `Decide` passes rules straight to `Match`. The only producer used to be the store, which validates every write; the interfaces make that producer pluggable, so the type now permits an unvalidated block rule — which fails open. Not reachable in production. Cheapest close, consistent with the seal doctrine: have `Decide` re-validate inbound rule values. | A follow-up PR |
 | `main()`'s wiring and all routes have no executable coverage | `newRouter()` stops after middleware and `/healthz`; every handler construction and route registration lives inline in `main()`, which no test can call. So the AST scan is not the primary check on the wiring, it is the only one. Extracting `func routes(...) *chi.Mux` would let one test drive the real table — and would catch a handler bound to the wrong route, or a route registered outside the auth group, neither of which anything notices today. | A follow-up PR |
-| `store.Reopen` mutates `s.db` under a live server | No synchronisation, while every other method reads that field. Pre-existing; surfaced by reading `backup.Import` closely. Belongs with the restore work above. | With the restore fix |
 | `Base.Shell`'s nil check misses a typed nil | `b.Nav == nil` is false for a non-nil interface holding a nil pointer, so that case panics rather than degrading. Latent: `main` exits fatally if the store cannot open, so `s` is never nil. | A follow-up PR |
 
 ## Sixth pass — a failed restore must leave a working database
@@ -266,6 +265,46 @@ unflushed frames — a quiet data loss dressed as a recovery.
 
 `/healthz` asks the database instead of reporting that the HTTP server is
 listening. That is the detector this whole class of failure never had.
+
+## Sixth pass, review round
+
+Three agents reviewed the restore fix and found real defects in it, two of them
+data loss introduced by the fix itself. Recorded because the pattern repeats:
+
+- **A leftover `.rollback` was silently destroyed.** The park is a rename, and
+  rename overwrites. A process killed between the park and the swap leaves the
+  real database at `.rollback` and nothing at `dbPath`; the container restarts,
+  `store.New` creates an empty database and re-seeds the default admin, and the
+  operator's natural next move — restore a backup — renames that empty database
+  over the last copy of their data. `Import` now refuses to start when a parked
+  file exists. My own test had used a *directory* at that path, which fails the
+  rename for unrelated reasons and so hid that a *file* succeeds.
+- **`rollBack` removed the live database before renaming the original back.** The
+  comment said the rename had "nowhere to land", which is false — rename replaces
+  its destination, as the park twenty lines above relies on. The removal opened a
+  window with no database at `dbPath` at all. Now one atomic rename.
+- **`Reopen` is not evidence of a rollback.** SQLite creates the file if missing,
+  so reopening an absent `dbPath` manufactures an empty database and returns nil.
+  `Import` reported `ErrRolledBack` — "your existing database is unchanged and
+  still in use" — while serving zero forms and zero users, so nobody could log in
+  to notice. Now stat-checked, and the `ErrUnavailable` message names the parked
+  file and warns that restarting re-enables the default admin login.
+- **The handler's reassuring message was the `default` branch**, against AGENT.md
+  §4. `ErrRejected` is named; `default` now claims nothing.
+- **Test defects.** `TestImportRollsBackWhenTheSwapFails` did not test the swap —
+  it blocked the park path, so the branch that actually puts the database back
+  had no coverage, and reverting the swap fix verbatim passed the suite. The
+  operator-message test asserted `Contains(msg, "unchanged")`, which two of the
+  three messages satisfy. The EXDEV fix had no test at all, and could be reverted
+  green. All closed, each verified by applying the regression.
+
+The data race in `Reopen` was fixed rather than deferred, because the `/healthz`
+probe turned it from a coincidence into a read every few seconds. All store
+access now goes through a locked `conn()`.
+
+`/healthz` is wired into the Dockerfile as a `HEALTHCHECK`. Without it the
+endpoint was a route nobody called — `restart: unless-stopped` does not restart a
+container whose process is alive and failing every request.
 
 ## Accepted risks
 

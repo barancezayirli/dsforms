@@ -13,4 +13,16 @@ WORKDIR /app
 COPY --from=builder /app/dsforms .
 VOLUME ["/data"]
 EXPOSE 8080
+
+# The endpoint asks the database, not the HTTP server, so this detects the state
+# where the process is listening and every route 500s — which a failed restore
+# could produce, and which only a restart clears. Without a HEALTHCHECK the
+# endpoint is a route nobody calls: `restart: unless-stopped` does not restart a
+# container whose process is alive.
+#
+# In the image rather than only in compose, so it applies however the image is
+# deployed. wget is in busybox on alpine, so nothing extra is installed.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://localhost:8080/healthz || exit 1
+
 CMD ["./dsforms"]
