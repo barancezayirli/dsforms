@@ -114,8 +114,9 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 	// old os.CreateTemp("", …) put the file in /tmp while DB_PATH defaults to
 	// /data/dsforms.db — different mounts in any container, so the rename failed
 	// with EXDEV on every restore. That was not an edge case, it was the default
-	// deployment; it went unnoticed only because a field-name mismatch meant this
-	// handler never reached the rename at all.
+	// deployment, and it was live: at the feature's first commit the form field
+	// name still matched, so restores reached the rename and failed there. The
+	// later field-name mismatch only hid it for the last stretch.
 	tmp, err := os.CreateTemp(filepath.Dir(h.DBPath), "dsforms-import-*.db")
 	if err != nil {
 		log.Printf("backup import: create temp file beside %s: %v", h.DBPath, err)
@@ -151,9 +152,18 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, backup.ErrRolledBack):
 			flash.Set(w, h.SecretKey, "error",
 				"Restore failed. Your existing database is unchanged and still in use.")
-		default:
+		case errors.Is(err, backup.ErrRejected):
 			flash.Set(w, h.SecretKey, "error",
 				"That file was rejected. Your database is unchanged.")
+		default:
+			// Never the reassuring message. AGENT.md §4: in a switch over a closed
+			// set the safe outcome is not default. Every return from Import carries
+			// a sentinel today, so this is unreachable — which is exactly when the
+			// next unsentinelled return starts telling an operator their database
+			// is fine while nobody has established that.
+			flash.Set(w, h.SecretKey, "error",
+				"Restore failed in an unexpected way. Check the server log and verify "+
+					"the database before retrying.")
 		}
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return

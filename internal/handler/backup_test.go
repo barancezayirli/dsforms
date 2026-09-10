@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"html/template"
 	"io"
 	"mime/multipart"
@@ -219,24 +222,24 @@ func TestBackupImportTellsTheOperatorWhichOutcomeHappened(t *testing.T) {
 		name        string
 		failReopens int
 		upload      string // "valid" or "garbage"
-		wantSays    string
+		want        string
 	}{
 		{
-			name:     "a file that is not a database is refused, and says so",
-			upload:   "garbage",
-			wantSays: "unchanged",
+			name:   "a file that is not a database is refused, and says so",
+			upload: "garbage",
+			want:   "That file was rejected. Your database is unchanged.",
 		},
 		{
 			name:        "a failed swap says the existing database is still in use",
 			upload:      "valid",
 			failReopens: 1,
-			wantSays:    "still in use",
+			want:        "Restore failed. Your existing database is unchanged and still in use.",
 		},
 		{
 			name:        "an unrecoverable failure asks for a restart",
 			upload:      "valid",
 			failReopens: 2,
-			wantSays:    "restarted",
+			want:        "Restore failed and the database could not be reopened. The service needs to be restarted.",
 		},
 	}
 
@@ -280,13 +283,70 @@ func TestBackupImportTellsTheOperatorWhichOutcomeHappened(t *testing.T) {
 			if msgType != "error" {
 				t.Errorf("flash type = %q, want %q", msgType, "error")
 			}
-			if !strings.Contains(msg, tc.wantSays) {
-				t.Errorf("the operator is told %q, which does not mention %q.\n"+
+			// Whole message, not a substring. An earlier version asserted
+			// strings.Contains(msg, "unchanged") for the rejected case — and the
+			// rolled-back message also contains "unchanged", so the test whose
+			// entire purpose is separating these three outcomes could not tell two
+			// of them apart. Swapping the two messages passed.
+			if msg != tc.want {
+				t.Errorf("the operator is told:\n  %q\nwant:\n  %q\n"+
 					"These three outcomes need three different next actions; one "+
 					"message for all of them sends an operator whose service is down "+
-					"off to re-export a file that was never the problem.",
-					msg, tc.wantSays)
+					"off to re-export a file that was never the problem.", msg, tc.want)
 			}
 		})
+	}
+}
+
+// TestUploadIsStagedBesideTheDatabase pins the fix for a bug that broke restore
+// on every containerized deployment.
+//
+// backup.Import finishes with os.Rename, which cannot cross filesystems. The
+// handler used to stage the upload with os.CreateTemp("", …) — /tmp — while
+// DB_PATH defaults to /data/dsforms.db. Different mounts in any container, so
+// the rename failed with EXDEV every single time.
+//
+// No test caught it, and none would: the suite puts the database and the upload
+// under t.TempDir(), one filesystem, where the buggy code passes everything.
+// Reverting the fix leaves the whole suite green and re-breaks restore for every
+// Docker user, which is why this asserts the staging *location* rather than a
+// behaviour that only differs across mounts.
+func TestUploadIsStagedBesideTheDatabase(t *testing.T) {
+	t.Parallel()
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "backup.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parsing backup.go: %v", err)
+	}
+
+	found := 0
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "CreateTemp" {
+			return true
+		}
+		if id, ok := sel.X.(*ast.Ident); !ok || id.Name != "os" {
+			return true
+		}
+		found++
+		if lit, ok := call.Args[0].(*ast.BasicLit); ok {
+			t.Errorf("backup.go:%d stages the upload with os.CreateTemp(%s, …).\n"+
+				"An empty or literal directory puts it on the system temp filesystem, "+
+				"while the database lives on the data volume — so the rename that "+
+				"completes the restore fails with EXDEV on every containerized "+
+				"deployment. Stage it beside h.DBPath.",
+				fset.Position(call.Pos()).Line, lit.Value)
+		}
+		return true
+	})
+
+	if found == 0 {
+		t.Fatal("no os.CreateTemp call found in backup.go; the scan is no longer " +
+			"matching it, so this test asserts nothing")
 	}
 }
