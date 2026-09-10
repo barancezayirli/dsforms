@@ -617,7 +617,7 @@ func TestDeleteRuleUnknownIDDoesNotClaimSuccess(t *testing.T) {
 // test for a fix that manufactured the opposite lie.
 //
 // Round 2 fixed a false negative — "could not be restored" for a submission that
-// *was* restored — by treating sql.ErrNoRows as "already restored". But
+// *was* restored — by treating store.ErrNotFound as "already restored". But
 // GetHeldSubmission returns ErrNoRows for two different facts: the row exists and
 // is no longer held, and there is no such row at all. Collapsing both into a
 // success flash means an operator clicking Restore on a row the 30-day retention

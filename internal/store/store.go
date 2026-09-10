@@ -18,6 +18,22 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// ErrNotFound is what every lookup here returns when the row does not exist.
+//
+// It names a contract that used to be unwritten. Handlers tested against
+// ErrNotFound directly, which was a private arrangement between two concrete
+// types in one binary — and then the handler interfaces made the store
+// pluggable, so "returns a database/sql sentinel" became a load-bearing term of
+// eleven published interfaces that stated it nowhere. An implementation that did
+// not happen to use database/sql would turn every 404 into a 500.
+//
+// It is ErrNotFound rather than a wrapper, so nothing changes today: existing
+// errors.Is checks keep matching, and callers that already had the sentinel
+// still work. What it buys is a name the store owns, in the package whose
+// contract it is. If the store ever stops returning the raw sentinel, this is
+// the one place that changes.
+var ErrNotFound = sql.ErrNoRows
+
 // Store wraps the SQLite database connection.
 type Store struct {
 	// mu guards db, which Reopen replaces while the server is serving. Read
@@ -708,7 +724,7 @@ func (s *Store) UpdateForm(f Form) error {
 }
 
 // DeleteForm deletes a form and its submissions.
-// Returns sql.ErrNoRows if no form with the given ID exists.
+// Returns ErrNotFound if no form with the given ID exists.
 func (s *Store) DeleteForm(id string) error {
 	result, err := s.conn().Exec("DELETE FROM forms WHERE id = ?", id)
 	if err != nil {
@@ -716,7 +732,7 @@ func (s *Store) DeleteForm(id string) error {
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("delete form: %w", sql.ErrNoRows)
+		return fmt.Errorf("delete form: %w", ErrNotFound)
 	}
 	return nil
 }
@@ -838,7 +854,7 @@ func (s *Store) GetSubmission(id string) (Submission, error) {
 	// written against IsHeld would likewise have been a silent no-op.
 	sub, err := scanHeld(s.conn().QueryRow("SELECT "+heldColumns+" FROM submissions WHERE id = ?", id))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrNotFound) {
 			// Callers distinguish "no such submission" from a real failure.
 			return Submission{}, err
 		}
@@ -1006,7 +1022,7 @@ func (s *Store) ListWaitlists() ([]WaitlistSummary, error) {
 }
 
 // UpdateWaitlist updates a waitlist's editable fields.
-// Returns sql.ErrNoRows if no waitlist with the given ID exists.
+// Returns ErrNotFound if no waitlist with the given ID exists.
 func (s *Store) UpdateWaitlist(wl Waitlist) error {
 	result, err := s.conn().Exec(
 		"UPDATE waitlists SET name = ?, redirect = ?, confirm_subject = ?, confirm_body = ? WHERE id = ?",
@@ -1017,13 +1033,13 @@ func (s *Store) UpdateWaitlist(wl Waitlist) error {
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("update waitlist: %w", sql.ErrNoRows)
+		return fmt.Errorf("update waitlist: %w", ErrNotFound)
 	}
 	return nil
 }
 
 // DeleteWaitlist deletes a waitlist and its entries/broadcasts (cascade).
-// Returns sql.ErrNoRows if no waitlist with the given ID exists.
+// Returns ErrNotFound if no waitlist with the given ID exists.
 func (s *Store) DeleteWaitlist(id string) error {
 	result, err := s.conn().Exec("DELETE FROM waitlists WHERE id = ?", id)
 	if err != nil {
@@ -1031,7 +1047,7 @@ func (s *Store) DeleteWaitlist(id string) error {
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("delete waitlist: %w", sql.ErrNoRows)
+		return fmt.Errorf("delete waitlist: %w", ErrNotFound)
 	}
 	return nil
 }
@@ -1151,7 +1167,7 @@ func (s *Store) ListEntries(waitlistID string) ([]WaitlistEntry, error) {
 }
 
 // DeleteEntry deletes a single waitlist entry scoped to its waitlist.
-// Returns sql.ErrNoRows if no matching entry exists.
+// Returns ErrNotFound if no matching entry exists.
 func (s *Store) DeleteEntry(waitlistID, id string) error {
 	result, err := s.conn().Exec("DELETE FROM waitlist_entries WHERE id = ? AND waitlist_id = ?", id, waitlistID)
 	if err != nil {
@@ -1159,7 +1175,7 @@ func (s *Store) DeleteEntry(waitlistID, id string) error {
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("delete entry: %w", sql.ErrNoRows)
+		return fmt.Errorf("delete entry: %w", ErrNotFound)
 	}
 	return nil
 }

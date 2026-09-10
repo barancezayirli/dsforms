@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
@@ -142,7 +141,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "formID")
 	form, err := h.Store.GetForm(formID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "form not found", http.StatusNotFound)
 			return
 		}

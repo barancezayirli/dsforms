@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +34,7 @@ type NavCounts struct {
 // ErrSubmissionGone means there is no such submission at all — deleted, purged
 // by the retention sweep, or never real.
 //
-// It exists because sql.ErrNoRows on the quarantine path answers two different
+// It exists because ErrNotFound on the quarantine path answers two different
 // questions with one value: "this row is no longer held" and "this row does not
 // exist". A caller that cannot tell them apart has to guess, and guessing wrong
 // tells an operator their submission is safe in the inbox when it has been
@@ -48,14 +47,14 @@ var ErrSubmissionGone = errors.New("submission does not exist")
 func (s *Store) classifyMissingHeld(id string) error {
 	var isHeld int
 	switch err := s.conn().QueryRow("SELECT is_held FROM submissions WHERE id = ?", id).Scan(&isHeld); {
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, ErrNotFound):
 		return fmt.Errorf("submission %s: %w", id, ErrSubmissionGone)
 	case err != nil:
 		return fmt.Errorf("submission %s: classifying a missing held row: %w", id, err)
 	default:
 		// The row is there and accepted, which is what a second restore looks
-		// like. sql.ErrNoRows stays the sentinel for that case.
-		return fmt.Errorf("submission %s: not held: %w", id, sql.ErrNoRows)
+		// like. ErrNotFound stays the sentinel for that case.
+		return fmt.Errorf("submission %s: not held: %w", id, ErrNotFound)
 	}
 }
 
@@ -225,7 +224,7 @@ func (s *Store) GetHeldSubmission(id string) (Submission, error) {
 	sub, err := scanHeld(s.conn().QueryRow(
 		"SELECT "+heldColumns+" FROM submissions WHERE id = ? AND is_held = 1", id))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrNotFound) {
 			// Which kind of missing? A double-clicked restore and a submission
 			// the retention sweep deleted both land here, and they need opposite
 			// messages.
@@ -286,13 +285,13 @@ func (s *Store) RestoreSubmission(id string) (Submission, error) {
 	// sent. One statement removes the window entirely.
 	//
 	// The AND is_held = 1 guard is what makes this idempotent: a double-click or
-	// a resubmitted POST affects no rows and returns sql.ErrNoRows rather than
+	// a resubmitted POST affects no rows and returns ErrNotFound rather than
 	// restoring twice and sending the withheld notification twice.
 	sub, err := scanHeld(s.conn().QueryRow(
 		"UPDATE submissions SET is_held = 0, read = 0, held_at = '' WHERE id = ? AND is_held = 1 "+
 			"RETURNING "+heldColumns, id))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrNotFound) {
 			// The AND is_held = 1 guard makes a second restore affect no rows.
 			// Same question as above: already restored, or gone entirely?
 			return Submission{}, s.classifyMissingHeld(id)

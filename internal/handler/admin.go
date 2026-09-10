@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -260,7 +259,7 @@ func (h *AdminHandler) EditFormPage(w http.ResponseWriter, r *http.Request) {
 
 	f, err := h.Store.GetForm(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "form not found", http.StatusNotFound)
 			return
 		}
@@ -301,7 +300,7 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		f, err := h.Store.GetForm(id)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, store.ErrNotFound) {
 				http.Error(w, "form not found", http.StatusNotFound)
 				return
 			}
@@ -343,7 +342,7 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 		if parseErr != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			ef, err := h.Store.GetForm(id)
 			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, store.ErrNotFound) {
 					http.Error(w, "form not found", http.StatusNotFound)
 					return
 				}
@@ -394,7 +393,7 @@ func (h *AdminHandler) DeleteForm(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	if err := h.Store.DeleteForm(id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "form not found", http.StatusNotFound)
 			return
 		}
@@ -466,7 +465,7 @@ func (h *AdminHandler) FormDetail(w http.ResponseWriter, r *http.Request) {
 	formID := chi.URLParam(r, "id")
 	form, err := h.Store.GetForm(formID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "form not found", http.StatusNotFound)
 			return
 		}
@@ -645,7 +644,7 @@ func (h *AdminHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 
 	sub, err := h.Store.GetSubmission(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "submission not found", http.StatusNotFound)
 			return
 		}
@@ -682,7 +681,7 @@ func (h *AdminHandler) DeleteSubmission(w http.ResponseWriter, r *http.Request) 
 
 	sub, err := h.Store.GetSubmission(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "submission not found", http.StatusNotFound)
 			return
 		}
@@ -727,7 +726,7 @@ func (h *AdminHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 
 	form, err := h.Store.GetForm(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
@@ -790,7 +789,7 @@ func (h *AdminHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 
 	f, err := h.Store.GetForm(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "form not found", http.StatusNotFound)
 			return
 		}
