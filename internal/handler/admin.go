@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/urlsafe"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -217,23 +217,20 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 		webhookFormat = ""
 	}
 
-	if webhookURL != "" {
-		u, parseErr := url.Parse(webhookURL)
-		if parseErr != nil || (u.Scheme != "http" && u.Scheme != "https") {
-			data := formNewData{
-				PageData: h.Shell(w, r, "New Form", "forms"),
-				Form: store.Form{
-					Name: name, EmailTo: emailTo, Redirect: redirect,
-					WebhookURL: webhookURL, WebhookFormat: webhookFormat,
-				},
-				Error: "Webhook URL must use http or https.",
-			}
-			if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
-				log.Printf("form_new template error: %v", err)
-				http.Error(w, "internal error", http.StatusInternalServerError)
-			}
-			return
+	if webhookURL != "" && !urlsafe.HTTPScheme(webhookURL) {
+		data := formNewData{
+			PageData: h.Shell(w, r, "New Form", "forms"),
+			Form: store.Form{
+				Name: name, EmailTo: emailTo, Redirect: redirect,
+				WebhookURL: webhookURL, WebhookFormat: webhookFormat,
+			},
+			Error: "Webhook URL must use http or https.",
 		}
+		if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
+			log.Printf("form_new template error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
 	}
 
 	f := store.Form{
@@ -337,36 +334,33 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 		webhookFormat = ""
 	}
 
-	if webhookURL != "" {
-		u, parseErr := url.Parse(webhookURL)
-		if parseErr != nil || (u.Scheme != "http" && u.Scheme != "https") {
-			ef, err := h.Store.GetForm(id)
-			if err != nil {
-				if errors.Is(err, store.ErrNotFound) {
-					http.Error(w, "form not found", http.StatusNotFound)
-					return
-				}
-				log.Printf("edit form: get form %s error: %v", id, err)
-				http.Error(w, "internal error", http.StatusInternalServerError)
+	if webhookURL != "" && !urlsafe.HTTPScheme(webhookURL) {
+		ef, err := h.Store.GetForm(id)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.Error(w, "form not found", http.StatusNotFound)
 				return
 			}
-			ef.Name = name
-			ef.EmailTo = emailTo
-			ef.Redirect = redirect
-			ef.WebhookURL = webhookURL
-			ef.WebhookFormat = webhookFormat
-			data := formEditData{
-				PageData: h.Shell(w, r, "Edit Form", "forms"),
-				Form:     ef,
-				BaseURL:  h.BaseURL,
-				Error:    "Webhook URL must use http or https.",
-			}
-			if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
-				log.Printf("form_edit template error: %v", err)
-				http.Error(w, "internal error", http.StatusInternalServerError)
-			}
+			log.Printf("edit form: get form %s error: %v", id, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		ef.Name = name
+		ef.EmailTo = emailTo
+		ef.Redirect = redirect
+		ef.WebhookURL = webhookURL
+		ef.WebhookFormat = webhookFormat
+		data := formEditData{
+			PageData: h.Shell(w, r, "Edit Form", "forms"),
+			Form:     ef,
+			BaseURL:  h.BaseURL,
+			Error:    "Webhook URL must use http or https.",
+		}
+		if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
+			log.Printf("form_edit template error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
 	}
 
 	f := store.Form{
