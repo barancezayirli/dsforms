@@ -216,7 +216,6 @@ Nothing below is caused by the refactor; the narrowing surfaced them.
 | Item | Why deferred | Target |
 |---|---|---|
 | `sql.ErrNoRows` is an unwritten term of the new interfaces | `AdminHandler` tests `errors.Is(err, sql.ErrNoRows)` against interface results. That was a private arrangement between two concrete types; it is now the load-bearing contract of a published interface, expressed nowhere in it. Any implementation not wrapping a `database/sql` sentinel turns every 404 into a 500. A `store.ErrNotFound` is the fix and touches every handler. | A follow-up PR |
-| Nothing stops the interfaces re-widening | `TestNoHandlerHoldsTheConcreteStore` catches a field typed `*store.Store`; it does not catch `SearchStore` growing to twenty methods nobody calls. Adding unused methods keeps the suite green. A scan asserting every method declared on an `XStore` is actually called through that field closes it, in the direction the drift runs. | A follow-up PR |
 | `AdminStore` (20) and `QuarantineStore` (14) want splitting | `AdminHandler` is two handlers: the forms half and the submissions half share only `GetForm`, and the routes already draw the line. `QuarantineStore` splits into a read-mostly review queue and a three-method rule-mutation surface with zero overlap — worth separating, since a rule write is what can open a fail-open block rule. | A follow-up PR |
 
 ## Sixth pass — a failed restore must leave a working database
