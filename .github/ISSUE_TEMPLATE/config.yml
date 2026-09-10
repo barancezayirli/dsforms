@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/barancezayirli/dsforms/security/advisories/new
+    about: Please report privately rather than in a public issue.
+  - name: Question or idea
+    url: https://github.com/barancezayirli/dsforms/discussions
+    about: For anything that is not a bug or a concrete proposal.

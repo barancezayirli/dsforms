@@ -1,0 +1,63 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a security issue, please close this and use
+        [private reporting](https://github.com/barancezayirli/dsforms/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+      placeholder: |
+        Submitting a form with a _redirect to my own site sends the visitor to
+        /success instead of my thank-you page.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Smallest way to reproduce it
+      description: >
+        A curl command, a form snippet, or the sequence of clicks. The smaller
+        the better — most bugs here have turned out to be narrower than the
+        first report suggested.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: A release tag, or the commit you built from.
+      placeholder: v0.6.0, or 32030d2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How are you running it
+      options:
+        - Docker image
+        - docker compose
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: >
+        dsforms logs the reason it rejects, holds or drops a submission. Please
+        redact anything you would not want public — logs here name origins and
+        IPs but never field values.
+      render: text
