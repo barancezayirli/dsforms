@@ -108,7 +108,7 @@
       {{if .Signals}}Was held, then restored{{else}}Spam check passed{{end}}
     </span>
     <span class="tag tag-outline tag-sm" style="margin-left:auto">
-      score {{.Submission.SpamScore}}
+      score {{.Submission.SpamScore}}{{if .Submission.HeldThreshold}} / {{.Submission.HeldThreshold}}{{end}}
     </span>
   </div>
   {{if .SignalsFailed}}
@@ -133,6 +133,11 @@
       {{end}}
     </div>
     {{end}}
+  </div>
+  {{else if .Submission.SpamScore}}
+  <div class="dim" style="font-size:12px;margin-top:5px">
+    Scored below the threshold, so it was delivered. The breakdown is kept only
+    for submissions that were held.
   </div>
   {{else}}
   <div class="dim" style="font-size:12px;margin-top:5px">

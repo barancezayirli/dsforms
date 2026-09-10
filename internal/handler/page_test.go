@@ -185,3 +185,83 @@ func TestBackupsPageRendersTheMeasuredSize(t *testing.T) {
 			"Backups card — one of the two render sites has dropped it", n)
 	}
 }
+
+// TestSubmissionPanelDistinguishesThreeStates renders the spam-check panel for
+// each state it can be in.
+//
+// The panel had two branches and three meanings. "Was held, then restored" shows
+// when signal rows exist; everything else fell to "Spam check passed" beside
+// "score 0" and the sentence "No link markup, keywords, injection probes or
+// repeat-IP activity" — which is simply false for a submission that scored 3 and
+// was delivered anyway.
+//
+// It is asserted against the rendered output rather than the struct because the
+// two previous branches in this session both shipped a fix that was correct in
+// the function and invisible on the page. The store test says the number is
+// right; this says the operator sees it.
+func TestSubmissionPanelDistinguishesThreeStates(t *testing.T) {
+	t.Parallel()
+
+	base := populatedPageData()["submission_detail.html"]
+	data, ok := base.(submissionDetailData)
+	if !ok {
+		t.Fatalf("fixture is %T, not submissionDetailData", base)
+	}
+
+	render := func(t *testing.T, d submissionDetailData) string {
+		t.Helper()
+		var buf bytes.Buffer
+		if err := realTemplates(t)["submission_detail.html"].ExecuteTemplate(&buf, "base", d); err != nil {
+			t.Fatalf("execute submission_detail.html: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("held then restored", func(t *testing.T) {
+		t.Parallel()
+		body := render(t, data) // the fixture carries signals
+		if !strings.Contains(body, "Was held, then restored") {
+			t.Error("a submission with a stored breakdown must say it was restored")
+		}
+	})
+
+	t.Run("passed, but scored something", func(t *testing.T) {
+		t.Parallel()
+		d := data
+		d.Signals = nil
+		d.Submission.SpamScore = 3
+		d.Submission.HeldThreshold = 6
+		body := render(t, d)
+
+		if !strings.Contains(body, "score 3 / 6") {
+			t.Error("the panel does not show the real score against its threshold")
+		}
+		if strings.Contains(body, "No link markup") {
+			t.Error("the panel claims nothing was detected, for a submission that " +
+				"scored 3. That sentence is only true at zero.")
+		}
+		if !strings.Contains(body, "Scored below the threshold") {
+			t.Error("the panel does not explain why a scoring submission was delivered")
+		}
+		if strings.Contains(body, "Was held, then restored") {
+			t.Error("a submission with a score but no stored breakdown was never " +
+				"held; saying so would be a worse claim than the one being fixed")
+		}
+	})
+
+	t.Run("genuinely clean", func(t *testing.T) {
+		t.Parallel()
+		d := data
+		d.Signals = nil
+		d.Submission.SpamScore = 0
+		d.Submission.HeldThreshold = 0
+		body := render(t, d)
+
+		if !strings.Contains(body, "No link markup") {
+			t.Error("a submission that really scored nothing should say so plainly")
+		}
+		if strings.Contains(body, "Scored below the threshold") {
+			t.Error("a zero-scoring submission did not score below anything")
+		}
+	})
+}

@@ -419,3 +419,72 @@ func TestSubmitCustomKeywordPilesUpButDoesNotHoldAlone(t *testing.T) {
 		t.Errorf("got %d held, want 1 once the keyword piles up with markup", len(held))
 	}
 }
+
+// TestAcceptedSubmissionStoresItsScore covers a number the UI was inventing.
+//
+// Score, threshold and signals were computed for every submission and persisted
+// only on the held path, so submission_detail.html rendered the column default
+// and every accepted submission claimed "score 0". A message sent during a
+// feature pass really scored 3 — a gibberish token on the ordinary English word
+// "months" — and the drawer still said 0.
+//
+// The message here scores above zero and stays below the threshold, which is the
+// case the bug is about: not spam, not clean either.
+func TestAcceptedSubmissionStoresItsScore(t *testing.T) {
+	t.Parallel()
+	h, s, _ := quarantineHandler(t)
+
+	rr := submitTo(t, h, "f1", map[string]string{
+		"name":    "Ana Silva",
+		"email":   "ana@example.org",
+		"message": "We are planning a crypto rollout next quarter and wanted your thoughts.",
+	}, "203.0.113.10")
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 — this message is below the threshold", rr.Code)
+	}
+	subs, err := s.ListSubmissions("f1")
+	if err != nil {
+		t.Fatalf("ListSubmissions: %v", err)
+	}
+	if len(subs) != 1 {
+		t.Fatalf("stored %d submissions, want 1 (accepted, not held)", len(subs))
+	}
+
+	got := subs[0]
+	if got.IsHeld {
+		t.Fatal("submission was held; this test is about the accepted path")
+	}
+	// The exact weight matters more than "greater than zero": asserting > 0 would
+	// pass on any wrong non-zero number, which is the same class of defect.
+	if got.SpamScore != 3 {
+		t.Errorf("stored SpamScore = %d, want 3 (one gibberish token).\n"+
+			"The drawer renders this field, so a zero here is the UI stating a "+
+			"score the submission never had.", got.SpamScore)
+	}
+	if got.HeldThreshold != screen.DefaultThreshold {
+		t.Errorf("stored HeldThreshold = %d, want %d — the bar it was judged against",
+			got.HeldThreshold, screen.DefaultThreshold)
+	}
+}
+
+// TestAcceptedCleanSubmissionStoresZero is the other half: a message that really
+// scores nothing must still read zero, or the fix has just moved the lie.
+func TestAcceptedCleanSubmissionStoresZero(t *testing.T) {
+	t.Parallel()
+	h, s, _ := quarantineHandler(t)
+
+	submitTo(t, h, "f1", map[string]string{
+		"name":    "Ben Cole",
+		"email":   "ben@example.org",
+		"message": "We are planning a rebrand next quarter and wanted your thoughts.",
+	}, "203.0.113.11")
+
+	subs, _ := s.ListSubmissions("f1")
+	if len(subs) != 1 {
+		t.Fatalf("stored %d submissions, want 1", len(subs))
+	}
+	if subs[0].SpamScore != 0 {
+		t.Errorf("stored SpamScore = %d, want 0 for a clean message", subs[0].SpamScore)
+	}
+}
