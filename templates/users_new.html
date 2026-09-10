@@ -18,11 +18,11 @@
     <label class="field">
       <span>Password</span>
       <input class="input" type="password" name="password" required autocomplete="new-password"
-             data-strength="#new-user-strength">
+             data-strength="#new-user-strength" data-strength-min="{{minPassword}}">
       <span class="strength" id="new-user-strength" aria-hidden="true">
         <span></span><span></span><span></span><span></span>
       </span>
-      <span class="form-hint">bcrypt cost 12 · minimum 12 characters</span>
+      <span class="form-hint">bcrypt cost 12 · minimum {{minPassword}} characters</span>
     </label>
     <label class="field" style="margin-bottom:0">
       <span>Confirm password</span>

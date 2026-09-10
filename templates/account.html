@@ -24,11 +24,11 @@
     <label class="field">
       <span>New password</span>
       <input class="input" type="password" name="new_password" required autocomplete="new-password"
-             data-strength="#pw-strength">
+             data-strength="#pw-strength" data-strength-min="{{minPassword}}">
       <span class="strength" id="pw-strength" aria-hidden="true">
         <span></span><span></span><span></span><span></span>
       </span>
-      <span class="form-hint">bcrypt cost 12 · minimum 12 characters</span>
+      <span class="form-hint">bcrypt cost 12 · minimum {{minPassword}} characters</span>
     </label>
     <label class="field" style="margin-bottom:0">
       <span>Confirm new password</span>

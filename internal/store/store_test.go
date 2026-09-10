@@ -86,15 +86,20 @@ func TestDefaultUserNotReseeded(t *testing.T) {
 func TestCreateUserBcryptsPassword(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	err := s.CreateUser("alice", "plaintext")
+	// One name for the password, used by all three assertions. Spelling it out
+	// three times is how the "stored as plain text" check ends up comparing
+	// against a string that is no longer the password, and passing for that
+	// reason rather than because the value was hashed.
+	const password = "longenoughplaintext"
+	err := s.CreateUser("alice", password)
 	if err != nil {
 		t.Fatalf("CreateUser error = %v", err)
 	}
 	u, _ := s.GetUserByUsername("alice")
-	if u.passwordHash == "plaintext" {
+	if u.passwordHash == password {
 		t.Error("password stored as plain text, expected bcrypt hash")
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(u.passwordHash), []byte("plaintext")); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(u.passwordHash), []byte(password)); err != nil {
 		t.Errorf("bcrypt verify failed: %v", err)
 	}
 }
@@ -130,7 +135,7 @@ func TestGetUserByID(t *testing.T) {
 func TestListUsers(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	_ = s.CreateUser("alice", "passphrase")
+	_ = s.CreateUser("alice", "longenoughpassphrase")
 	users, err := s.ListUsers()
 	if err != nil {
 		t.Fatalf("error = %v", err)
@@ -157,7 +162,7 @@ func TestUpdatePassword(t *testing.T) {
 func TestDeleteUserNonLast(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	_ = s.CreateUser("alice", "passphrase")
+	_ = s.CreateUser("alice", "longenoughpassphrase")
 	alice, _ := s.GetUserByUsername("alice")
 	err := s.DeleteUser(alice.ID)
 	if err != nil {
@@ -202,9 +207,18 @@ func TestHasDefaultPassword(t *testing.T) {
 func TestCreateUserDuplicate(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	err := s.CreateUser("admin", "passphrase")
+	// Long enough to reach the uniqueness check. This test used a 10-character
+	// password and asserted only "some error", so when MinPasswordLength rose it
+	// kept passing while actually receiving ErrPasswordTooShort — green, and
+	// testing nothing about duplicate usernames. Asserting which error it is, is
+	// what makes that impossible.
+	err := s.CreateUser("admin", strings.Repeat("a", MinPasswordLength))
 	if err == nil {
 		t.Fatal("expected error creating duplicate username, got nil")
+	}
+	if errors.Is(err, ErrPasswordTooShort) {
+		t.Fatalf("CreateUser rejected the password (%v) instead of reaching the "+
+			"uniqueness check; this test is no longer about duplicates", err)
 	}
 }
 
@@ -821,7 +835,7 @@ func TestReopenRunsMigrations(t *testing.T) {
 	}
 
 	// Should be able to create users (migrations ran)
-	if err := sA.CreateUser("test", "passphrase"); err != nil {
+	if err := sA.CreateUser("test", "longenoughpassphrase"); err != nil {
 		t.Errorf("CreateUser after reopen failed: %v", err)
 	}
 }
@@ -1325,7 +1339,11 @@ func TestPasswordsHaveAMinimumLength(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 
-	tooShort := []string{"", " ", "x", "1234567"}
+	// The last entry is the boundary: exactly one character short, derived from
+	// the constant rather than written out. It used to be the literal "1234567",
+	// which stopped being the boundary the moment the minimum moved off 8 — the
+	// case would still pass, while no longer testing the edge it was added for.
+	tooShort := []string{"", " ", "x", strings.Repeat("a", MinPasswordLength-1)}
 	for _, p := range tooShort {
 		if err := s.CreateUser("u"+p, p); err == nil {
 			t.Errorf("CreateUser accepted the %d-character password %q.\n"+

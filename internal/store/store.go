@@ -569,25 +569,40 @@ func (s *Store) ListUsers() ([]User, error) {
 	return users, nil
 }
 
-// CreateUser creates a new user with a bcrypt-hashed password.
 // MinPasswordLength is the shortest password this instance will store.
 //
-// Enforced on write, in the store, because that is where all four ways of
-// setting a password converge: the admin form, the account page, `dsforms user
-// add` and `dsforms user set-password`. There was no check on any of them, so an
-// account could be created with an EMPTY password and would then log in normally
-// with full admin rights — verified against a running instance before this was
-// added.
+// Enforced on write, in the store, because that is where all four *operator*
+// ways of setting a password converge: the admin form, the account page,
+// `dsforms user add` and `dsforms user set-password`. There was no check on any
+// of them, so an account could be created with an EMPTY password and would then
+// log in normally with full admin rights — verified against a running instance
+// before this was added.
 //
-// Deliberately not enforced on login. An instance upgraded from a version
-// without this rule may hold shorter passwords, and rejecting them at the door
-// would lock people out of their own data to fix a problem they cannot then log
-// in to fix.
-const MinPasswordLength = 8
+// The default-admin seed is a fifth path and does not converge here: it hashes
+// and INSERTs directly, so it is exempt by construction rather than by
+// permission. That is deliberate — see the note on login below — but it means
+// "every path that sets a password is checked" is false as stated, and the
+// exemption is worth knowing about before adding a sixth.
+//
+// Twelve, not eight, because the markup said twelve first and the two never
+// agreed: the Nocturne port put "minimum 12 characters" into account.html and
+// users_new.html on 2026-09-09, a day before any minimum existed in code, and
+// when one arrived it was 8. Both numbers were picked a day apart, so neither
+// is a long-standing promise — but 12 is the one operators were shown, and
+// raising the check is the direction that does not weaken anything. Neither
+// page states it now; both call minPassword, which reads this.
+//
+// Deliberately not enforced on login. Existing accounts may hold shorter
+// passwords, and rejecting them at the door would lock people out of their own
+// data to fix a problem they cannot then log in to fix. Note this is not only
+// an upgrade concern: the seed below writes a 5-character password, so a fresh
+// install starts with one too.
+const MinPasswordLength = 12
 
 // ErrPasswordTooShort is returned by CreateUser and UpdatePassword.
 var ErrPasswordTooShort = fmt.Errorf("password must be at least %d characters", MinPasswordLength)
 
+// CreateUser creates a new user with a bcrypt-hashed password.
 func (s *Store) CreateUser(username, password string) error {
 	if len(password) < MinPasswordLength {
 		return ErrPasswordTooShort
