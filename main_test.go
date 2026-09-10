@@ -839,3 +839,54 @@ func TestLandingPageShowsEveryScreenshot(t *testing.T) {
 	}
 	t.Logf("checked %d screenshots", len(referenced))
 }
+
+// TestUnknownSubcommandDoesNotStartTheServer pins a dispatch that used to fall
+// through.
+//
+// The switch over os.Args[1] had no default, so anything it did not recognise
+// carried on into normal startup: `dsforms --help` began serving, and so did
+// `dsforms backupp create` or any typo in a deploy script. Starting a server is
+// the least safe response available to "I do not understand this command" — the
+// operator believes one thing happened while another did.
+//
+// AGENT.md §4: in a switch over a closed value set the safe outcome is never the
+// fall-through; name every case and let the default deny.
+func TestUnknownSubcommandDoesNotStartTheServer(t *testing.T) {
+	t.Parallel()
+	fset, files := astcheck.Package(t, ".")
+
+	var found, hasDefault bool
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			sw, ok := n.(*ast.SwitchStmt)
+			if !ok {
+				return true
+			}
+			// The dispatch is the switch over os.Args[1].
+			idx, ok := sw.Tag.(*ast.IndexExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := idx.X.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Args" {
+				return true
+			}
+			found = true
+			for _, c := range sw.Body.List {
+				if cc, ok := c.(*ast.CaseClause); ok && cc.List == nil {
+					hasDefault = true
+				}
+			}
+			if !hasDefault {
+				t.Errorf("main.go:%d switches on os.Args with no default clause.\n"+
+					"An unrecognised subcommand then falls through and starts the "+
+					"server, so a typo silently serves instead of reporting the typo.",
+					fset.Position(sw.Pos()).Line)
+			}
+			return true
+		})
+	}
+	if !found {
+		t.Fatal("no switch over os.Args found; the scan is not reading the dispatch")
+	}
+}
