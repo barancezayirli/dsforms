@@ -292,6 +292,12 @@ It deliberately does not verify database *integrity*. A corrupt database is not
 something a restart repairs, and failing a liveness probe on it turns a
 damaged-but-serving instance into a crash loop.
 
+Note what it does and does not catch. It catches a database handle that has been
+closed — the state a failed restore could leave behind, and the reason the
+endpoint exists. It does not catch the file being deleted out from under a
+running process: SQLite keeps the open inode, so queries continue to succeed
+against a file that no longer has a name. Verified both ways.
+
 ## Reverse Proxy
 
 For production, put dsforms behind a reverse proxy for TLS termination.
