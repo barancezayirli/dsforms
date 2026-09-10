@@ -257,6 +257,41 @@ docker compose exec dsforms ./dsforms backup create
 
 The backup is a standard SQLite file. You can open it with any SQLite client or use it as a direct replacement for the live database.
 
+### What happens if a restore fails
+
+A restore replaces the live database, so it is written to fail safely:
+
+- The uploaded file is checked before anything is touched. A file that is not a
+  valid dsforms database is refused and nothing changes.
+- The existing database is set aside, not overwritten, until the replacement has
+  actually opened. If it does not, the original is put back and stays in service.
+- You are told which of those happened. "That file was rejected" means your
+  database is untouched; "your existing database is unchanged and still in use"
+  means the swap failed and was undone.
+- In the one case where neither works, the message names the file your data is
+  in (`<DB_PATH>.rollback`) and says not to restart before moving it back —
+  starting with no database there creates an empty one.
+
+If a restore is interrupted by the process dying, dsforms refuses to start
+another one while `<DB_PATH>.rollback` exists, because that file may be your
+only remaining copy.
+
+## Health Checks
+
+`GET /healthz` returns `200 ok` when the process can reach its database, and
+`503 database unavailable` when it cannot. It runs a real query rather than
+checking that the server is listening — the failure worth catching is a process
+that is up and answering every request with an error, which only a restart
+fixes.
+
+The Docker image ships a `HEALTHCHECK` that uses it, so `docker ps` reports
+health and orchestrators restart the container on their own. Nothing needs
+configuring.
+
+It deliberately does not verify database *integrity*. A corrupt database is not
+something a restart repairs, and failing a liveness probe on it turns a
+damaged-but-serving instance into a crash loop.
+
 ## Reverse Proxy
 
 For production, put dsforms behind a reverse proxy for TLS termination.
@@ -280,6 +315,13 @@ server {
     }
 }
 ```
+
+> **If you use IP or CIDR filter rules, the proxy is part of your security
+> boundary.** dsforms trusts `X-Forwarded-For` for the client IP, so anything
+> that can reach it directly can set that header to whatever it likes. Bind
+> dsforms to localhost (as above) so only the proxy can reach it. Email and
+> domain rules are unaffected — those match the sender field, which is validated
+> rather than taken from a header.
 
 **Caddy:**
 
