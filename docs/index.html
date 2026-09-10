@@ -490,6 +490,44 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         </p>
       </div>
     </div>
+
+    <!-- The screens themselves. The cards above describe them; a product page
+         that only describes its interface is asking to be taken on trust.
+         width/height are the real pixel dimensions so the browser reserves the
+         space and the page does not jump as they arrive; loading="lazy" keeps
+         them off the critical path, since all five sit well below the fold. -->
+    <div class="shots" style="margin-top:32px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+      <figure style="margin:0;grid-column:1/-1">
+        <img src="screenshots/dashboard.png" width="1280" height="800" loading="lazy" decoding="async"
+             alt="The dsforms overview: submissions over time, spam rate, per-form breakdown and rate-limit activity."
+             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Overview — what arrived, what was held, and how often.</figcaption>
+      </figure>
+      <figure style="margin:0">
+        <img src="screenshots/reader.png" width="1280" height="800" loading="lazy" decoding="async"
+             alt="A submission open in the reader, over the list it came from."
+             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Reader — opens over the list, arrows step through.</figcaption>
+      </figure>
+      <figure style="margin:0">
+        <img src="screenshots/submission.png" width="1280" height="800" loading="lazy" decoding="async"
+             alt="A single submission with its fields and spam score breakdown."
+             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Submission — every field, and why it scored what it did.</figcaption>
+      </figure>
+      <figure style="margin:0">
+        <img src="screenshots/form-edit.png" width="1280" height="800" loading="lazy" decoding="async"
+             alt="Form settings, including the copy-paste HTML snippet for the endpoint."
+             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Form settings — with the snippet to paste into your site.</figcaption>
+      </figure>
+      <figure style="margin:0">
+        <img src="screenshots/login.png" width="1280" height="800" loading="lazy" decoding="async"
+             alt="The dsforms login screen."
+             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Sign in — sessions in the database, not JWTs in a cookie.</figcaption>
+      </figure>
+    </div>
   </div>
 </section>
 

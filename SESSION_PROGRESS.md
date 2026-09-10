@@ -318,7 +318,6 @@ Found by the review sweep, none caused by this branch, none acted on here.
 |---|---|---|
 | Retyping `screen.Rule.Kind` / `.Type` as defined types (was `filter.Rule`) | They are the "documented string set" AGENT.md §4 names, and `matches` fails open on an unknown type — an in-memory rule with a typo'd Type silently matches nothing, which for a *block* rule is a bypass rather than a no-op. The DB `CHECK` constraints make it unreachable today, so the invariant lives in SQLite rather than in Go. The constants already exist; the change is mechanical. | A follow-up PR |
 | A "resend notification" action for restored submissions | `notified = 0` on a restored row records a notification that was never sent, but nothing reads the column — no sweep, no retry, no admin action — so a failed send is not retried. Needs UI design. The misleading comment claiming otherwise has been removed. | A follow-up PR |
-| Wiring `docs/screenshots/` into the landing page | The five captures (dashboard, reader, submission, form-edit, login) are committed, but `docs/index.html` references none of them — the Admin UI section still describes the screens in cards instead of showing them. Only the page markup is outstanding. | A follow-up PR |
 
 ## Open questions
 
