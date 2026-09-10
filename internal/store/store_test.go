@@ -1376,3 +1376,83 @@ func TestPasswordsHaveAMinimumLength(t *testing.T) {
 		t.Errorf("CheckPassword failed for a valid account: %v", err)
 	}
 }
+
+// TestCreateSubmissionStoresTheScoreOnEveryReadPath covers the two columns
+// CreateSubmission started writing, beside the code that writes them.
+//
+// Until this branch, spam_score and held_threshold were written only by
+// CreateHeldSubmission, and every read-path test builds its row with
+// CreateHeldSubmission + RestoreSubmission. So the accepted-path write was
+// guarded only from internal/handler, two layers up — a refactor there would
+// have taken the guard with it.
+//
+// Each read is checked because they share heldColumns by invariant
+// (TestEverySubmissionReadUsesTheSharedColumnList) rather than by construction,
+// and the drawer that reported this bug uses GetSubmission while the list page
+// uses ListSubmissionsPaged.
+func TestCreateSubmissionStoresTheScoreOnEveryReadPath(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+
+	const (
+		wantScore     = 3
+		wantThreshold = 6
+	)
+	if err := s.CreateSubmission(Submission{
+		ID: "s1", FormID: "f1", RawData: `{"name":"Ana"}`,
+		SpamScore: wantScore, HeldThreshold: wantThreshold,
+	}); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	check := func(t *testing.T, where string, got Submission) {
+		t.Helper()
+		if got.SpamScore != wantScore {
+			t.Errorf("%s: SpamScore = %d, want %d", where, got.SpamScore, wantScore)
+		}
+		if got.HeldThreshold != wantThreshold {
+			t.Errorf("%s: HeldThreshold = %d, want %d", where, got.HeldThreshold, wantThreshold)
+		}
+		if got.IsHeld {
+			t.Errorf("%s: IsHeld = true; a scored submission is not a held one, and "+
+				"the reader uses this to decide which screen it belongs on", where)
+		}
+	}
+
+	one, err := s.GetSubmission("s1")
+	if err != nil {
+		t.Fatalf("GetSubmission: %v", err)
+	}
+	check(t, "GetSubmission", one)
+
+	list, err := s.ListSubmissions("f1")
+	if err != nil {
+		t.Fatalf("ListSubmissions: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListSubmissions returned %d rows, want 1", len(list))
+	}
+	check(t, "ListSubmissions", list[0])
+
+	paged, err := s.ListSubmissionsPaged("f1", 10, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsPaged: %v", err)
+	}
+	if len(paged) != 1 {
+		t.Fatalf("ListSubmissionsPaged returned %d rows, want 1", len(paged))
+	}
+	check(t, "ListSubmissionsPaged", paged[0])
+
+	// A scored submission that was never held still has no breakdown. The
+	// reader branches on that to tell "passed" from "was held, then restored".
+	signals, err := s.SubmissionSignals("s1")
+	if err != nil {
+		t.Fatalf("SubmissionSignals: %v", err)
+	}
+	if len(signals) != 0 {
+		t.Errorf("SubmissionSignals returned %d rows for an accepted submission, want 0", len(signals))
+	}
+}

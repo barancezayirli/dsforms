@@ -254,7 +254,12 @@ func TestSubmissionPanelDistinguishesThreeStates(t *testing.T) {
 		d := data
 		d.Signals = nil
 		d.Submission.SpamScore = 0
-		d.Submission.HeldThreshold = 0
+		// A real bar, not zero. Every accepted submission is judged against a
+		// clamped threshold, so held_threshold = 0 is a row the fixed code cannot
+		// write — and a fixture in a state production cannot reach lets a
+		// one-word slip pass: branching on HeldThreshold instead of SpamScore
+		// would put "Scored below the threshold" under every clean submission.
+		d.Submission.HeldThreshold = 6
 		body := render(t, d)
 
 		if !strings.Contains(body, "No link markup") {
