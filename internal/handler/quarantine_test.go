@@ -11,10 +11,9 @@ import (
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/auth"
-	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/flash"
 	"github.com/barancezayirli/dsforms/internal/mail"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -73,7 +72,7 @@ func setupQuarantineWithMailer(t *testing.T, m *mail.MockMailer) (*store.Store, 
 		Notifier:         m,
 		Webhook:          wh,
 		RetentionDays:    30,
-		DefaultThreshold: spam.DefaultThreshold,
+		DefaultThreshold: screen.DefaultThreshold,
 	}
 
 	r := chi.NewRouter()
@@ -117,7 +116,7 @@ func seedHeld(t *testing.T, s *store.Store, id string, score int, signals []stor
 		IP:        "203.0.113.5",
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := s.CreateHeldSubmission(sub, score, spam.DefaultThreshold, signals); err != nil {
+	if err := s.CreateHeldSubmission(sub, score, screen.DefaultThreshold, signals); err != nil {
 		t.Fatalf("CreateHeldSubmission(%s): %v", id, err)
 	}
 }
@@ -125,7 +124,7 @@ func seedHeld(t *testing.T, s *store.Store, id string, score int, signals []stor
 func TestQuarantinePageListsHeld(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupQuarantine(t)
-	seedHeld(t, s, "h1", 6, []store.SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}})
+	seedHeld(t, s, "h1", 6, []store.SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}})
 	seedHeld(t, s, "h2", 12, nil)
 
 	w := doAdminRequest(t, s, r, "GET", "/admin/quarantine", "")
@@ -187,7 +186,7 @@ func TestQuarantinePanelFragment(t *testing.T) {
 func TestQuarantineRestoreSendsWithheldNotification(t *testing.T) {
 	t.Parallel()
 	s, m, r := setupQuarantine(t)
-	seedHeld(t, s, "h1", 6, []store.SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}})
+	seedHeld(t, s, "h1", 6, []store.SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}})
 
 	w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", "")
 	if w.Code != http.StatusSeeOther {
@@ -303,10 +302,10 @@ func TestRulesPageAddAndValidate(t *testing.T) {
 func TestRulesSplitByKind(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupQuarantine(t)
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "spam.example", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
-	if _, err := s.AddFilterRule(filter.KindAllow, filter.TypeEmail, "vip@example.com", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindAllow, screen.TypeEmail, "vip@example.com", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 
@@ -544,11 +543,11 @@ func TestDeleteRuleRemovesOnlyTheNamedRule(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupQuarantine(t)
 
-	keep, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", "")
+	keep, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "spam.example", "")
 	if err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
-	drop, err := s.AddFilterRule(filter.KindBlock, filter.TypeEmail, "bot@spam.example", "")
+	drop, err := s.AddFilterRule(screen.KindBlock, screen.TypeEmail, "bot@spam.example", "")
 	if err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
@@ -578,7 +577,7 @@ func TestDeleteRuleRemovesOnlyTheNamedRule(t *testing.T) {
 func TestDeleteRuleUnknownIDDoesNotClaimSuccess(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupQuarantine(t)
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "spam.example", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
 // Charts are hand-built inline SVG rendered from aggregate rows. A charting
@@ -192,35 +192,35 @@ const (
 // stored verbatim in spam_signals. An unknown rule — a row written by an older
 // or newer binary — must still render something, so both lookups fall back
 // rather than producing a blank icon and an empty label.
-// Keyed by spam.Rule so the value set has one definition, but Go does not
+// Keyed by screen.Check so the value set has one definition, but Go does not
 // exhaustiveness-check a map literal: adding a rule without a label here
 // compiles cleanly and go vet says nothing. TestRuleIconAndLabelFallBack is the
-// guard, and it ranges spam.AllRules so it cannot fall behind the constants.
-var ruleIcons = map[spam.Rule]string{
-	spam.RuleMarkup:     "link",
-	spam.RuleKeyword:    "text-aa",
-	spam.RuleSQL:        "bug",
-	spam.RuleGibberish:  "question",
-	spam.RuleURLInName:  "user-focus",
-	spam.RuleExtraLinks: "link",
-	spam.RuleRepeatIP:   "fingerprint",
-	spam.RuleBlocked:    "prohibit",
+// guard, and it ranges screen.AllRules so it cannot fall behind the constants.
+var ruleIcons = map[screen.Check]string{
+	screen.CheckMarkup:     "link",
+	screen.CheckKeyword:    "text-aa",
+	screen.CheckSQL:        "bug",
+	screen.CheckGibberish:  "question",
+	screen.CheckURLInName:  "user-focus",
+	screen.CheckExtraLinks: "link",
+	screen.CheckRepeatIP:   "fingerprint",
+	screen.CheckBlocked:    "prohibit",
 }
 
-var ruleLabels = map[spam.Rule]string{
-	spam.RuleMarkup:     "Link markup",
-	spam.RuleKeyword:    "Keyword hit",
-	spam.RuleSQL:        "SQL probe",
-	spam.RuleGibberish:  "Gibberish token",
-	spam.RuleURLInName:  "URL in a name field",
-	spam.RuleExtraLinks: "Multiple raw URLs",
-	spam.RuleRepeatIP:   "Repeat submissions from this IP",
-	spam.RuleBlocked:    "Blocked by a filter rule",
+var ruleLabels = map[screen.Check]string{
+	screen.CheckMarkup:     "Link markup",
+	screen.CheckKeyword:    "Keyword hit",
+	screen.CheckSQL:        "SQL probe",
+	screen.CheckGibberish:  "Gibberish token",
+	screen.CheckURLInName:  "URL in a name field",
+	screen.CheckExtraLinks: "Multiple raw URLs",
+	screen.CheckRepeatIP:   "Repeat submissions from this IP",
+	screen.CheckBlocked:    "Blocked by a filter rule",
 }
 
 // RuleIcon returns the icon name for a spam rule. The fallback matters: a row
 // written by a newer binary must still render something rather than nothing.
-func RuleIcon(rule spam.Rule) string {
+func RuleIcon(rule screen.Check) string {
 	if name, ok := ruleIcons[rule]; ok {
 		return name
 	}
@@ -228,7 +228,7 @@ func RuleIcon(rule spam.Rule) string {
 }
 
 // RuleLabel returns the human-readable name for a spam rule.
-func RuleLabel(rule spam.Rule) string {
+func RuleLabel(rule screen.Check) string {
 	if label, ok := ruleLabels[rule]; ok {
 		return label
 	}

@@ -9,10 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/flash"
 	"github.com/barancezayirli/dsforms/internal/safe"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -57,14 +56,14 @@ type heldRow struct {
 
 // Rules returns the rule names that fired, for the Signals column.
 func (h heldRow) Rules() []string {
-	seen := map[spam.Rule]bool{}
+	seen := map[screen.Check]bool{}
 	var out []string
 	for _, sig := range h.Signals {
-		if seen[sig.Rule] {
+		if seen[sig.Check] {
 			continue
 		}
-		seen[sig.Rule] = true
-		out = append(out, RuleLabel(sig.Rule))
+		seen[sig.Check] = true
+		out = append(out, RuleLabel(sig.Check))
 	}
 	return out
 }
@@ -374,7 +373,7 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 
 	rules := make([]string, 0, len(signals))
 	for _, sig := range signals {
-		rules = append(rules, string(sig.Rule))
+		rules = append(rules, string(sig.Check))
 	}
 	// Field values are deliberately not logged, here as everywhere else: the
 	// rules and the score are what a weight-tuning exercise needs, and the
@@ -447,9 +446,9 @@ func plural(n int, word string) string {
 // filterRulesData backs the Filter rules screen.
 type filterRulesData struct {
 	PageData
-	Block     []filter.Rule
-	Allow     []filter.Rule
-	Keywords  []filter.Rule
+	Block     []screen.Rule
+	Allow     []screen.Rule
+	Keywords  []screen.Rule
 	Threshold int
 	Error     string
 }
@@ -479,11 +478,11 @@ func (h *QuarantineHandler) renderRules(w http.ResponseWriter, r *http.Request, 
 		// — never matched it. Claiming a protection that does not exist is worse
 		// than omitting the row.
 		switch {
-		case rule.Type == filter.TypeKeyword:
+		case rule.Type == screen.TypeKeyword:
 			data.Keywords = append(data.Keywords, rule)
-		case rule.Kind == filter.KindAllow:
+		case rule.Kind == screen.KindAllow:
 			data.Allow = append(data.Allow, rule)
-		case rule.Kind == filter.KindBlock:
+		case rule.Kind == screen.KindBlock:
 			data.Block = append(data.Block, rule)
 		default:
 			log.Printf("rules: rule %s has unknown kind %q; not displayed", rule.ID, rule.Kind)

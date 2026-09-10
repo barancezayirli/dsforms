@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/mail"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -74,7 +74,7 @@ func setupSubmit(t *testing.T) (*store.Store, *mail.MockMailer, *chi.Mux) {
 		t.Fatalf("store.New error: %v", err)
 	}
 	m := mail.NewMockMailer()
-	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
+	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://example.com", Screener: screen.New(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 	_ = s.CreateForm(store.Form{ID: "test-form", Name: "Test", EmailTo: "test@example.com", Redirect: "https://example.com/thanks"})
@@ -217,7 +217,7 @@ func TestSubmitDefaultRedirect(t *testing.T) {
 	t.Parallel()
 	s, m, _ := setupSubmit(t)
 	_ = s.CreateForm(store.Form{ID: "no-redir", Name: "NoRedir", EmailTo: "t@t.com"})
-	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
+	h := &SubmitHandler{Store: s, Notifier: m, BaseURL: "https://example.com", Screener: screen.New(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 	form := url.Values{"name": {"Alice"}}
@@ -482,7 +482,7 @@ func TestSubmitWebhookFired(t *testing.T) {
 	})
 	m := mail.NewMockMailer()
 	wh := newMockWebhookSender()
-	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
+	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com", Screener: screen.New(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 
@@ -509,7 +509,7 @@ func TestSubmitNoWebhook(t *testing.T) {
 	_ = s.CreateForm(store.Form{ID: "no-wh", Name: "NoWH", EmailTo: "test@test.com"})
 	m := mail.NewMockMailer()
 	wh := newMockWebhookSender()
-	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
+	h := &SubmitHandler{Store: s, Notifier: m, Webhook: wh, BaseURL: "https://example.com", Screener: screen.New(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 
@@ -627,7 +627,7 @@ func TestSubmitNoEmailNoWebhook(t *testing.T) {
 		t.Fatalf("store.New error: %v", err)
 	}
 	_ = s.CreateForm(store.Form{ID: "silent", Name: "Silent"})
-	h := &SubmitHandler{Store: s, Notifier: nil, Webhook: nil, BaseURL: "https://example.com", Tracker: spam.NewTracker(1000)}
+	h := &SubmitHandler{Store: s, Notifier: nil, Webhook: nil, BaseURL: "https://example.com", Screener: screen.New(1000)}
 	r := chi.NewRouter()
 	r.Post("/f/{formID}", h.Handle)
 

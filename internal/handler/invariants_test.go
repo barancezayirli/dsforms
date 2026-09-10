@@ -143,7 +143,7 @@ func TestNoStructShadowsAnEmbeddedField(t *testing.T) {
 //
 // A defined type would not close this: it still would not check that a constant
 // has a navGroups entry, which is the same non-exhaustiveness that made the
-// spam.Rule type weaker than it looked. Every call site passes a literal, so
+// screen.Check type weaker than it looked. Every call site passes a literal, so
 // checking membership at the call site is both cheaper and stricter.
 func TestShellActiveNamesAKnownNavGroup(t *testing.T) {
 	t.Parallel()

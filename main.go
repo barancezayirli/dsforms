@@ -24,7 +24,7 @@ import (
 	"github.com/barancezayirli/dsforms/internal/mail"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/barancezayirli/dsforms/internal/safe"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/barancezayirli/dsforms/internal/webhook"
 	"github.com/go-chi/chi/v5"
@@ -547,12 +547,16 @@ func main() {
 		log.Println("broadcast worker started without SMTP — broadcasts will be marked failed until SMTP_HOST/SMTP_FROM are configured")
 	}
 
+	// One screener for the process: it carries the repeat-IP tally, which is the
+	// only state the hold/accept decision keeps.
+	screener := screen.New(10000)
+
 	submitHandler := &handler.SubmitHandler{
 		Store:            s,
 		Notifier:         mailer,
 		Webhook:          webhookSender,
 		BaseURL:          cfg.BaseURL,
-		Tracker:          spam.NewTracker(10000),
+		Screener:         screener,
 		DefaultThreshold: cfg.SpamThreshold,
 	}
 

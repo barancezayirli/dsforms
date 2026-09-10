@@ -1,7 +1,7 @@
 // Package spam — this file adds gibberish/synthetic-string detection, folded into
 // Score by spam.go. Kept in its own file because it's a pure, self-contained
 // predicate with no dependency on the rest of the scoring logic.
-package spam
+package score
 
 import (
 	"strings"

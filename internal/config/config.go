@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
 // Config holds all application configuration loaded from environment variables.
@@ -26,7 +26,7 @@ type Config struct {
 	RatePerMinute int
 
 	// SpamThreshold is the instance-wide score at or above which a submission
-	// is held for review. A form may override it; spam.DefaultThreshold is the
+	// is held for review. A form may override it; screen.DefaultThreshold is the
 	// fallback when neither is set.
 	SpamThreshold int
 
@@ -72,9 +72,9 @@ func Load() Config {
 // as unset, but an explicit 0 must mean "use the default" too — a literal
 // threshold of zero would hold every submission ever received.
 func spamThreshold() int {
-	n := envOrInt("SPAM_THRESHOLD", spam.DefaultThreshold)
+	n := envOrInt("SPAM_THRESHOLD", screen.DefaultThreshold)
 	if n == 0 {
-		return spam.DefaultThreshold
+		return screen.DefaultThreshold
 	}
 	clamped := clampInt(n, 1, 20)
 	if clamped != n {

@@ -8,9 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/mail"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -49,8 +48,8 @@ func quarantineHandler(t *testing.T) (*SubmitHandler, *store.Store, *mail.MockMa
 		Store:            s,
 		Notifier:         m,
 		BaseURL:          "https://example.com",
-		Tracker:          spam.NewTracker(1000),
-		DefaultThreshold: spam.DefaultThreshold,
+		Screener:         screen.New(1000),
+		DefaultThreshold: screen.DefaultThreshold,
 	}
 	return h, s, m
 }
@@ -77,11 +76,11 @@ func TestSubmitHoldsSpamInsteadOfDropping(t *testing.T) {
 	if len(held) != 1 {
 		t.Fatalf("got %d held submissions, want 1 — spam should be quarantined, not dropped", len(held))
 	}
-	if held[0].SpamScore < spam.DefaultThreshold {
-		t.Errorf("SpamScore = %d, want >= %d", held[0].SpamScore, spam.DefaultThreshold)
+	if held[0].SpamScore < screen.DefaultThreshold {
+		t.Errorf("SpamScore = %d, want >= %d", held[0].SpamScore, screen.DefaultThreshold)
 	}
-	if held[0].HeldThreshold != spam.DefaultThreshold {
-		t.Errorf("HeldThreshold = %d, want %d", held[0].HeldThreshold, spam.DefaultThreshold)
+	if held[0].HeldThreshold != screen.DefaultThreshold {
+		t.Errorf("HeldThreshold = %d, want %d", held[0].HeldThreshold, screen.DefaultThreshold)
 	}
 
 	// The breakdown must be stored, or the quarantine screen has nothing to show.
@@ -150,7 +149,7 @@ func TestSubmitHoneypotBeatsAllowRule(t *testing.T) {
 	t.Parallel()
 	h, s, _ := quarantineHandler(t)
 
-	if _, err := s.AddFilterRule(filter.KindAllow, filter.TypeEmail, "vip@example.com", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindAllow, screen.TypeEmail, "vip@example.com", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 
@@ -172,7 +171,7 @@ func TestSubmitAllowRuleSkipsScoring(t *testing.T) {
 	t.Parallel()
 	h, s, m := quarantineHandler(t)
 
-	if _, err := s.AddFilterRule(filter.KindAllow, filter.TypeEmail, "vip@example.com", "known good"); err != nil {
+	if _, err := s.AddFilterRule(screen.KindAllow, screen.TypeEmail, "vip@example.com", "known good"); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 
@@ -203,7 +202,7 @@ func TestSubmitBlockRuleHoldsImmediately(t *testing.T) {
 	t.Parallel()
 	h, s, m := quarantineHandler(t)
 
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "spam.example", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 
@@ -223,7 +222,7 @@ func TestSubmitBlockRuleHoldsImmediately(t *testing.T) {
 	}
 
 	signals, _ := s.SubmissionSignals(held[0].ID)
-	if len(signals) != 1 || signals[0].Rule != spam.RuleBlocked {
+	if len(signals) != 1 || signals[0].Check != screen.CheckBlocked {
 		t.Fatalf("signals = %+v, want a single 'rule' signal naming the blocklist entry", signals)
 	}
 	// The weights-sum-to-score invariant applies here too. The scored path
@@ -232,9 +231,9 @@ func TestSubmitBlockRuleHoldsImmediately(t *testing.T) {
 	if signals[0].Weight != held[0].SpamScore {
 		t.Errorf("signal weight %d does not match the stored score %d", signals[0].Weight, held[0].SpamScore)
 	}
-	if held[0].SpamScore != spam.DefaultThreshold {
+	if held[0].SpamScore != screen.DefaultThreshold {
 		t.Errorf("SpamScore = %d, want the threshold %d — a zero here renders the meter empty",
-			held[0].SpamScore, spam.DefaultThreshold)
+			held[0].SpamScore, screen.DefaultThreshold)
 	}
 	if signals[0].Match != "spam.example" {
 		t.Errorf("signal Match = %q, want the rule value", signals[0].Match)
@@ -269,7 +268,7 @@ func TestSubmitRepeatIPIsHeldWithItsOwnSignal(t *testing.T) {
 	signals, _ := s.SubmissionSignals(held[0].ID)
 	var found bool
 	for _, sig := range signals {
-		if sig.Rule == "repeat_ip" {
+		if sig.Check == "repeat_ip" {
 			found = true
 			if sig.Match != ip {
 				t.Errorf("repeat_ip signal Match = %q, want the IP %q", sig.Match, ip)
@@ -297,7 +296,7 @@ func TestSubmitAllowRuleSkipsRepeatIP(t *testing.T) {
 	t.Parallel()
 	h, s, _ := quarantineHandler(t)
 
-	if _, err := s.AddFilterRule(filter.KindAllow, filter.TypeEmail, "vip@example.com", "office"); err != nil {
+	if _, err := s.AddFilterRule(screen.KindAllow, screen.TypeEmail, "vip@example.com", "office"); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 
@@ -328,7 +327,7 @@ func TestSubmitBlockRuleLeavesFieldEmpty(t *testing.T) {
 	t.Parallel()
 	h, s, _ := quarantineHandler(t)
 
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeCIDR, "203.0.113.0/24", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeCIDR, "203.0.113.0/24", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 	submitTo(t, h, "f1", map[string]string{"message": "ordinary"}, "203.0.113.9")
@@ -401,7 +400,7 @@ func TestSubmitCustomKeywordPilesUpButDoesNotHoldAlone(t *testing.T) {
 	t.Parallel()
 	h, s, _ := quarantineHandler(t)
 
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeKeyword, "telegram pump", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeKeyword, "telegram pump", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 

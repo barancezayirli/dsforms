@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
@@ -125,8 +124,8 @@ func populatedPageData() map[string]any {
 	form := store.Form{ID: "f1", Name: "Contact", EmailTo: "me@example.com",
 		WebhookURL: "https://hooks.example.com/x", WebhookFormat: "generic", SpamThreshold: 6}
 	signals := []store.SpamSignal{
-		{Rule: spam.RuleMarkup, Field: "message", Match: "[url=", Weight: 6},
-		{Rule: spam.RuleKeyword, Field: "message", Match: "backlinks", Weight: 5},
+		{Check: screen.CheckMarkup, Field: "message", Match: "[url=", Weight: 6},
+		{Check: screen.CheckKeyword, Field: "message", Match: "backlinks", Weight: 5},
 	}
 	wl := store.Waitlist{ID: "w1", Name: "Launch", ConfirmSubject: "Welcome"}
 	// Every field the shell can carry is set. Leaving one at its zero value
@@ -181,9 +180,9 @@ func populatedPageData() map[string]any {
 			MeterPercent: 92, MeterMax: 12, Threshold: 6, HeldTotal: 12, AwaitingCount: 12,
 			HeldRecent: 146, TrafficRecent: 930, RetentionDays: 30, Pager: pager},
 		"rules.html": filterRulesData{PageData: shell, Threshold: 6, Error: "bad",
-			Block:    []filter.Rule{{ID: "r1", Kind: filter.KindBlock, Type: filter.TypeDomain, Value: "spam.example", Hits: 3, CreatedAt: time.Now()}},
-			Allow:    []filter.Rule{{ID: "r2", Kind: filter.KindAllow, Type: filter.TypeEmail, Value: "vip@example.com", Note: "restored", CreatedAt: time.Now()}},
-			Keywords: []filter.Rule{{ID: "r3", Kind: filter.KindBlock, Type: filter.TypeKeyword, Value: "crypto pump", CreatedAt: time.Now()}}},
+			Block:    []screen.Rule{{ID: "r1", Kind: screen.KindBlock, Type: screen.TypeDomain, Value: "spam.example", Hits: 3, CreatedAt: time.Now()}},
+			Allow:    []screen.Rule{{ID: "r2", Kind: screen.KindAllow, Type: screen.TypeEmail, Value: "vip@example.com", Note: "restored", CreatedAt: time.Now()}},
+			Keywords: []screen.Rule{{ID: "r3", Kind: screen.KindBlock, Type: screen.TypeKeyword, Value: "crypto pump", CreatedAt: time.Now()}}},
 		"home.html": overviewData{PageData: shell, Greeting: "Good afternoon, admin",
 			Summary: "1 form", Range: 30, BarWidth: BarWidth(),
 			KPIs: []kpi{{Icon: "tray", Label: "Submissions", Value: "784", Delta: "+12%", Sub: "vs 700", Spark: Sparkline([]int{1, 3, 2}, sparkWidth, sparkHeight, 4)}},

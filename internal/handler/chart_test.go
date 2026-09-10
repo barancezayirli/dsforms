@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
 // coords pulls the numeric pairs out of an SVG path so tests can assert on
@@ -208,14 +208,14 @@ func TestAgeSince(t *testing.T) {
 func TestRuleIconAndLabelFallBack(t *testing.T) {
 	t.Parallel()
 
-	if got := RuleIcon(spam.RuleMarkup); got != "link" {
+	if got := RuleIcon(screen.CheckMarkup); got != "link" {
 		t.Errorf("RuleIcon(markup) = %q, want %q", got, "link")
 	}
-	if got := RuleLabel(spam.RuleMarkup); got != "Link markup" {
+	if got := RuleLabel(screen.CheckMarkup); got != "Link markup" {
 		t.Errorf("RuleLabel(markup) = %q", got)
 	}
 
-	const unknown = spam.Rule("invented_by_a_newer_binary")
+	const unknown = screen.Check("invented_by_a_newer_binary")
 	if got := RuleIcon(unknown); got != "shield-warning" {
 		t.Errorf("RuleIcon(unknown) = %q, want the fallback glyph", got)
 	}
@@ -226,12 +226,12 @@ func TestRuleIconAndLabelFallBack(t *testing.T) {
 	// Every declared rule must have both, or the quarantine panel renders a
 	// nameless row with a blank icon.
 	//
-	// Ranged over spam.AllRules rather than a list written out here. Restating
+	// Ranged over screen.AllChecks rather than a list written out here. Restating
 	// the constants made this test a second copy of the value set kept in step by
-	// memory — the same defect the spam.Rule type was introduced to end,
+	// memory — the same defect the screen.Check type was introduced to end,
 	// relocated from a doc comment into a test. (The count that used to sit in
 	// this sentence was itself the thing the rule forbids.)
-	for _, rule := range spam.AllRules {
+	for _, rule := range screen.AllChecks {
 		if _, ok := ruleIcons[rule]; !ok {
 			t.Errorf("rule %q has no icon", rule)
 		}

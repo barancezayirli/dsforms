@@ -9,7 +9,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/barancezayirli/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
 // updateGolden re-records the golden file. Run with:
@@ -36,8 +36,17 @@ func TestDecideGolden(t *testing.T) {
 
 	var buf bytes.Buffer
 	for _, c := range goldenCases() {
-		v := decide(c.fields, c.ip, c.rules, c.threshold, c.repeated)
-		writeCase(&buf, c, v)
+		// A fresh Screener per case, primed so the repeat flag is exactly what
+		// the case asks for: Decide records as it decides, so a shared tracker
+		// would make every later case a repeat.
+		sc := screen.New(16)
+		in := screen.Input{FormID: "f", Fields: c.fields, IP: c.ip, Rules: c.rules, Threshold: c.threshold}
+		if c.repeated {
+			for i := 0; i < 2; i++ {
+				sc.Decide(in)
+			}
+		}
+		writeCase(&buf, c, sc.Decide(in))
 	}
 
 	path := filepath.Join("testdata", "verdicts.golden")
@@ -72,14 +81,14 @@ type goldenCase struct {
 	name      string
 	fields    map[string]string
 	ip        string
-	rules     []filter.Rule
+	rules     []screen.Rule
 	threshold int
 	repeated  bool
 }
 
 // writeCase renders one case deterministically. Fields are sorted because Go
 // randomises map iteration, and a golden file that reorders itself is worthless.
-func writeCase(buf *bytes.Buffer, c goldenCase, v verdict) {
+func writeCase(buf *bytes.Buffer, c goldenCase, v screen.Verdict) {
 	fmt.Fprintf(buf, "=== %s\n", c.name)
 
 	keys := make([]string, 0, len(c.fields))
@@ -103,14 +112,14 @@ func writeCase(buf *bytes.Buffer, c goldenCase, v verdict) {
 	}
 
 	action := "accept"
-	if v.hold {
+	if v.Hold {
 		action = "HOLD"
 	}
-	fmt.Fprintf(buf, "  -> %s score=%d matchedRule=%q\n", action, v.score, v.matchedRuleID)
-	for _, s := range v.signals {
-		fmt.Fprintf(buf, "     signal %s field=%q match=%q weight=%d\n", s.Rule, s.Field, s.Match, s.Weight)
+	fmt.Fprintf(buf, "  -> %s score=%d matchedRule=%q\n", action, v.Score, v.MatchedRuleID)
+	for _, s := range v.Signals {
+		fmt.Fprintf(buf, "     signal %s field=%q match=%q weight=%d\n", s.Check, s.Field, s.Match, s.Weight)
 	}
-	if len(v.signals) == 0 {
+	if len(v.Signals) == 0 {
 		buf.WriteString("     signal (none)\n")
 	}
 	buf.WriteString("\n")
@@ -161,28 +170,28 @@ func fieldSets() []struct {
 // ruleSets exercise both kinds against every type, plus the precedence case.
 func ruleSets() []struct {
 	name  string
-	rules []filter.Rule
+	rules []screen.Rule
 } {
-	r := func(id, kind, typ, val string) filter.Rule {
-		return filter.Rule{ID: id, Kind: kind, Type: typ, Value: val}
+	r := func(id, kind, typ, val string) screen.Rule {
+		return screen.Rule{ID: id, Kind: kind, Type: typ, Value: val}
 	}
 	return []struct {
 		name  string
-		rules []filter.Rule
+		rules []screen.Rule
 	}{
 		{"no-rules", nil},
-		{"allow-email", []filter.Rule{r("A1", filter.KindAllow, filter.TypeEmail, "vip@customer.com")}},
-		{"allow-email-mike", []filter.Rule{r("A2", filter.KindAllow, filter.TypeEmail, "mike@works.com")}},
-		{"allow-domain", []filter.Rule{r("A3", filter.KindAllow, filter.TypeDomain, "customer.com")}},
-		{"block-email", []filter.Rule{r("B1", filter.KindBlock, filter.TypeEmail, "bot@example.com")}},
-		{"block-domain", []filter.Rule{r("B2", filter.KindBlock, filter.TypeDomain, "example.com")}},
-		{"block-domain-ru", []filter.Rule{r("B3", filter.KindBlock, filter.TypeDomain, "example.ru")}},
-		{"block-ip", []filter.Rule{r("B4", filter.KindBlock, filter.TypeIP, "203.0.113.5")}},
-		{"block-cidr", []filter.Rule{r("B5", filter.KindBlock, filter.TypeCIDR, "203.0.113.0/24")}},
-		{"block-keyword", []filter.Rule{r("B6", filter.KindBlock, filter.TypeKeyword, "widget")}},
-		{"allow-beats-block", []filter.Rule{
-			r("B7", filter.KindBlock, filter.TypeDomain, "customer.com"),
-			r("A4", filter.KindAllow, filter.TypeEmail, "vip@customer.com"),
+		{"allow-email", []screen.Rule{r("A1", screen.KindAllow, screen.TypeEmail, "vip@customer.com")}},
+		{"allow-email-mike", []screen.Rule{r("A2", screen.KindAllow, screen.TypeEmail, "mike@works.com")}},
+		{"allow-domain", []screen.Rule{r("A3", screen.KindAllow, screen.TypeDomain, "customer.com")}},
+		{"block-email", []screen.Rule{r("B1", screen.KindBlock, screen.TypeEmail, "bot@example.com")}},
+		{"block-domain", []screen.Rule{r("B2", screen.KindBlock, screen.TypeDomain, "example.com")}},
+		{"block-domain-ru", []screen.Rule{r("B3", screen.KindBlock, screen.TypeDomain, "example.ru")}},
+		{"block-ip", []screen.Rule{r("B4", screen.KindBlock, screen.TypeIP, "203.0.113.5")}},
+		{"block-cidr", []screen.Rule{r("B5", screen.KindBlock, screen.TypeCIDR, "203.0.113.0/24")}},
+		{"block-keyword", []screen.Rule{r("B6", screen.KindBlock, screen.TypeKeyword, "widget")}},
+		{"allow-beats-block", []screen.Rule{
+			r("B7", screen.KindBlock, screen.TypeDomain, "customer.com"),
+			r("A4", screen.KindAllow, screen.TypeEmail, "vip@customer.com"),
 		}},
 	}
 }

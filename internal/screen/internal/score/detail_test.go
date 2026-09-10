@@ -1,4 +1,4 @@
-package spam
+package score
 
 import (
 	"go/ast"
@@ -33,7 +33,7 @@ func TestDetailSignals(t *testing.T) {
 			data:      map[string]string{"message": "[url=http://x.com]click[/url]"},
 			wantScore: 6,
 			wantSignals: []Signal{
-				{Rule: "markup", Field: "message", Match: "[url=", Weight: 6},
+				{Check: "markup", Field: "message", Match: "[url=", Weight: 6},
 			},
 		},
 		{
@@ -41,7 +41,7 @@ func TestDetailSignals(t *testing.T) {
 			data:      map[string]string{"message": "<a href=1><a href=2>"},
 			wantScore: 12,
 			wantSignals: []Signal{
-				{Rule: "markup", Field: "message", Match: "<a href", Weight: 12},
+				{Check: "markup", Field: "message", Match: "<a href", Weight: 12},
 			},
 		},
 		{
@@ -49,8 +49,8 @@ func TestDetailSignals(t *testing.T) {
 			data:      map[string]string{"message": "admin' or 1=1 -- -"},
 			wantScore: 12,
 			wantSignals: []Signal{
-				{Rule: "sql", Field: "message", Match: "' or 1=1", Weight: 6},
-				{Rule: "sql", Field: "message", Match: "-- -", Weight: 6},
+				{Check: "sql", Field: "message", Match: "' or 1=1", Weight: 6},
+				{Check: "sql", Field: "message", Match: "-- -", Weight: 6},
 			},
 		},
 		{
@@ -58,7 +58,7 @@ func TestDetailSignals(t *testing.T) {
 			data:      map[string]string{"message": "buy backlinks now"},
 			wantScore: 5,
 			wantSignals: []Signal{
-				{Rule: "keyword", Field: "message", Match: "backlinks", Weight: 5},
+				{Check: "keyword", Field: "message", Match: "backlinks", Weight: 5},
 			},
 		},
 		{
@@ -66,7 +66,7 @@ func TestDetailSignals(t *testing.T) {
 			data:      map[string]string{"message": "Best CASINO in town"},
 			wantScore: 5,
 			wantSignals: []Signal{
-				{Rule: "keyword", Field: "message", Match: "casino", Weight: 5},
+				{Check: "keyword", Field: "message", Match: "casino", Weight: 5},
 			},
 		},
 		{
@@ -74,7 +74,7 @@ func TestDetailSignals(t *testing.T) {
 			data:      map[string]string{"name": "https://cheap-pills.example"},
 			wantScore: 4,
 			wantSignals: []Signal{
-				{Rule: "url_in_name", Field: "name", Match: "https://cheap-pills.example", Weight: 4},
+				{Check: "url_in_name", Field: "name", Match: "https://cheap-pills.example", Weight: 4},
 			},
 		},
 		{
@@ -82,7 +82,7 @@ func TestDetailSignals(t *testing.T) {
 			data:      map[string]string{"message": "https://a.com and https://b.com and https://c.com"},
 			wantScore: 4,
 			wantSignals: []Signal{
-				{Rule: "extra_links", Field: "", Match: "", Weight: 4},
+				{Check: "extra_links", Field: "", Match: "", Weight: 4},
 			},
 		},
 	}
@@ -114,8 +114,8 @@ func TestDetailGibberishCapturesOriginalCaseToken(t *testing.T) {
 	if len(signals) != 1 {
 		t.Fatalf("got %d signals, want 1: %+v", len(signals), signals)
 	}
-	if signals[0].Rule != RuleGibberish {
-		t.Errorf("Rule = %q, want %q", signals[0].Rule, RuleGibberish)
+	if signals[0].Check != CheckGibberish {
+		t.Errorf("Check = %q, want %q", signals[0].Check, CheckGibberish)
 	}
 	if signals[0].Match != "xKqZjWmB" {
 		t.Errorf("Match = %q, want the original-case token %q", signals[0].Match, "xKqZjWmB")
@@ -160,10 +160,10 @@ func TestDetailRuleOrderWithinField(t *testing.T) {
 		"name": "<a href=http://x.com>casino</a> union select xKqZjWmB",
 	})
 
-	want := []Rule{RuleMarkup, RuleSQL, RuleKeyword, RuleURLInName, RuleGibberish}
-	got := make([]Rule, 0, len(signals))
+	want := []Check{CheckMarkup, CheckSQL, CheckKeyword, CheckURLInName, CheckGibberish}
+	got := make([]Check, 0, len(signals))
 	for _, s := range signals {
-		got = append(got, s.Rule)
+		got = append(got, s.Check)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("rule order = %v, want %v", got, want)
@@ -182,8 +182,8 @@ func TestDetailExtraLinksSortsLast(t *testing.T) {
 		t.Fatal("want signals, got none")
 	}
 	last := signals[len(signals)-1]
-	if last.Rule != RuleExtraLinks {
-		t.Errorf("last signal = %q, want extra_links (got all: %+v)", last.Rule, signals)
+	if last.Check != CheckExtraLinks {
+		t.Errorf("last signal = %q, want extra_links (got all: %+v)", last.Check, signals)
 	}
 	if last.Field != "" {
 		t.Errorf("extra_links Field = %q, want \"\" (whole-submission rule)", last.Field)
@@ -225,7 +225,7 @@ func TestDetailTruncatesMatch(t *testing.T) {
 	}
 	for _, s := range signals {
 		if n := len([]rune(s.Match)); n > maxMatchRunes {
-			t.Errorf("%s Match is %d runes, want <= %d", s.Rule, n, maxMatchRunes)
+			t.Errorf("%s Match is %d runes, want <= %d", s.Check, n, maxMatchRunes)
 		}
 	}
 }
@@ -284,7 +284,7 @@ func TestDetailWithCustomKeywords(t *testing.T) {
 	if score != keywordWeight {
 		t.Errorf("score = %d, want %d", score, keywordWeight)
 	}
-	want := []Signal{{Rule: "keyword", Field: "message", Match: "telegram pump", Weight: keywordWeight}}
+	want := []Signal{{Check: "keyword", Field: "message", Match: "telegram pump", Weight: keywordWeight}}
 	if !reflect.DeepEqual(signals, want) {
 		t.Errorf("signals = %+v, want %+v", signals, want)
 	}
@@ -319,43 +319,43 @@ func TestDetailWithNilKeywordsMatchesDetail(t *testing.T) {
 	}
 }
 
-// TestAllRulesIsComplete keeps AllRules honest.
+// TestAllChecksIsComplete keeps AllChecks honest.
 //
-// AllRules exists so callers stop restating the rule set, but it is itself a
+// AllChecks exists so callers stop restating the rule set, but it is itself a
 // second copy of the const block — so a hand-written expected count here would
 // just move the staleness one line over. Go cannot enumerate a type's constants
 // at runtime, so this parses the package's own source and derives the list. A
-// new Rule constant that nobody adds to AllRules fails, with no number for
+// new Check constant that nobody adds to AllChecks fails, with no number for
 // anyone to forget to bump.
-func TestAllRulesIsComplete(t *testing.T) {
+func TestAllChecksIsComplete(t *testing.T) {
 	t.Parallel()
 
-	declared := ruleConstantsInSource(t)
+	declared := checkConstantsInSource(t)
 	if len(declared) == 0 {
-		t.Fatal("found no Rule constants in the source; this test is asserting nothing")
+		t.Fatal("found no Check constants in the source; this test is asserting nothing")
 	}
 
-	listed := map[Rule]bool{}
-	for _, r := range AllRules {
+	listed := map[Check]bool{}
+	for _, r := range AllChecks {
 		if listed[r] {
-			t.Errorf("AllRules lists %q twice", r)
+			t.Errorf("AllChecks lists %q twice", r)
 		}
 		listed[r] = true
 	}
 
 	for name, value := range declared {
 		if !listed[value] {
-			t.Errorf("constant %s (%q) is missing from AllRules", name, value)
+			t.Errorf("constant %s (%q) is missing from AllChecks", name, value)
 		}
 	}
-	if len(AllRules) != len(declared) {
-		t.Errorf("AllRules has %d entries, source declares %d constants", len(AllRules), len(declared))
+	if len(AllChecks) != len(declared) {
+		t.Errorf("AllChecks has %d entries, source declares %d constants", len(AllChecks), len(declared))
 	}
 }
 
-// ruleConstantsInSource returns every `X Rule = "y"` constant declared in this
+// checkConstantsInSource returns every `X Check = "y"` constant declared in this
 // package, by name and value.
-func ruleConstantsInSource(t *testing.T) map[string]Rule {
+func checkConstantsInSource(t *testing.T) map[string]Check {
 	t.Helper()
 
 	fset := token.NewFileSet()
@@ -364,7 +364,7 @@ func ruleConstantsInSource(t *testing.T) map[string]Rule {
 		t.Fatalf("parsing package source: %v", err)
 	}
 
-	out := map[string]Rule{}
+	out := map[string]Check{}
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Files {
 			for _, decl := range file.Decls {
@@ -383,7 +383,7 @@ func ruleConstantsInSource(t *testing.T) map[string]Rule {
 					if id, ok := vs.Type.(*ast.Ident); ok {
 						lastType = id.Name
 					}
-					if lastType != "Rule" {
+					if lastType != "Check" {
 						continue
 					}
 					for i, name := range vs.Names {
@@ -398,7 +398,7 @@ func ruleConstantsInSource(t *testing.T) map[string]Rule {
 						if err != nil {
 							t.Fatalf("unquoting %s: %v", name.Name, err)
 						}
-						out[name.Name] = Rule(value)
+						out[name.Name] = Check(value)
 					}
 				}
 			}
@@ -413,12 +413,12 @@ func ruleConstantsInSource(t *testing.T) map[string]Rule {
 func TestDetailEmitsOnlyDeclaredRules(t *testing.T) {
 	t.Parallel()
 
-	listed := map[Rule]bool{}
-	for _, r := range AllRules {
+	listed := map[Check]bool{}
+	for _, r := range AllChecks {
 		listed[r] = true
 	}
 
-	emitted := map[Rule]bool{}
+	emitted := map[Check]bool{}
 	for _, data := range []map[string]string{
 		{"message": "<a href=x>casino</a> http://a.example http://b.example"},
 		{"message": "union select 1"},
@@ -427,7 +427,7 @@ func TestDetailEmitsOnlyDeclaredRules(t *testing.T) {
 	} {
 		_, signals := Detail(data)
 		for _, sig := range signals {
-			emitted[sig.Rule] = true
+			emitted[sig.Check] = true
 		}
 	}
 	if len(emitted) == 0 {
@@ -435,7 +435,7 @@ func TestDetailEmitsOnlyDeclaredRules(t *testing.T) {
 	}
 	for rule := range emitted {
 		if !listed[rule] {
-			t.Errorf("Detail emits %q but AllRules does not list it", rule)
+			t.Errorf("Detail emits %q but AllChecks does not list it", rule)
 		}
 	}
 }

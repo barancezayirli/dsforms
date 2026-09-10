@@ -42,8 +42,8 @@
     {{range .Signals}}
     <div class="rule-box">
       <div class="rule-head">
-        <svg class="i"><use href="#ph-{{ruleIcon .Rule}}"/></svg>
-        <span class="rule-name">{{ruleLabel .Rule}}</span>
+        <svg class="i"><use href="#ph-{{ruleIcon .Check}}"/></svg>
+        <span class="rule-name">{{ruleLabel .Check}}</span>
         <span class="tag tag-outline tag-sm">+{{.Weight}}</span>
       </div>
       {{if .Match}}

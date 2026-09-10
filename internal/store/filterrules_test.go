@@ -4,17 +4,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barancezayirli/dsforms/internal/filter"
+	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
 func TestAddAndListFilterRules(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "Example.RU", "seen in logs"); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "Example.RU", "seen in logs"); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
-	if _, err := s.AddFilterRule(filter.KindAllow, filter.TypeEmail, "Real@Example.RU", "restored"); err != nil {
+	if _, err := s.AddFilterRule(screen.KindAllow, screen.TypeEmail, "Real@Example.RU", "restored"); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 
@@ -26,7 +26,7 @@ func TestAddAndListFilterRules(t *testing.T) {
 		t.Fatalf("got %d rules, want 2", len(rules))
 	}
 
-	byValue := map[string]filter.Rule{}
+	byValue := map[string]screen.Rule{}
 	for _, r := range rules {
 		byValue[r.Value] = r
 	}
@@ -47,10 +47,10 @@ func TestAddFilterRuleRejectsDuplicates(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "example.ru", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "example.ru", ""); err != nil {
 		t.Fatalf("first add: %v", err)
 	}
-	_, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "EXAMPLE.RU", "")
+	_, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "EXAMPLE.RU", "")
 	if err == nil {
 		t.Fatal("adding the same rule in different case should fail, got nil")
 	}
@@ -70,10 +70,10 @@ func TestAddFilterRuleAllowsSameValueDifferentKind(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeIP, "45.155.204.7", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeIP, "45.155.204.7", ""); err != nil {
 		t.Fatalf("block add: %v", err)
 	}
-	if _, err := s.AddFilterRule(filter.KindAllow, filter.TypeIP, "45.155.204.7", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindAllow, screen.TypeIP, "45.155.204.7", ""); err != nil {
 		t.Errorf("allow add with the same value should be permitted: %v", err)
 	}
 }
@@ -82,10 +82,10 @@ func TestAddFilterRuleValidates(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeIP, "not-an-ip", ""); err == nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeIP, "not-an-ip", ""); err == nil {
 		t.Error("an invalid IP should be rejected before it reaches the database")
 	}
-	if _, err := s.AddFilterRule("sideways", filter.TypeIP, "1.2.3.4", ""); err == nil {
+	if _, err := s.AddFilterRule("sideways", screen.TypeIP, "1.2.3.4", ""); err == nil {
 		t.Error("an unknown kind should be rejected")
 	}
 	rules, err := s.ListFilterRules()
@@ -101,7 +101,7 @@ func TestDeleteFilterRule(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 
-	r, err := s.AddFilterRule(filter.KindBlock, filter.TypeKeyword, "crypto pump", "")
+	r, err := s.AddFilterRule(screen.KindBlock, screen.TypeKeyword, "crypto pump", "")
 	if err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestIncrementRuleHits(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 
-	r, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "example.ru", "")
+	r, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "example.ru", "")
 	if err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestAddFilterRuleStoresQueryableTimestamps(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "spam.example", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 

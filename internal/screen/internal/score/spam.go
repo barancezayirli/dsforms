@@ -6,7 +6,7 @@
 // weight must not retroactively rewrite that history. The *threshold* they are
 // compared against is not fixed — an operator sets it per instance
 // (SPAM_THRESHOLD) and per form, with DefaultThreshold as the fallback.
-package spam
+package score
 
 import "strings"
 

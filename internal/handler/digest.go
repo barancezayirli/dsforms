@@ -64,7 +64,7 @@ func (d *Digest) Run() (bool, error) {
 		}
 		rules := make([]string, 0, len(signals))
 		for _, sig := range signals {
-			rules = append(rules, RuleLabel(sig.Rule))
+			rules = append(rules, RuleLabel(sig.Check))
 		}
 		// The sender and the reasons, never the submission body: this email
 		// leaves the server, and forwarding spam payloads by mail is how a
