@@ -61,13 +61,18 @@ func (h *WaitlistSubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	wantsJSON := strings.Contains(r.Header.Get("Accept"), "application/json")
 
+	// Resolved once, above the honeypot branch, for the same reason as in
+	// submit.go: both ways out of this handler send the browser somewhere, and
+	// the honeypot one is the branch a per-call-site fix forgets.
+	redirectURL := redirectTarget(r, "waitlist submit: "+waitlistID, wl.Redirect, h.BaseURL, ExtractIP(r))
+
 	// Honeypot — silently succeed without storing.
 	if r.FormValue("_honeypot") != "" {
 		if wantsJSON {
 			writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 			return
 		}
-		http.Redirect(w, r, determineRedirect(r.FormValue("_redirect"), wl.Redirect), http.StatusFound)
+		http.Redirect(w, r, redirectURL, http.StatusFound)
 		return
 	}
 
@@ -124,7 +129,8 @@ func (h *WaitlistSubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	redirectURL := determineRedirect(r.FormValue("_redirect"), wl.Redirect)
+	// appendPosition decorates a destination that has already been vetted —
+	// order matters, and this is the order that keeps it safe.
 	http.Redirect(w, r, appendPosition(redirectURL, position), http.StatusFound)
 }
 

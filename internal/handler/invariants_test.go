@@ -4,7 +4,9 @@ import (
 	"go/ast"
 	"go/token"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/barancezayirli/dsforms/internal/astcheck"
@@ -484,4 +486,113 @@ func TestHandlersDoNotDependOnDatabaseSQL(t *testing.T) {
 		t.Fatalf("only %d files scanned; the scan is not reading the package", checked)
 	}
 	t.Logf("scanned %d files", checked)
+}
+
+// rawRedirectDetector reports whether a file reads the _redirect form field
+// anywhere outside redirectTarget.
+//
+// The open redirect was not one bug in one place. determineRedirect returned the
+// submitted value verbatim and was called from four sites — two in submit.go,
+// two in waitlist_submit.go — one of which was the honeypot branch, which is
+// exactly the one a careful four-site patch overlooks. The fix collapsed them to
+// a single resolver, and this is what stops the fifth endpoint from arriving
+// with its own copy: the next form-like handler will be written by pasting an
+// existing one.
+//
+// The package-level internalFields map must keep naming the field — it is what
+// strips _redirect out of stored submission data — so the detector looks inside
+// function bodies only, and that exemption is a fixture rather than an accident.
+func rawRedirectDetector() astcheck.Detector {
+	reads := func(f *ast.File) bool {
+		found := false
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Name.Name == "redirectTarget" || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				lit, ok := n.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				if v, err := strconv.Unquote(lit.Value); err == nil && v == "_redirect" {
+					found = true
+				}
+				return true
+			})
+		}
+		return found
+	}
+
+	return astcheck.Detector{
+		Name:  "_redirect read outside redirectTarget",
+		Match: reads,
+		Positive: map[string]string{
+			"FormValue in a handler": `package p
+import "net/http"
+func Handle(w http.ResponseWriter, r *http.Request) { _ = r.FormValue("_redirect") }`,
+
+			"read through a local variable": `package p
+import "net/http"
+func Handle(w http.ResponseWriter, r *http.Request) {
+	req := r
+	_ = req.FormValue("_redirect")
+}`,
+
+			"map index rather than a method call": `package p
+import "net/http"
+func Handle(w http.ResponseWriter, r *http.Request) { _ = r.PostForm["_redirect"] }`,
+
+			"a second helper that resolves it itself": `package p
+import "net/http"
+func redirectTarget(r *http.Request) string { return r.FormValue("_redirect") }
+func otherTarget(r *http.Request) string { return r.FormValue("_redirect") }`,
+		},
+		Negative: map[string]string{
+			// The real exemption: the field-stripping table, at package level.
+			"package-level internalFields table": `package p
+var internalFields = map[string]bool{"_redirect": true, "_honeypot": true}`,
+
+			"the one resolver allowed to read it": `package p
+import "net/http"
+func redirectTarget(r *http.Request) string { return r.FormValue("_redirect") }`,
+
+			"an unrelated field": `package p
+import "net/http"
+func Handle(r *http.Request) { _ = r.FormValue("_honeypot") }`,
+		},
+	}
+}
+
+// TestRawRedirectDetectorFires is the positive control. Without it, the guard
+// below passes both when the property holds and when the matcher has died.
+func TestRawRedirectDetectorFires(t *testing.T) {
+	t.Parallel()
+	rawRedirectDetector().Verify(t)
+}
+
+// TestNoRawRedirectFieldRead is the guard itself.
+func TestNoRawRedirectFieldRead(t *testing.T) {
+	t.Parallel()
+
+	_, files := parseHandlerPackage(t)
+	detector := rawRedirectDetector()
+
+	var offenders []string
+	for path, f := range files {
+		if detector.Match(f) {
+			offenders = append(offenders, path)
+		}
+	}
+	if len(files) < 10 {
+		t.Fatalf("parsed only %d files; the package scan has stopped finding them", len(files))
+	}
+	sort.Strings(offenders)
+	if len(offenders) > 0 {
+		t.Errorf("_redirect is read outside redirectTarget in:\n  %s\n\n"+
+			"Route it through redirectTarget instead. A destination taken straight "+
+			"from the request is the open redirect this closed — and the branch that "+
+			"gets missed is always the honeypot one, because it looks like a drop "+
+			"rather than a redirect.", strings.Join(offenders, "\n  "))
+	}
 }

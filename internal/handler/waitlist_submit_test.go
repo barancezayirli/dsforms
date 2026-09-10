@@ -190,3 +190,53 @@ func TestSubstituteVarsNoTemplateInjection(t *testing.T) {
 		t.Errorf("substituteVars should not recursively expand injected tokens; got %q", got)
 	}
 }
+
+// The waitlist honours _redirect and had no test for it at all, in either
+// branch. Both exits are covered here because both call http.Redirect directly
+// rather than going through submit.go's respondSuccess.
+
+func TestWaitlistSubmitRedirectOffOriginRefused(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupWaitlistSubmit(t)
+	form := url.Values{"email": {"a@example.org"}, "_redirect": {"https://evil.example.net/phish"}}
+	w := postWaitlist(r, "wl", form, "")
+	loc := w.Header().Get("Location")
+	if strings.Contains(loc, "evil.example.net") {
+		t.Fatalf("Location = %q — an off-origin _redirect reached the Location header", loc)
+	}
+	if !strings.HasPrefix(loc, "https://example.com/joined") {
+		t.Errorf("Location = %q, want the waitlist's configured redirect", loc)
+	}
+}
+
+func TestWaitlistSubmitHoneypotRedirectOffOriginRefused(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupWaitlistSubmit(t)
+	form := url.Values{
+		"email":     {"bot@example.org"},
+		"_honeypot": {"filled"},
+		"_redirect": {"https://evil.example.net/phish"},
+	}
+	w := postWaitlist(r, "wl", form, "")
+	if loc := w.Header().Get("Location"); loc != "https://example.com/joined" {
+		t.Errorf("Location = %q, want the configured redirect — the honeypot branch "+
+			"calls http.Redirect on its own and needs the same rule", loc)
+	}
+}
+
+// TestWaitlistSubmitRedirectSameOriginKeepsPosition pins the ordering: the trust
+// check runs first and appendPosition decorates a destination already vetted.
+// Reversed, appendPosition would be parsing an attacker-supplied URL.
+func TestWaitlistSubmitRedirectSameOriginKeepsPosition(t *testing.T) {
+	t.Parallel()
+	_, _, r := setupWaitlistSubmit(t)
+	form := url.Values{"email": {"a@example.org"}, "_redirect": {"https://example.com/welcome"}}
+	w := postWaitlist(r, "wl", form, "")
+	loc := w.Header().Get("Location")
+	if !strings.HasPrefix(loc, "https://example.com/welcome") {
+		t.Errorf("Location = %q, want the requested page on the configured origin", loc)
+	}
+	if !strings.Contains(loc, "position=1") {
+		t.Errorf("Location = %q, want the position appended to an allowed redirect", loc)
+	}
+}
