@@ -631,10 +631,6 @@ func main() {
 		log.Println("broadcast worker started without SMTP — broadcasts will be marked failed until SMTP_HOST/SMTP_FROM are configured")
 	}
 
-	// One screener for the process: it carries the repeat-IP tally, which is the
-	// only state the hold/accept decision keeps.
-	screener := screen.New(10000)
-
 	// A rule stored under an older normalisation can be permanently unmatchable,
 	// and a block rule in that state fails open while still appearing on the
 	// rules screen. Said once at boot so it is visible without anyone visiting
@@ -648,16 +644,60 @@ func main() {
 		}
 	}
 
+	r := routes(serverDeps{
+		store:      s,
+		cfg:        cfg,
+		templates:  templates,
+		mailer:     mailer,
+		sendMailer: sendMailer,
+		webhook:    webhookSender,
+		worker:     worker,
+	})
+
+	log.Printf("starting server on %s", cfg.ListenAddr)
+	if err := http.ListenAndServe(cfg.ListenAddr, r); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("server error: %v", err)
+	}
+}
+
+// serverDeps is everything the route table needs, so that assembling it is a
+// function a test can call.
+//
+// main() used to build the handlers and register all fifty-odd routes inline,
+// which meant nothing could execute the real table: no test could catch a
+// handler bound to the wrong path, or — the one that matters — a route
+// registered outside the RequireAuth group, which is an authentication bypass
+// that no existing check would notice.
+type serverDeps struct {
+	store      *store.Store
+	cfg        config.Config
+	templates  map[string]*template.Template
+	mailer     handler.Notifier // nil when SMTP is unconfigured
+	sendMailer *mail.Mailer     // nil when SMTP is unconfigured
+	webhook    handler.WebhookSender
+	worker     handler.BroadcastNotifier
+}
+
+// routes builds the handlers and the full route table.
+//
+// It starts the rate-limiter cleanup goroutines and the digest timer, which are
+// part of what a running server is; it does not listen. Everything before this
+// — migrations, the CLI, the background purges — stays in main().
+func routes(d serverDeps) *chi.Mux {
+	// One screener for the process: it carries the repeat-IP tally, which is the
+	// only state the hold/accept decision keeps.
+	screener := screen.New(10000)
+
 	submitHandler := &handler.SubmitHandler{
-		Store:            s,
-		Notifier:         mailer,
-		Webhook:          webhookSender,
-		BaseURL:          cfg.BaseURL,
+		Store:            d.store,
+		Notifier:         d.mailer,
+		Webhook:          d.webhook,
+		BaseURL:          d.cfg.BaseURL,
 		Screener:         screener,
-		DefaultThreshold: cfg.SpamThreshold,
+		DefaultThreshold: d.cfg.SpamThreshold,
 	}
 
-	limiter := ratelimit.NewLimiter(cfg.RateBurst, cfg.RatePerMinute, time.Now)
+	limiter := ratelimit.NewLimiter(d.cfg.RateBurst, d.cfg.RatePerMinute, time.Now)
 	limiter.StartCleanup(10*time.Minute, 30*time.Minute)
 
 	loginGuard := ratelimit.NewLoginGuard(5, 15*time.Minute, time.Now)
@@ -672,61 +712,61 @@ func main() {
 	// handler a second, unrestricted route to the database beside the narrow one
 	// it declares.
 	base := handler.Base{
-		Nav:       s,
-		SecretKey: cfg.SecretKey,
-		BaseURL:   cfg.BaseURL,
-		DBPath:    cfg.DBPath,
-		Journal:   journalMode(s.DB()),
+		Nav:       d.store,
+		SecretKey: d.cfg.SecretKey,
+		BaseURL:   d.cfg.BaseURL,
+		DBPath:    d.cfg.DBPath,
+		Journal:   journalMode(d.store.DB()),
 		Version:   version,
 		AssetVer:  assetVersion(),
-		Templates: templates,
+		Templates: d.templates,
 	}
 
-	authHandler := &handler.AuthHandler{Base: base, Store: s, LoginGuard: loginGuard}
+	authHandler := &handler.AuthHandler{Base: base, Store: d.store, LoginGuard: loginGuard}
 	overviewHandler := &handler.OverviewHandler{
 		Base:          base,
-		Store:         s,
+		Store:         d.store,
 		Limiter:       limiter,
-		RateBurst:     cfg.RateBurst,
-		RatePerMinute: cfg.RatePerMinute,
+		RateBurst:     d.cfg.RateBurst,
+		RatePerMinute: d.cfg.RatePerMinute,
 		RetentionDays: int(quarantineRetention / (24 * time.Hour)),
 	}
-	searchHandler := &handler.SearchHandler{Base: base, Store: s}
+	searchHandler := &handler.SearchHandler{Base: base, Store: d.store}
 	quarantineHandler := &handler.QuarantineHandler{
 		Base:             base,
-		Store:            s,
-		Notifier:         mailer,
-		Webhook:          webhookSender,
+		Store:            d.store,
+		Notifier:         d.mailer,
+		Webhook:          d.webhook,
 		RetentionDays:    int(quarantineRetention / (24 * time.Hour)),
-		DefaultThreshold: cfg.SpamThreshold,
+		DefaultThreshold: d.cfg.SpamThreshold,
 	}
-	adminHandler := &handler.AdminHandler{Base: base, Store: s, Webhook: webhookSender}
-	usersHandler := &handler.UsersHandler{Base: base, Store: s}
-	backupHandler := &handler.BackupHandler{Base: base, Store: s}
+	adminHandler := &handler.AdminHandler{Base: base, Store: d.store, Webhook: d.webhook}
+	usersHandler := &handler.UsersHandler{Base: base, Store: d.store}
+	backupHandler := &handler.BackupHandler{Base: base, Store: d.store}
 
 	waitlistSubmitHandler := &handler.WaitlistSubmitHandler{
-		Store:   s,
-		BaseURL: cfg.BaseURL,
+		Store:   d.store,
+		BaseURL: d.cfg.BaseURL,
 	}
-	if sendMailer != nil {
-		waitlistSubmitHandler.Mailer = sendMailer
+	if d.sendMailer != nil {
+		waitlistSubmitHandler.Mailer = d.sendMailer
 	}
 
-	waitlistHandler := &handler.WaitlistHandler{Base: base, Store: s, Broadcaster: worker}
+	waitlistHandler := &handler.WaitlistHandler{Base: base, Store: d.store, Broadcaster: d.worker}
 
 	// Daily quarantine digest. Opt-in via DIGEST_TO, and silently inert without
 	// SMTP — the only background timer this redesign adds.
-	if sendMailer != nil && cfg.DigestTo != "" {
+	if d.sendMailer != nil && d.cfg.DigestTo != "" {
 		digest := &handler.Digest{
-			Store:     s,
-			Mailer:    sendMailer,
-			To:        cfg.DigestTo,
-			BaseURL:   cfg.BaseURL,
+			Store:     d.store,
+			Mailer:    d.sendMailer,
+			To:        d.cfg.DigestTo,
+			BaseURL:   d.cfg.BaseURL,
 			Retention: int(quarantineRetention / (24 * time.Hour)),
 		}
 		digest.Start(24 * time.Hour)
-		log.Printf("quarantine digest enabled (daily to %s)", cfg.DigestTo)
-	} else if cfg.DigestTo != "" {
+		log.Printf("quarantine digest enabled (daily to %s)", d.cfg.DigestTo)
+	} else if d.cfg.DigestTo != "" {
 		// Otherwise an operator who sets DIGEST_TO waits days for a mail that
 		// was never going to arrive, with nothing in the log to explain it.
 		log.Printf("quarantine digest disabled: DIGEST_TO is set but SMTP is not configured")
@@ -746,9 +786,9 @@ func main() {
 		// exists for the state a restart DOES fix: a database handle closed by a
 		// failed restore.
 		var ok int
-		return s.DB().QueryRowContext(ctx, "SELECT 1").Scan(&ok)
+		return d.store.DB().QueryRowContext(ctx, "SELECT 1").Scan(&ok)
 	})
-	errorPages(r, templates)
+	errorPages(r, d.templates)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
 
@@ -764,7 +804,7 @@ func main() {
 	r.Get("/success", adminHandler.Success)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireAuth(s))
+		r.Use(auth.RequireAuth(d.store))
 		r.Post("/admin/logout", authHandler.Logout)
 		r.Get("/admin", overviewHandler.Page)
 		r.Get("/admin/forms", adminHandler.Dashboard)
@@ -812,9 +852,5 @@ func main() {
 		r.Get("/admin/backups/export", backupHandler.Export)
 		r.Post("/admin/backups/import", backupHandler.Import)
 	})
-
-	log.Printf("starting server on %s", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, r); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server error: %v", err)
-	}
+	return r
 }
