@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"html/template"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -378,4 +379,75 @@ func TestEmbedSnippetsCarryTheHoneypot(t *testing.T) {
 			"so the scan is no longer matching them", checked)
 	}
 	t.Logf("checked %d embeddable snippet(s)", checked)
+}
+
+// TestSidebarDoesNotInventAJournalMode guards a claim the page used to make up.
+//
+// dbStatus returned the string literal "WAL", rendered on every admin page as
+// fact, without ever asking the database. SQLite silently falls back to `delete`
+// journaling on filesystems without shared-memory support — a network mount,
+// some container volumes — and the sidebar went on saying WAL. Same defect as
+// the hardcoded "ok" that /healthz used to return, and on the page an operator
+// reads while deciding whether a restore is safe.
+//
+// An unknown mode must render as nothing, not as a guess.
+func TestSidebarDoesNotInventAJournalMode(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile(filepath.Join("page.go"))
+	if err != nil {
+		t.Fatalf("read page.go: %v", err)
+	}
+	if regexp.MustCompile(`Journal:\s*"`).Match(src) {
+		t.Error("page.go assigns a literal journal mode. It must come from the " +
+			"database, or the sidebar states something nobody checked.")
+	}
+
+	// And the value must actually reach the card from Base.
+	b := &Base{DBPath: ""}
+	if got := b.dbStatus().Journal; got != "" {
+		t.Errorf("dbStatus invented %q for a Base with no journal mode set", got)
+	}
+	b.Journal = "WAL"
+	if got := b.dbStatus().Journal; got != "WAL" {
+		t.Errorf("dbStatus returned %q, want the mode Base was given", got)
+	}
+}
+
+// TestShellDegradesOnATypedNilNavCounter covers the Go trap, not just the case
+// anyone thinks to write.
+//
+// Base.Nav is an interface. `b.Nav == nil` is false when it holds a nil pointer,
+// so a Base wired with a typed nil walked past the guard and panicked inside
+// NavCounts on the first request — a 500 with no hint of misconfiguration, where
+// the whole point of the guard is to degrade visibly instead.
+func TestShellDegradesOnATypedNilNavCounter(t *testing.T) {
+	t.Parallel()
+
+	var typedNil *nilNavCounter
+	b := &Base{Nav: typedNil, SecretKey: testSecretKey}
+
+	req := httptest.NewRequest("GET", "/admin", nil)
+	w := httptest.NewRecorder()
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			t.Fatalf("Shell panicked on a typed-nil Nav: %v\n"+
+				"An interface holding a nil pointer is not == nil, so the guard has "+
+				"to look through it or it protects only the case nobody hits.", rec)
+		}
+	}()
+
+	data := b.Shell(w, req, "Home", "home")
+	if !data.Degraded {
+		t.Error("Shell returned a clean page for a Base with no usable nav counter; " +
+			"the sidebar reads zero everywhere while claiming to be accurate")
+	}
+}
+
+// nilNavCounter exists only to be a typed nil.
+type nilNavCounter struct{}
+
+func (n *nilNavCounter) NavCounts() (store.NavCounts, error) {
+	return store.NavCounts{}, nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -79,6 +80,25 @@ var (
 	// watching the test pass.
 	_ backup.Store = (*store.Store)(nil)
 )
+
+// journalMode reports the database's actual journal mode for the sidebar card.
+//
+// The card used to render the literal "WAL". SQLite silently falls back to
+// `delete` journaling on filesystems without shared-memory support, so the claim
+// could be false on exactly the deployments where it matters — and it is shown
+// on the page an operator reads while deciding whether a restore is safe.
+//
+// Read once: it is a property of the file, and the sidebar renders on every
+// page. An unreadable answer returns empty, which renders as nothing rather than
+// as a guess.
+func journalMode(db *sql.DB) string {
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		log.Printf("journal mode: %v", err)
+		return ""
+	}
+	return strings.ToUpper(mode)
+}
 
 //go:embed templates/*
 var templateFS embed.FS
@@ -647,6 +667,7 @@ func main() {
 		SecretKey: cfg.SecretKey,
 		BaseURL:   cfg.BaseURL,
 		DBPath:    cfg.DBPath,
+		Journal:   journalMode(s.DB()),
 		Version:   version,
 		AssetVer:  assetVersion(),
 		Templates: templates,

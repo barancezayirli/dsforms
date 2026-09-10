@@ -82,7 +82,7 @@
           <div class="db-card-row">
             <svg class="i"><use href="#ph-hard-drives"/></svg><span>{{.DB.Name}}</span>
           </div>
-          <div class="db-card-sub">{{.DB.Size}} · {{.DB.Journal}}</div>
+          <div class="db-card-sub">{{.DB.Size}}{{if and .DB.Size .DB.Journal}} · {{end}}{{.DB.Journal}}</div>
         </div>
         <div class="user-row">
           <span class="avatar" aria-hidden="true">{{.CurrentUser.Initials}}</span>
