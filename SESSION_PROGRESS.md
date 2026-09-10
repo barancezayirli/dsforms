@@ -215,8 +215,6 @@ Nothing below is caused by the refactor; the narrowing surfaced them.
 
 | Item | Why deferred | Target |
 |---|---|---|
-| **`backup.Import` leaves the process holding a closed database** | Three exit paths after the live handle is closed return without reopening — stale-WAL removal, `os.Rename` (the realistic one: `os.CreateTemp("")` puts the upload on `/tmp` while the DB is on a volume, so Docker gets `EXDEV`), and `Reopen` itself. `store.Reopen` only assigns on success, so every route 500s until a restart, `/healthz` still says `ok`, and the flash blames the uploaded file — which passed validation. A rollback to the original path recovers cleanly when tried. This is the most destructive operation in the product and deserves its own branch and its own tests, not a rider on a refactor. | **Next session — highest priority** |
-| `/healthz` never touches the database | It is the failure detector for the row above and reports healthy while every real request fails. A `SELECT 1` fixes it. Pairs naturally with that work. | Next session |
 | `_subject` is documented and read by nobody | `README.md` offers it as the notification subject; `internalFields` strips it before storage and the subject is hardcoded in `mail`. A user following the README loses the value twice, silently — worse than the backup bug, which at least printed something. `submit_test.go` asserts the discard, locking it in. Either implement or delete the row. | A follow-up PR |
 | The waitlist snippet omits `_honeypot` | `waitlist_submit.go` reads it and `form_edit.html` emits it for `/f/`, but `waitlist_edit.html` does not. The waitlist route runs no screener, so the honeypot is its only filter — every operator who copies the offered snippet ships a signup form with none. | A follow-up PR |
 | `rules.html` posts no `note` | The handler reads one and the template renders it, so rules added from the quarantine screen carry provenance and identical rules added from the Rules page render bare. | A follow-up PR |
@@ -225,8 +223,102 @@ Nothing below is caused by the refactor; the narrowing surfaced them.
 | `AdminStore` (20) and `QuarantineStore` (14) want splitting | `AdminHandler` is two handlers: the forms half and the submissions half share only `GetForm`, and the routes already draw the line. `QuarantineStore` splits into a read-mostly review queue and a three-method rule-mutation surface with zero overlap — worth separating, since a rule write is what can open a fail-open block rule. | A follow-up PR |
 | `screen.Rule`'s invariant has no owner | `Rule.Value` is documented as normalised by `Validate` before storage, and `Decide` passes rules straight to `Match`. The only producer used to be the store, which validates every write; the interfaces make that producer pluggable, so the type now permits an unvalidated block rule — which fails open. Not reachable in production. Cheapest close, consistent with the seal doctrine: have `Decide` re-validate inbound rule values. | A follow-up PR |
 | `main()`'s wiring and all routes have no executable coverage | `newRouter()` stops after middleware and `/healthz`; every handler construction and route registration lives inline in `main()`, which no test can call. So the AST scan is not the primary check on the wiring, it is the only one. Extracting `func routes(...) *chi.Mux` would let one test drive the real table — and would catch a handler bound to the wrong route, or a route registered outside the auth group, neither of which anything notices today. | A follow-up PR |
-| `store.Reopen` mutates `s.db` under a live server | No synchronisation, while every other method reads that field. Pre-existing; surfaced by reading `backup.Import` closely. Belongs with the restore work above. | With the restore fix |
 | `Base.Shell`'s nil check misses a typed nil | `b.Nav == nil` is false for a non-nil interface holding a nil pointer, so that case panics rather than degrading. Latent: `main` exits fatally if the store cannot open, so `s` is never nil. | A follow-up PR |
+
+## Sixth pass — a failed restore must leave a working database
+
+Branch `fix/restore-leaves-closed-database`.
+
+`backup.Import` closed the live handle and then had three returns before it
+reopened anything, and `store.Reopen` only assigns on success — so any of them
+left the process holding a closed handle. Reproduced directly:
+
+```
+Import returned:                import: reopen: simulated reopen failure
+ListForms after failed Import:  list forms: sql: database is closed
+ListForms, second attempt:      list forms: sql: database is closed
+```
+
+Two things were worse than the review reported. The `Reopen` path was **data
+loss, not downtime** — `os.Rename` had already overwritten the live database, so
+there was no original to go back to. And the cross-device case was **the default
+deployment**: the handler staged uploads in `/tmp` via `os.CreateTemp("", …)`
+while `DB_PATH` defaults to `/data/dsforms.db`, so the rename failed with `EXDEV`
+in any container. It went unnoticed only because the field-name bug meant this
+code never ran.
+
+The previous database is now parked under `.rollback` and deleted only once the
+replacement has actually opened; every failure after the close funnels through
+one `rollBack` helper, and `Import` cannot return without either a working
+database or `ErrUnavailable`. Uploads are staged beside the database, so the
+swap is a same-filesystem rename by construction.
+
+Three sentinels replace one error value, because the three outcomes need
+opposite operator responses — the old single message told an operator whose
+service was down that their file was probably corrupt, sending them to re-export
+against a process that could not answer.
+
+A failed checkpoint is now fatal rather than logged. It used to warn that
+unflushed data may be lost and then delete the WAL, which is what lost it; with
+a rollback in play it would have restored a database stripped of its own
+unflushed frames — a quiet data loss dressed as a recovery.
+
+`/healthz` asks the database instead of reporting that the HTTP server is
+listening. That is the detector this whole class of failure never had.
+
+## Sixth pass, review round
+
+Three agents reviewed the restore fix and found real defects in it, two of them
+data loss introduced by the fix itself. Recorded because the pattern repeats:
+
+- **A leftover `.rollback` was silently destroyed.** The park is a rename, and
+  rename overwrites. A process killed between the park and the swap leaves the
+  real database at `.rollback` and nothing at `dbPath`; the container restarts,
+  `store.New` creates an empty database and re-seeds the default admin, and the
+  operator's natural next move — restore a backup — renames that empty database
+  over the last copy of their data. `Import` now refuses to start when a parked
+  file exists. My own test had used a *directory* at that path, which fails the
+  rename for unrelated reasons and so hid that a *file* succeeds.
+- **`rollBack` removed the live database before renaming the original back.** The
+  comment said the rename had "nowhere to land", which is false — rename replaces
+  its destination, as the park twenty lines above relies on. The removal opened a
+  window with no database at `dbPath` at all. Now one atomic rename.
+- **`Reopen` is not evidence of a rollback.** SQLite creates the file if missing,
+  so reopening an absent `dbPath` manufactures an empty database and returns nil.
+  `Import` reported `ErrRolledBack` — "your existing database is unchanged and
+  still in use" — while serving zero forms and zero users, so nobody could log in
+  to notice. Now stat-checked, and the `ErrUnavailable` message names the parked
+  file and warns that restarting re-enables the default admin login.
+- **The handler's reassuring message was the `default` branch**, against AGENT.md
+  §4. `ErrRejected` is named; `default` now claims nothing.
+- **Test defects.** `TestImportRollsBackWhenTheSwapFails` did not test the swap —
+  it blocked the park path, so the branch that actually puts the database back
+  had no coverage, and reverting the swap fix verbatim passed the suite. The
+  operator-message test asserted `Contains(msg, "unchanged")`, which two of the
+  three messages satisfy. The EXDEV fix had no test at all, and could be reverted
+  green. All closed, each verified by applying the regression.
+
+The data race in `Reopen` was fixed rather than deferred, because the `/healthz`
+probe turned it from a coincidence into a read every few seconds. All store
+access now goes through a locked `conn()`.
+
+`/healthz` is wired into the Dockerfile as a `HEALTHCHECK`. Without it the
+endpoint was a route nobody called — `restart: unless-stopped` does not restart a
+container whose process is alive and failing every request.
+
+## Deferred from the sixth-pass review
+
+Found by the review sweep, none caused by this branch, none acted on here.
+
+| Item | Why deferred | Target |
+|---|---|---|
+| **Logout does not check that the session was deleted** | `internal/handler/auth.go` calls `h.Store.DeleteSession(token)` bare — error neither captured nor logged. The cookie is cleared, so the operator sees a successful logout, while the row survives and `RequireAuth` keeps accepting that token for up to 30 days. The false statement is a security guarantee and the failure is invisible everywhere. Small fix, but it is a security change and deserves its own branch and its own test. | **Next session — highest priority** |
+| **A failed `MarkDeliverySent` resends a broadcast forever** | `internal/broadcaster/broadcaster.go:118` logs and continues. The email has already gone out; the row stays `pending`, and `MarkDeliverySent` does not increment `attempts`, so `MaxAttempts` never caps it. The subscriber receives the same broadcast every few seconds indefinitely, the progress page permanently understates the count, and `finalize()` never completes. The comment a few lines above reasons about exactly this poisoned-row shape and stops one branch short. | Next session |
+| `/healthz` pings, which proves less than it looks like | `PingContext` only proves a connection object exists. Measured against a corrupted database it returns nil while `PRAGMA quick_check(1)` reports the damage — and `quick_check` reports it as a *row value* with a nil error, so checking only `err` would repeat the checkpoint mistake in a second place. The endpoint does correctly catch the closed-handle state it was added for, so this is a strengthening, not a hole. | A follow-up PR |
+| Crash between staging and swap litters the data volume | The upload is now staged beside the database, so an interrupted restore leaves `dsforms-import-*.db` (up to 100 MB) on the data volume with nothing to sweep it. A startup cleanup of that glob is the fix. | A follow-up PR |
+| Concurrent restores are not serialized | Two overlapping `Import` calls both close the handle and contend for one fixed park path. Admin-only, so low reach, but there is no mutex and no test. | A follow-up PR |
+| `_subject`, the waitlist honeypot, `note`, and the CSV flush | Carried over from the fifth-pass table above; unchanged by this branch. | A follow-up PR |
+| `DBStatus` hardcodes `Journal: "WAL"` | `internal/handler/page.go` renders the journal mode as a literal on every admin page without ever querying `PRAGMA journal_mode`, and SQLite silently falls back to `delete` journaling on filesystems without shared-memory support. Same shape as the hardcoded `/healthz` "ok" this branch replaced, on the page an operator uses to reason about restores. | A follow-up PR |
 
 ## Accepted risks
 

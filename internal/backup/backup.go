@@ -2,6 +2,7 @@ package backup
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -63,6 +64,37 @@ func Validate(path string) error {
 	return nil
 }
 
+// rollbackSuffix names the file the previous database is parked under while the
+// replacement is proven to open. It lives beside the database deliberately: the
+// rename that moves it must be on one filesystem to be atomic.
+const rollbackSuffix = ".rollback"
+
+// Whether the previous database has been moved to the rollback path yet, named
+// so the failure sites read as English rather than as a bare true/false.
+const (
+	nothingMoved   = false
+	originalParked = true
+)
+
+// The three outcomes of a restore, which need three different responses and used
+// to be one error value.
+//
+// Callers must be able to tell "your file was refused and nothing changed" from
+// "the restore failed but your database is still serving" from "there is no
+// working database now". The handler used to print "the uploaded file may be
+// invalid or corrupted" for all three — wrong for two of them, since the file
+// had already passed Validate, and it sends the operator to re-export and
+// re-upload against a process that can no longer answer.
+var (
+	// ErrRejected: refused before the live database was touched.
+	ErrRejected = errors.New("backup: restore rejected")
+	// ErrRolledBack: the swap failed and the previous database is back in service.
+	ErrRolledBack = errors.New("backup: restore rolled back")
+	// ErrUnavailable: the swap failed and so did the recovery. The process has no
+	// working database and only a restart will fix it.
+	ErrUnavailable = errors.New("backup: database unavailable")
+)
+
 // Store is what Import needs to swap the database file underneath a running
 // process: the handle to close, and the way to open the replacement.
 //
@@ -76,45 +108,157 @@ type Store interface {
 	Reopen(path string) error
 }
 
-// Import validates the file, atomically renames it to dbPath, and reopens the store.
+// Import replaces the live database with an uploaded one, and guarantees that a
+// failure leaves a working database behind.
+//
+// The old implementation closed the live handle and then returned from several
+// failure sites before it reopened anything. store.Reopen only assigns on
+// success, so any of them left the process holding a closed handle: every route
+// 500s until someone restarts the container, while /healthz still reported ok.
+// The Reopen path was worse than downtime — the rename had already overwritten
+// the live database, so there was no original left to go back to.
+//
+// So the previous database is parked under rollbackSuffix and only deleted once
+// the replacement has actually opened. Every failure after the handle is closed
+// funnels through rollBack, and Import cannot return without either a working
+// database or ErrUnavailable.
 func Import(s Store, uploadedPath, dbPath string) error {
 	if err := Validate(uploadedPath); err != nil {
-		return fmt.Errorf("import: %w", err)
+		return fmt.Errorf("%w: %w", ErrRejected, err)
 	}
 
-	// Checkpoint the live DB so all WAL frames are written to the main file.
-	if _, err := s.DB().Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		log.Printf("import: WAL checkpoint failed (recent unflushed data may be lost): %v", err)
+	// Refuse if a previous restore left its parked database behind.
+	//
+	// The park below is a rename, and rename overwrites its destination, so
+	// without this check the next restore silently destroys that file. That is
+	// the whole disaster: a process killed between the park and the swap leaves
+	// the real database at .rollback and nothing at dbPath; the container
+	// restarts, store.New creates an empty database and re-seeds admin/admin, and
+	// the operator — seeing an empty instance — restores a backup, which renames
+	// that empty database over the last copy of their data.
+	//
+	// Nothing else in the codebase looks at this file, so refusing here is what
+	// makes it survivable.
+	if _, err := os.Stat(dbPath + rollbackSuffix); err == nil {
+		return fmt.Errorf("%w: %s already exists, which means a previous restore did "+
+			"not finish. That file may be your database — move it somewhere safe (or "+
+			"back to %s) before restoring again",
+			ErrRejected, dbPath+rollbackSuffix, dbPath)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("%w: cannot check for a leftover %s: %w",
+			ErrRejected, dbPath+rollbackSuffix, err)
 	}
 
-	// Close the old connection before filesystem operations so no writes race
-	// with the rename.
+	// Flush the write-ahead log into the main database before anything is
+	// touched, and refuse the restore if it cannot be flushed completely.
+	//
+	// The swap removes the WAL, because SQLite would otherwise replay the old
+	// database's frames over the restored one. That is only safe once every frame
+	// is in the main file. This used to log "recent unflushed data may be lost"
+	// and delete the WAL anyway, which is what lost it; with a rollback in play it
+	// would be worse, restoring a database missing its own most recent writes.
+	//
+	// The result row is what has to be checked, not the error. wal_checkpoint does
+	// not report contention as a failure: a reader holding a snapshot returns
+	// (busy=1, log=53, checkpointed=52) with a nil error, so an Exec-and-check-err
+	// guard passes in precisely the case it exists to catch. One concurrent admin
+	// request is enough to produce it.
+	var busy, walFrames, flushed sql.NullInt64
+	if err := s.DB().QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
+		Scan(&busy, &walFrames, &flushed); err != nil {
+		return fmt.Errorf("%w: cannot flush the current database to disk, so it "+
+			"cannot be safely set aside: %w", ErrRejected, err)
+	}
+	// A database not in WAL mode reports -1 for both counts: nothing to flush.
+	if walFrames.Int64 > 0 && flushed.Int64 < walFrames.Int64 {
+		return fmt.Errorf("%w: %d of %d write-ahead frames could not be written to "+
+			"the database file, most likely because another request is holding a read "+
+			"snapshot. Removing the log now would discard those writes; retry the "+
+			"restore", ErrRejected, walFrames.Int64-flushed.Int64, walFrames.Int64)
+	}
+
+	// Close before any filesystem operation so no write races the rename.
 	if err := s.DB().Close(); err != nil {
 		log.Printf("import: warning: close old db: %v", err)
 	}
 
-	// Remove stale WAL file — if it exists and cannot be removed, abort to
-	// prevent SQLite replaying old WAL frames over the new database.
+	// rollBack puts the previous database back and returns the right sentinel.
+	// One implementation rather than one per failure site: four copies of "undo
+	// it" is how three of them end up subtly different.
+	//
+	// Not named recover — that is a builtin, and shadowing it inside a function
+	// that may one day want a deferred recover is a trap for the next reader.
+	rollBack := func(cause error, parked bool) error {
+		parkPath := dbPath + rollbackSuffix
+		if parked {
+			// One atomic rename, straight over the failed replacement.
+			//
+			// An earlier version removed dbPath first, on the theory that the
+			// rename needed somewhere to land. It does not — rename replaces its
+			// destination — and the removal opened the worst window in the
+			// function: between it and a rename that then failed, there was no
+			// database at dbPath at all and the operator's only copy was a file
+			// nothing mentions.
+			if err := os.Rename(parkPath, dbPath); err != nil {
+				return fmt.Errorf("%w: restore failed (%w) and the previous database "+
+					"could not be moved back: it is still at %s. Do not restart until "+
+					"it has been moved back to %s — a restart with no database there "+
+					"creates an empty one and re-enables the default admin login: %w",
+					ErrUnavailable, cause, parkPath, dbPath, err)
+			}
+		}
+
+		// Reopen alone is not evidence the previous database is back. SQLite
+		// creates the file if it is missing, so Reopen on an absent dbPath
+		// manufactures an empty database, returns nil, and this would report a
+		// successful rollback while serving zero forms and zero users — nobody
+		// could even log in to notice. Verified before trusting it.
+		if _, err := os.Stat(dbPath); err != nil {
+			return fmt.Errorf("%w: restore failed (%w) and there is no database at %s. "+
+				"Check for %s before restarting, since starting with no database "+
+				"creates an empty one and re-enables the default admin login: %w",
+				ErrUnavailable, cause, dbPath, parkPath, err)
+		}
+		if err := s.Reopen(dbPath); err != nil {
+			return fmt.Errorf("%w: restore failed (%w) and the previous database "+
+				"could not be reopened: %w", ErrUnavailable, cause, err)
+		}
+		return fmt.Errorf("%w: %w", ErrRolledBack, cause)
+	}
+
+	// Stale WAL and SHM belong to the database being replaced. The WAL must go,
+	// or SQLite replays its frames over the new file; SHM is reconstructable.
 	walPath := dbPath + "-wal"
 	if _, statErr := os.Stat(walPath); statErr == nil {
 		if err := os.Remove(walPath); err != nil {
-			return fmt.Errorf("import: cannot remove old WAL file (aborting to prevent corruption): %w", err)
+			return rollBack(fmt.Errorf("cannot remove the old WAL file, which would be "+
+				"replayed over the restored database: %w", err), nothingMoved)
 		}
 	}
-	// SHM is reconstructable — best-effort removal only.
 	if err := os.Remove(dbPath + "-shm"); err != nil && !os.IsNotExist(err) {
 		log.Printf("import: warning: could not remove SHM file: %v", err)
 	}
 
-	// Atomic swap: rename the validated uploaded file to the live DB path.
+	// Park the previous database rather than letting the next rename destroy it.
+	if err := os.Rename(dbPath, dbPath+rollbackSuffix); err != nil {
+		return rollBack(fmt.Errorf("cannot set the current database aside: %w", err), nothingMoved)
+	}
+
+	// The swap. Same filesystem by construction — the handler writes the upload
+	// beside the database precisely so this cannot fail with EXDEV.
 	if err := os.Rename(uploadedPath, dbPath); err != nil {
-		return fmt.Errorf("import: rename: %w", err)
+		return rollBack(fmt.Errorf("cannot move the uploaded database into place: %w", err), originalParked)
 	}
 
-	// Reopen opens a fresh connection to the new file (old is already closed).
 	if err := s.Reopen(dbPath); err != nil {
-		return fmt.Errorf("import: reopen: %w", err)
+		return rollBack(fmt.Errorf("the restored database could not be opened: %w", err), originalParked)
 	}
 
+	// Only now is the previous database genuinely disposable. Left behind it is a
+	// full second copy of the database sitting next to the live one, doubling
+	// disk use on every restore.
+	if err := os.Remove(dbPath + rollbackSuffix); err != nil && !os.IsNotExist(err) {
+		log.Printf("import: warning: could not remove %s: %v", dbPath+rollbackSuffix, err)
+	}
 	return nil
 }

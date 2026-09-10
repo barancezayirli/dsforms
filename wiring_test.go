@@ -2,14 +2,13 @@ package main
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/barancezayirli/dsforms/internal/astcheck"
 )
 
 // handlerPkg is the import path whose composite literals this file checks.
@@ -48,7 +47,7 @@ func TestEveryStorageFieldIsWired(t *testing.T) {
 	t.Parallel()
 
 	fset := token.NewFileSet()
-	mainFiles := parsePkg(t, fset, ".")
+	_, mainFiles := astcheck.Package(t, ".")
 
 	storeBacked := assertedStoreInterfaces(t, mainFiles)
 	if len(storeBacked) < 10 {
@@ -65,8 +64,8 @@ func TestEveryStorageFieldIsWired(t *testing.T) {
 
 	seen := map[string]bool{}
 	for path, f := range mainFiles {
-		local := localName(f, handlerPkg)
-		if local == "" {
+		local := astcheck.ImportedAs(f, handlerPkg)
+		if len(local) == 0 {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -81,7 +80,7 @@ func TestEveryStorageFieldIsWired(t *testing.T) {
 			// Match the package by its resolved import path, not by the
 			// identifier "handler": a second, aliased import of the same package
 			// is legal Go and would otherwise hide every literal built through it.
-			if id, ok := sel.X.(*ast.Ident); !ok || id.Name != local {
+			if id, ok := sel.X.(*ast.Ident); !ok || !local[id.Name] {
 				return true
 			}
 			want, ok := required[sel.Sel.Name]
@@ -158,8 +157,8 @@ func assertedStoreInterfaces(t *testing.T, files map[string]*ast.File) map[strin
 	t.Helper()
 	out := map[string]bool{}
 	for _, f := range files {
-		local := localName(f, handlerPkg)
-		if local == "" {
+		local := astcheck.ImportedAs(f, handlerPkg)
+		if len(local) == 0 {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -171,7 +170,7 @@ func assertedStoreInterfaces(t *testing.T, files map[string]*ast.File) map[strin
 			if !ok {
 				return true
 			}
-			if id, ok := sel.X.(*ast.Ident); !ok || id.Name != local {
+			if id, ok := sel.X.(*ast.Ident); !ok || !local[id.Name] {
 				return true
 			}
 			// Only assertions whose right-hand side is *store.Store: the same
@@ -209,7 +208,7 @@ func mentionsStoreStore(e ast.Expr) bool {
 // exactly that.
 func requiredFields(t *testing.T, fset *token.FileSet, storeBacked map[string]bool) map[string][]storageField {
 	t.Helper()
-	files := parsePkg(t, fset, "internal/handler")
+	_, files := astcheck.Package(t, "internal/handler")
 
 	structs := map[string]*ast.StructType{}
 	for _, f := range files {
@@ -259,43 +258,6 @@ func requiredFields(t *testing.T, fset *token.FileSet, storeBacked map[string]bo
 			slices.SortFunc(fields, func(a, b storageField) int { return strings.Compare(a.name, b.name) })
 			out[name] = fields
 		}
-	}
-	return out
-}
-
-// localName returns the identifier `path` is imported under in f, or "" if f
-// does not import it. Resolving the path rather than assuming the identifier is
-// what makes an aliased import visible to these scans.
-func localName(f *ast.File, path string) string {
-	for _, imp := range f.Imports {
-		p, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || p != path {
-			continue
-		}
-		if imp.Name != nil {
-			return imp.Name.Name
-		}
-		return path[strings.LastIndex(path, "/")+1:]
-	}
-	return ""
-}
-
-func parsePkg(t *testing.T, fset *token.FileSet, dir string) map[string]*ast.File {
-	t.Helper()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
-	if err != nil {
-		t.Fatalf("parsing %s: %v", dir, err)
-	}
-	out := map[string]*ast.File{}
-	for _, pkg := range pkgs {
-		for path, f := range pkg.Files {
-			out[path] = f
-		}
-	}
-	if len(out) == 0 {
-		t.Fatalf("parsed no source files in %s", dir)
 	}
 	return out
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -216,7 +217,11 @@ func staticHandler() http.Handler {
 	}))
 }
 
-func newRouter() *chi.Mux {
+// healthCheck reports whether the process can actually serve. Returning an error
+// makes /healthz fail.
+type healthCheck func(context.Context) error
+
+func newRouter(healthy healthCheck) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Recovery middleware — must be first so it wraps all other middleware
@@ -269,9 +274,28 @@ func newRouter() *chi.Mux {
 		})
 	})
 
+	// /healthz asks the database, rather than reporting that the HTTP server is
+	// listening — which it always is, right up until it is useless.
+	//
+	// A failed backup restore could leave the process holding a closed database
+	// handle: every route 500s, only a restart fixes it, and this endpoint went on
+	// answering "ok" so nothing detected it. That is now the exact condition it
+	// reports, since a closed handle fails to ping.
+	//
+	// The tradeoff is accepted deliberately: a transient database problem now
+	// fails the healthcheck and an orchestrator may restart the container. The
+	// state this exists to catch is only recoverable by restarting.
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte("ok")); err != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		body, status := "ok", http.StatusOK
+		if err := healthy(ctx); err != nil {
+			log.Printf("healthz: %v", err)
+			body, status = "database unavailable", http.StatusServiceUnavailable
+		}
+		w.WriteHeader(status)
+		if _, err := w.Write([]byte(body)); err != nil {
 			log.Printf("healthz write error: %v", err)
 		}
 	})
@@ -678,7 +702,9 @@ func main() {
 		log.Printf("quarantine digest disabled: DIGEST_TO is set but SMTP is not configured")
 	}
 
-	r := newRouter()
+	r := newRouter(func(ctx context.Context) error {
+		return s.DB().PingContext(ctx)
+	})
 	errorPages(r, templates)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)

@@ -2,10 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
-	"go/token"
 	"io"
 	"maps"
 	"net/http"
@@ -18,14 +19,52 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/astcheck"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/go-chi/chi/v5"
 )
 
+// alwaysHealthy is the health check for routers under test, which have no
+// database behind them.
+//
+// An explicit func rather than a nil meaning "skip": a nil that quietly means
+// something is how the sidebar's degraded banner went missing for two rounds.
+func alwaysHealthy(context.Context) error { return nil }
+
+// TestHealthzReportsAnUnusableDatabase is the regression test for "nothing
+// detected it".
+//
+// A failed backup restore could leave the process holding a closed database
+// handle — every route 500s, and only a restart fixes it. /healthz returned a
+// hardcoded "ok" throughout, so no orchestrator, monitor or human was told. The
+// endpoint reported that the HTTP server was listening, which it always is,
+// right up until it is useless.
+func TestHealthzReportsAnUnusableDatabase(t *testing.T) {
+	t.Parallel()
+
+	r := newRouter(func(context.Context) error {
+		return errors.New("sql: database is closed")
+	})
+
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("GET /healthz with an unusable database = %d, want %d.\n"+
+			"A healthcheck that cannot fail cannot trigger a restart, and a restart "+
+			"is the only thing that recovers this state.",
+			w.Code, http.StatusServiceUnavailable)
+	}
+	if w.Body.String() == "ok" {
+		t.Error(`GET /healthz body is still "ok" while the database is unusable`)
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	t.Parallel()
 
-	r := newRouter()
+	r := newRouter(alwaysHealthy)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -41,7 +80,7 @@ func TestHealthz(t *testing.T) {
 
 func TestSecurityHeaders(t *testing.T) {
 	t.Parallel()
-	r := newRouter()
+	r := newRouter(alwaysHealthy)
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -69,7 +108,7 @@ func TestSecurityHeaders(t *testing.T) {
 
 func TestMaxBytesReader(t *testing.T) {
 	t.Parallel()
-	r := newRouter()
+	r := newRouter(alwaysHealthy)
 	// Add a test route that reads the body
 	r.Post("/test-body", func(w http.ResponseWriter, r *http.Request) {
 		_, err := io.ReadAll(r.Body)
@@ -121,7 +160,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 
 func TestNotFoundHandler(t *testing.T) {
 	t.Parallel()
-	r := newRouter()
+	r := newRouter(alwaysHealthy)
 	req := httptest.NewRequest("GET", "/nonexistent-route", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -135,7 +174,7 @@ func TestNotFoundHandler(t *testing.T) {
 
 func TestRecoveryMiddleware(t *testing.T) {
 	t.Parallel()
-	r := newRouter()
+	r := newRouter(alwaysHealthy)
 	r.Get("/panic-test", func(w http.ResponseWriter, r *http.Request) {
 		panic("test panic")
 	})
@@ -374,7 +413,7 @@ func TestErrorPagesRenderStyled404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTemplates: %v", err)
 	}
-	r := newRouter()
+	r := newRouter(alwaysHealthy)
 	errorPages(r, templates)
 
 	req := httptest.NewRequest("GET", "/nonexistent-route", nil)
@@ -457,7 +496,7 @@ func TestRecoveryRendersStyled500(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTemplates: %v", err)
 	}
-	r := newRouter()
+	r := newRouter(alwaysHealthy)
 	errorPages(r, templates)
 	t.Cleanup(func() {
 		// serverErrorPage is package-level, so restore the plain-text default
@@ -595,14 +634,13 @@ func uploadForms(t *testing.T) []uploadForm {
 // to it, as "TypeName.MethodName".
 func postRoutes(t *testing.T) map[string]string {
 	t.Helper()
-	fset := token.NewFileSet()
-	files := parsePkg(t, fset, ".")
+	_, files := astcheck.Package(t, ".")
 
 	// Handler variable -> type name, from `x := &handler.XHandler{...}`.
 	varType := map[string]string{}
 	for _, f := range files {
-		local := localName(f, handlerPkg)
-		if local == "" {
+		local := astcheck.ImportedAs(f, handlerPkg)
+		if len(local) == 0 {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -623,7 +661,7 @@ func postRoutes(t *testing.T) map[string]string {
 				return true
 			}
 			if sel, ok := lit.Type.(*ast.SelectorExpr); ok {
-				if id, ok := sel.X.(*ast.Ident); ok && id.Name == local {
+				if id, ok := sel.X.(*ast.Ident); ok && local[id.Name] {
 					varType[name.Name] = sel.Sel.Name
 				}
 			}
@@ -674,8 +712,7 @@ func postRoutes(t *testing.T) map[string]string {
 // method reads.
 func formFileNamesByMethod(t *testing.T) map[string]map[string]bool {
 	t.Helper()
-	fset := token.NewFileSet()
-	files := parsePkg(t, fset, "internal/handler")
+	_, files := astcheck.Package(t, "internal/handler")
 
 	out := map[string]map[string]bool{}
 	for _, f := range files {
