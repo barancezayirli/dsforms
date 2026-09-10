@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 func setupBackup(t *testing.T) (*store.Store, *chi.Mux, string) {
@@ -35,11 +35,13 @@ func setupBackup(t *testing.T) (*store.Store, *chi.Mux, string) {
 	templates["backups.html"] = backupTmpl
 
 	bh := &BackupHandler{
-		Store:     s,
-		SecretKey: testSecretKey,
-		BaseURL:   "https://example.com",
-		DBPath:    dbPath,
-		Templates: templates,
+		Base: Base{
+			Store:     s,
+			SecretKey: testSecretKey,
+			BaseURL:   "https://example.com",
+			DBPath:    dbPath,
+			Templates: templates,
+		},
 	}
 
 	r := chi.NewRouter()

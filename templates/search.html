@@ -1,0 +1,52 @@
+{{template "base" .}}
+
+{{define "content"}}
+<div class="page-head">
+  <h4>Search</h4>
+  {{if .Query}}
+  <span class="muted" style="font-size:13px">
+    {{len .Rows}} result{{if ne (len .Rows) 1}}s{{end}} for <strong>{{.Query}}</strong>
+  </span>
+  {{end}}
+</div>
+
+{{if not .Query}}
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-magnifying-glass"/></svg></span>
+  <h3>Search submissions</h3>
+  <p>Type in the header field, or press <span class="kbd">⌘K</span> from anywhere.
+     Matches are across every field of every accepted submission.</p>
+</div>
+
+{{else if .Rows}}
+<div class="card elev-sm">
+  <div style="display:flex;flex-direction:column">
+    {{range .Rows}}
+    <a class="rule-b" style="display:block;padding:11px 0"
+       href="/admin/forms/{{.FormID}}/submissions/{{.ID}}" data-drawer>
+      <div style="display:flex;align-items:center;gap:9px">
+        <span class="avatar {{if not .Read}}avatar-unread{{end}}" aria-hidden="true">{{.Initial}}</span>
+        <span class="truncate" style="flex:1;min-width:0;font-size:13.5px;{{if not .Read}}font-weight:500{{end}}">{{.Name}}</span>
+        <span class="tag tag-neutral tag-sm nowrap">{{.FormName}}</span>
+        <span class="dim nowrap" style="font-size:11px">{{.Age}}</span>
+      </div>
+      {{if .Preview}}
+      <div class="muted truncate" style="font-size:12.5px;margin-top:4px">{{.Preview}}</div>
+      {{end}}
+    </a>
+    {{end}}
+  </div>
+</div>
+
+{{else}}
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-selection-slash"/></svg></span>
+  <h3>Nothing matched</h3>
+  <p>No accepted submission contains all of those words. Held submissions are
+     not searched — they have their own screen.</p>
+  <a class="btn btn-secondary" href="/admin/quarantine">
+    <svg class="i" style="font-size:15px"><use href="#ph-shield-warning"/></svg>Check quarantine
+  </a>
+</div>
+{{end}}
+{{end}}

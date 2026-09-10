@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/ratelimit"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/ratelimit"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 const testSecretKey = "test-secret-key-32-chars-long!!"
@@ -38,11 +38,13 @@ func setupAuth(t *testing.T) (*store.Store, *chi.Mux) {
 	}
 
 	ah := &AuthHandler{
-		Store:      s,
-		SecretKey:  testSecretKey,
-		BaseURL:    "https://example.com",
+		Base: Base{
+			Store:     s,
+			SecretKey: testSecretKey,
+			BaseURL:   "https://example.com",
+			Templates: templates,
+		},
 		LoginGuard: guard,
-		Templates:  templates,
 	}
 
 	r := chi.NewRouter()

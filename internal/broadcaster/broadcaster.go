@@ -6,11 +6,14 @@
 package broadcaster
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/safe"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // Store is the subset of *store.Store the worker needs.
@@ -98,7 +101,16 @@ func (w *Worker) RunOnce() (int, error) {
 			continue
 		}
 
-		if sendErr := w.Mailer.SendMail(d.Email, b.Subject, b.Body); sendErr != nil {
+		// The send is guarded per delivery, not per batch. A panic here used to
+		// escape RunOnce, and once the worker loop recovered it the loop saw
+		// n = 0, err = nil — indistinguishable from an empty queue. So the
+		// poisoned row was retried every Idle interval forever, its attempts
+		// never incremented, its broadcast never finalized, and the operator's
+		// progress page never resolved. Treating a panic as a failed send lets
+		// it exhaust MaxAttempts and stop, which is what an erroring send
+		// already did.
+		sendErr := w.sendGuarded(d.Email, b.Subject, b.Body)
+		if sendErr != nil {
 			if err := w.Store.MarkDeliveryFailed(d.ID, sendErr.Error(), w.MaxAttempts); err != nil {
 				log.Printf("broadcaster: mark failed %s: %v", d.ID, err)
 			}
@@ -112,6 +124,39 @@ func (w *Worker) RunOnce() (int, error) {
 
 	w.finalize()
 	return len(ds), nil
+}
+
+// runOnceSafely is RunOnce with any escaping panic turned into an error.
+//
+// The distinction matters more than it looks. Recovering and leaving n = 0,
+// err = nil is indistinguishable from "the queue is empty", so the loop takes
+// the idle wait and retries the same poisoned batch forever without ever
+// advancing its attempt count. Surfacing it as an error routes it to the
+// sleep-and-log path, where a persistent failure at least stays visible.
+func (w *Worker) runOnceSafely() (n int, err error) {
+	panicked := true
+	safe.Do("broadcaster: run", func() {
+		n, err = w.RunOnce()
+		panicked = false
+	})
+	if panicked {
+		return 0, errors.New("panic in RunOnce")
+	}
+	return n, err
+}
+
+// sendGuarded calls the mailer, converting a panic into an ordinary error so one
+// malformed recipient costs that delivery rather than the batch or the process.
+func (w *Worker) sendGuarded(to, subject, body string) (err error) {
+	panicked := true
+	safe.Do("broadcaster: send to "+to, func() {
+		err = w.Mailer.SendMail(to, subject, body)
+		panicked = false
+	})
+	if panicked {
+		return fmt.Errorf("panic while sending to %s", to)
+	}
+	return err
 }
 
 // finalize marks any 'sending' broadcast with no remaining pending deliveries done.
@@ -152,7 +197,7 @@ func (w *Worker) Start() {
 		w.ensureSignal()
 		go func() {
 			for {
-				n, err := w.RunOnce()
+				n, err := w.runOnceSafely()
 				if err != nil {
 					log.Printf("broadcaster: run error: %v", err)
 					time.Sleep(w.Idle)

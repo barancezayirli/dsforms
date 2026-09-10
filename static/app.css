@@ -1,0 +1,785 @@
+/* ==========================================================================
+   dsforms — Nocturne
+   --------------------------------------------------------------------------
+   Ported from the design handoff in reference/design_handoff_dsforms_admin/.
+   The prototypes there carry every value as an inline style attribute; this
+   file is the class layer they imply. Token values come from the Nocturne
+   stylesheet under _ds/nocturne-<id>/ — treat that as the source of truth
+   and change values here only to match it.
+
+   Served from /static/app.css and linked by both base.html and login.html, so
+   the token block exists exactly once (login.html used to duplicate it).
+   ========================================================================== */
+
+/* — font ——————————————————————————————————————————————————————————————————
+   Inter as a single variable file covering 100..900. The design needs 400,
+   500, 600 and 700; four static cuts would be ~95KB against 48KB for the
+   variable, so one file wins on both bytes and requests. Vendored rather than
+   linked from Google Fonts because the CSP in main.go is `default-src 'self'`
+   with no font-src — a remote @import would be blocked by our own header.
+
+   The filename carries a content hash so the file can be cached for a year:
+   re-vendoring Inter changes the name, which is what invalidates it. The
+   preload hint in base.html must name the identical URL — a ?v= query on one
+   side and not the other makes them two URLs and downloads the font twice.
+   TestFontPreloadMatchesFontFace enforces that. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/static/fonts/inter-latin-wght-normal.f052ee44.woff2') format('woff2');
+}
+
+/* — tokens ———————————————————————————————————————————————————————————— */
+:root {
+  --color-bg:      #161826;
+  --color-surface: #232532;
+  --color-text:    #e9e9ed;
+  --color-accent:  #9184d9;
+  --color-divider: rgba(233, 233, 237, .16);
+
+  /* Tonal ramps, generated in OKLCH on one shared lightness scale, so the same
+     step of any role matches the others in visual value. */
+  --n-100: #f3f5fe;  --n-200: #e4e7f5;  --n-300: #cfd3e5;
+  --n-400: #b2b6ca;  --n-500: #9397ab;  --n-600: #75798c;
+  --n-700: #595d6c;  --n-800: #3f424d;  --n-900: #292b31;
+
+  --a-100: #f5f4ff;  --a-200: #e7e5fe;  --a-300: #d2cefd;
+  --a-400: #b5abfc;  --a-500: #968ae0;  --a-600: #796cbf;
+  --a-700: #5d5294;  --a-800: #423a6a;  --a-900: #2b2741;
+
+  /* Deck-scale saturated fills. Interface chrome never uses these; the landing
+     page's closing panel is the one place they appear. */
+  --color-section:       #262a60;
+  --color-section-glow:  #353b80;
+  --color-section-ghost: #4c5397;
+
+  --font:      'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, Menlo, Consolas, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+
+  /* Elevation on a dark ground is a hairline edge plus ambient darkness, not a
+     soft ink shadow. Never stack these. */
+  --shadow-sm: 0 0 0 1px var(--n-800);
+  --shadow-md: 0 0 0 1px var(--n-700), 0 6px 18px rgba(0, 0, 0, .55);
+  --shadow-lg: 0 0 0 1px var(--n-500), 0 16px 40px rgba(0, 0, 0, .65);
+
+  --sidebar-w:  228px;
+  --rail-w:      68px;
+}
+
+/* — reset & base —————————————————————————————————————————————————————— */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings never exceed weight 500 — hierarchy is size and space, not weight. */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -.015em;
+}
+h1 { font-size: 42px; }
+h2 { font-size: 32px; }
+h3 { font-size: 25px; }
+h4 { font-size: 20px; }
+h5 { font-size: 16px; }
+h6 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+
+a { color: inherit; text-decoration: none; text-underline-offset: 3px; }
+a.link { color: var(--color-accent); }
+a.link:hover { text-decoration: underline; }
+img { display: block; max-width: 100%; }
+button { font: inherit; cursor: pointer; }
+input, textarea, select { font: inherit; }
+
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+
+/* — text utilities ————————————————————————————————————————————————————— */
+.muted     { color: var(--n-500); }
+.dim       { color: var(--n-600); }
+.strong    { color: var(--n-400); }
+.mono      { font-family: var(--font-mono); }
+.nowrap    { white-space: nowrap; }
+.truncate  { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Uppercase micro-label. Accent-on-ground sits near 3:1 — fine for chrome and
+   large text, not for body copy; paragraph-size accent text uses --a-300. */
+.kicker {
+  font-size: 10px;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--n-600);
+}
+.kicker-accent { color: var(--color-accent); }
+
+/* — icons —————————————————————————————————————————————————————————————
+   One <symbol> sprite is inlined per page by templates/icons.html; glyphs are
+   referenced as <svg class="i"><use href="#ph-NAME"/></svg> and inherit
+   currentColor. Size with font-size on the svg itself. */
+.i {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  display: block;
+  fill: currentColor;
+  font-size: 16px;
+}
+.i-accent { color: var(--color-accent); }
+
+/* — the Nocturne fading rule ——————————————————————————————————————————
+   Freestanding rules fade to transparent over 48px at each end rather than
+   stopping cleanly. It has to be a background strip rather than a border so it
+   can carry a gradient, and so a table can paint it at row level — a border on
+   <td> would restart the fade inside every cell. Box outlines and in-control
+   separators stay solid. */
+.hr {
+  height: 1px;
+  border: 0;
+  margin: 11px 0;
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent);
+}
+.rule-b {
+  background-image: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent);
+  background-repeat: no-repeat;
+  background-position: bottom;
+  background-size: 100% 1px;
+}
+.rule-r {
+  background-image: linear-gradient(to bottom,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent);
+  background-repeat: no-repeat;
+  background-position: right;
+  background-size: 1px 100%;
+}
+
+/* — buttons ———————————————————————————————————————————————————————————
+   Nocturne never solid-fills a button, including primary and including the
+   landing page's closing CTA. Emphasis is outline colour, not fill. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;          /* the Nocturne sheet omits this and labels wrap */
+  color: var(--color-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+}
+.btn:disabled, .btn[disabled], .btn[aria-disabled='true'] {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.btn-primary   { color: var(--color-accent); border-color: var(--color-accent); }
+.btn-primary:hover:not(:disabled)   { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.btn-primary:active:not(:disabled)  { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.btn-secondary { border-color: var(--color-divider); }
+.btn-secondary:hover:not(:disabled)  { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.btn-secondary:active:not(:disabled) { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.btn-ghost     { color: var(--color-accent); padding-inline: 4px; }
+.btn-ghost:hover:not(:disabled)  { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.btn-ghost:active:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.btn-quiet     { color: var(--n-500); }
+.btn-quiet:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text) 7%, transparent); color: var(--color-text); }
+
+/* Destructive actions are a heavier neutral outline, not a hue. Nocturne is a
+   mono palette; introducing red here would be the only saturated non-accent
+   colour in the interface. */
+.btn-danger { border-color: var(--n-700); color: var(--n-300); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text) 9%, transparent); }
+
+.btn-icon  { width: 36px; height: 36px; padding: 0; }
+.btn-icon.sm { width: 30px; height: 30px; }
+.btn-block { width: 100%; }
+.btn-34    { height: 34px; }
+
+/* — tags ——————————————————————————————————————————————————————————————— */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  letter-spacing: .02em;
+  padding: 3px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.tag-accent  { background: var(--a-800); color: var(--a-100); }
+.tag-neutral { background: var(--n-800); color: var(--n-100); }
+.tag-outline { border: 1px solid var(--color-accent); color: var(--color-accent); }
+.tag-sm      { font-size: 10px; padding: 1px 7px; }
+
+/* — forms —————————————————————————————————————————————————————————————— */
+.field { display: block; margin-bottom: 14px; }
+.field > label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 5px;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+.input {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 14px;
+  color: var(--color-text);
+  caret-color: var(--color-accent);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+}
+.input:hover { border-color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+.input:focus-visible { border-color: var(--color-accent); outline-offset: 0; }
+.input::placeholder { color: var(--n-600); }
+textarea.input { min-height: 90px; resize: vertical; line-height: 1.6; }
+select.input { appearance: none; padding-right: 26px; }
+
+.form-hint  { font-size: 11px; color: var(--n-600); margin-top: 4px; }
+.form-error { font-size: 12px; color: var(--a-300); margin-top: 4px; }
+
+/* Tinted notice. Stands in for every place a conventional UI would reach for
+   red or amber — invalid credentials, destructive warnings, the default
+   password banner. Body-size text uses accent-300 for contrast. */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  border-radius: var(--radius-md);
+  background: var(--a-900);
+  box-shadow: inset 0 0 0 1px var(--a-700);
+  font-size: 13px;
+  color: var(--a-300);
+}
+.notice .i { color: var(--a-400); font-size: 16px; }
+.notice a { text-decoration: underline; margin-left: auto; white-space: nowrap; }
+
+.radio { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.radio input, .seg-opt input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.radio .dot { width: 16px; height: 16px; flex: none; border-radius: 4px; border: 1.5px solid var(--color-divider); }
+.radio:hover .dot { border-color: var(--color-accent); }
+.radio input:checked + .dot {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  box-shadow: inset 0 0 0 3px var(--color-bg);
+}
+.radio input:indeterminate + .dot {
+  border-color: var(--color-accent);
+  background: linear-gradient(var(--color-accent), var(--color-accent)) no-repeat center / 8px 2px;
+}
+.radio input:focus-visible + .dot { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.seg { display: inline-flex; overflow: hidden; border: 1px solid var(--color-divider); border-radius: var(--radius-md); }
+.seg-opt { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }
+.seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
+.seg-opt:has(input:checked) { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.seg-opt:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+
+/* Toggle. A real checkbox drives it so it posts and is keyboard-operable; the
+   knob is an inset box-shadow rather than a positioned element, which is what
+   lets one box paint both track and knob. */
+.toggle { display: flex; align-items: flex-start; gap: 11px; cursor: pointer; }
+.toggle input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.toggle .track {
+  width: 34px; height: 19px; flex: none; margin-top: 1px;
+  border-radius: 10px;
+  background: var(--n-900);
+  box-shadow: inset 0 0 0 1px var(--n-800), inset 3px 0 0 0 var(--n-600);
+  transition: background .15s ease, box-shadow .15s ease;
+}
+.toggle input:checked + .track {
+  background: var(--a-700);
+  box-shadow: inset 0 0 0 1px var(--a-600), inset 15px 0 0 0 var(--a-300);
+}
+.toggle input:focus-visible + .track { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.toggle-label { font-size: 13px; line-height: 1.35; }
+.toggle-hint  { font-size: 11px; color: var(--n-600); }
+
+/* — cards —————————————————————————————————————————————————————————————— */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 15px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+.card-title  { font-size: 15px; font-weight: 500; line-height: 1.2; }
+.card-kicker { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-accent); }
+.card-body   { font-size: 13px; color: var(--n-400); flex: 1; }
+.card-meta   { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--n-600); }
+.card-head   { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.card-head .card-title { margin-right: auto; }
+.elev-sm { box-shadow: var(--shadow-sm); }
+.elev-md { box-shadow: var(--shadow-md); }
+.elev-lg { box-shadow: var(--shadow-lg); }
+
+/* — tables ————————————————————————————————————————————————————————————
+   Every card containing a table wraps it in .table-wrap, and wide tables set
+   an explicit min-width, so they scroll inside their own card rather than
+   stretching a flex sibling off-screen. */
+.table-wrap { overflow-x: auto; margin: 0 -15px; padding: 0 15px; }
+.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.table th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--n-600);
+  padding: 7px 8px;
+  white-space: nowrap;
+}
+.table td { padding: 9px 8px; vertical-align: middle; }
+.table thead tr {
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+/* Body rows take a fainter rule than the header's. */
+.table tbody tr {
+  background: linear-gradient(to right,
+    transparent, rgba(233, 233, 237, .08) 48px,
+    rgba(233, 233, 237, .08) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+.table tbody tr:hover {
+  /* The hover tint layers over the row rule, which keeps painting. */
+  background:
+    linear-gradient(color-mix(in srgb, var(--color-text) 4%, transparent),
+                    color-mix(in srgb, var(--color-text) 4%, transparent)) no-repeat 0 0 / 100% 100%,
+    linear-gradient(to right,
+      transparent, rgba(233, 233, 237, .08) 48px,
+      rgba(233, 233, 237, .08) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+.table tbody tr.on {
+  background:
+    linear-gradient(rgba(43, 39, 65, .6), rgba(43, 39, 65, .6)) no-repeat 0 0 / 100% 100%,
+    linear-gradient(to right,
+      transparent, rgba(233, 233, 237, .08) 48px,
+      rgba(233, 233, 237, .08) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+.table .row-link { cursor: pointer; }
+
+/* — layout shell ——————————————————————————————————————————————————————— */
+.app { display: flex; min-height: 100vh; }
+
+.sidebar {
+  flex: none;
+  width: var(--sidebar-w);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 10px 14px;
+  /* background-color, not the background shorthand: these elements also carry a
+     .rule-r / .rule-b class whose fading edge is painted as a background-image,
+     and the shorthand would reset it to none. */
+  background-color: var(--color-bg);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.brand { display: flex; align-items: center; gap: 9px; padding: 2px 6px 16px; }
+.brand-mark {
+  width: 26px; height: 26px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 7px;
+  background: var(--a-900);
+  box-shadow: inset 0 0 0 1px var(--a-700);
+  color: var(--a-400);
+}
+.brand-mark .i { font-size: 15px; }
+.brand-word { font-size: 16px; font-weight: 500; letter-spacing: -.02em; }
+.brand-word em { color: var(--color-accent); font-style: normal; }
+
+.nav-group { display: flex; flex-direction: column; }
+.nav-group-title { padding: 8px 12px 4px; }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  color: var(--n-400);
+}
+.nav-item:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.nav-item.on {
+  background: var(--a-900);
+  color: var(--a-300);
+  box-shadow: inset 0 0 0 1px var(--a-800);
+}
+.nav-item .i { font-size: 17px; }
+.nav-item .label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.nav-badge {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--a-800);
+  color: var(--a-300);
+}
+
+.sidebar-foot { margin-top: auto; padding-top: 18px; }
+.db-card {
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--n-800);
+  padding: 10px 11px;
+  margin-bottom: 10px;
+}
+.db-card-row { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--n-400); }
+.db-card-row .i { font-size: 14px; color: var(--color-accent); }
+.db-card-sub { font-size: 11px; color: var(--n-600); margin-top: 3px; }
+
+.user-row { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: var(--radius-md); }
+.user-row:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.avatar {
+  width: 26px; height: 26px; flex: none;
+  border-radius: 50%;
+  background: var(--n-800);
+  color: var(--n-300);
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 500;
+}
+.avatar-unread { background: var(--a-800); color: var(--a-300); }
+.avatar-lg { width: 38px; height: 38px; font-size: 14px; }
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 12px;
+  padding: 14px 22px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background-color: var(--color-bg);
+}
+.crumb { font-size: 11px; color: var(--n-600); letter-spacing: .04em; }
+.crumb-title { font-size: 15px; font-weight: 500; letter-spacing: -.01em; }
+.header-actions { margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+
+.search {
+  display: flex; align-items: center; gap: 7px;
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--n-800);
+  border-radius: var(--radius-md);
+  padding: 0 10px;
+  height: 34px;
+  flex: 0 1 230px;
+  min-width: 150px;
+}
+.search .i { font-size: 15px; color: var(--n-600); }
+.search input { border: 0; background: transparent; color: var(--color-text); font-size: 13px; outline: none; width: 100%; }
+.kbd {
+  font-size: 10px; color: var(--n-600);
+  box-shadow: inset 0 0 0 1px var(--n-800);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+.content {
+  padding: 20px 22px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.banner { margin: 16px 22px 0; }
+.flash  { margin: 16px 22px 0; }
+.flash-error .i { color: var(--a-400); }
+
+/* — responsive rows ————————————————————————————————————————————————————
+   Two-column rows are wrapping flex, never fixed grid tracks, and auto-fit
+   grids use minmax(min(Npx,100%),1fr) so a track can collapse below its floor
+   on a narrow screen instead of overflowing. */
+.row { display: flex; flex-wrap: wrap; gap: 12px; }
+.row > .col-main { flex: 1.5 1 440px; min-width: 0; }
+.row > .col-side { flex: 1 1 320px; min-width: 0; }
+.grid      { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); }
+.grid-kpi  { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); }
+.grid-stat { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); }
+.actions   { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+
+/* — KPI card ——————————————————————————————————————————————————————————
+   The generous bottom padding reserves the sparkline band. Without it the
+   sub-caption renders on top of the chart and becomes unreadable. */
+.kpi { padding: 14px 15px 46px; gap: 0; position: relative; overflow: hidden; }
+.kpi-head  { display: flex; align-items: center; gap: 7px; }
+.kpi-head .i { font-size: 15px; color: var(--color-accent); }
+.kpi-label { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--n-500); }
+.kpi-row   { display: flex; align-items: baseline; gap: 8px; margin-top: 9px; }
+.kpi-value { font-size: 31px; font-weight: 500; letter-spacing: -.03em; line-height: 1; }
+.kpi-delta { font-size: 12px; color: var(--n-400); }
+.kpi-sub   { font-size: 11px; color: var(--n-600); margin-top: 4px; }
+.spark     { position: absolute; right: 0; bottom: 0; left: 0; height: 40px; width: 100%; opacity: .55; }
+
+/* — stat strip ————————————————————————————————————————————————————————— */
+.stat { padding: 12px 16px; min-width: 150px; flex: 1; gap: 2px; }
+.stat-value { font-size: 24px; font-weight: 500; letter-spacing: -.02em; }
+.stat-value.sm { font-size: 19px; }
+.stat-label { font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--n-600); }
+.stat-sub   { font-size: 11px; color: var(--n-600); }
+.stat-accent { color: var(--a-400); }
+
+/* — chart —————————————————————————————————————————————————————————————
+   Gridlines are absolutely-positioned HTML rather than SVG lines: the SVG uses
+   preserveAspectRatio="none" so it can stretch to the card, which would smear
+   any stroke drawn inside it. The 34px gutter holds the value labels and the
+   SVG is inset by exactly that much so the two layers align. */
+.chart { position: relative; flex: 1 1 auto; min-height: 190px; margin-top: 14px; }
+.gridline {
+  position: absolute; left: 0; right: 0;
+  display: flex; align-items: center; gap: 8px;
+  transform: translateY(-50%);
+}
+.gridline span:first-child {
+  width: 26px; flex: none; text-align: right;
+  font-size: 9.5px; color: var(--n-600); line-height: 1;
+}
+.gridline span:last-child { flex: 1; height: 1px; background: var(--n-900); }
+.chart svg { position: absolute; left: 34px; right: 0; top: 0; bottom: 0; width: calc(100% - 34px); height: 100%; }
+.chart-ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--n-600); margin: 6px 0 0 34px; }
+.legend { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--n-500); }
+.legend span.swatch { width: 9px; height: 9px; border-radius: 3px; display: inline-block; margin-right: 5px; }
+
+/* — meters & bars —————————————————————————————————————————————————————— */
+.bar { height: 6px; border-radius: 3px; background: var(--n-900); overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: 3px; background: var(--a-700); }
+.bar > i.hot { background: var(--a-500); }
+.bar-inline { width: 64px; height: 5px; flex: none; }
+
+.meter { position: relative; height: 8px; border-radius: 4px; background: var(--n-900); overflow: hidden; }
+.meter > i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(to right, var(--a-700), var(--a-500)); }
+.meter-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--n-600); margin-top: 4px; }
+
+.strength { display: flex; gap: 4px; }
+.strength span { height: 4px; flex: 1; border-radius: 2px; background: var(--n-900); }
+.strength span.on { background: var(--a-600); }
+
+/* — code blocks ———————————————————————————————————————————————————————— */
+.code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--n-300);
+  background: var(--color-bg);
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.codecard { border-radius: var(--radius-md); overflow: hidden; background: var(--color-surface); box-shadow: var(--shadow-sm); }
+.codecard-head { display: flex; align-items: center; gap: 9px; padding: 9px 13px; }
+.codecard-head .name { font-family: var(--font-mono); font-size: 12px; color: var(--n-500); }
+.codecard-head .btn { margin-left: auto; }
+.codecard pre { padding: 14px 15px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.85; overflow-x: auto; color: var(--n-300); }
+
+/* — submission list ———————————————————————————————————————————————————— */
+.from-cell { display: flex; align-items: center; gap: 9px; }
+.unread-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: transparent; }
+.unread .unread-dot { background: var(--color-accent); }
+.from-name { font-size: 13.5px; color: var(--n-400); }
+.unread .from-name { color: var(--color-text); font-weight: 500; }
+.from-email { font-size: 11px; color: var(--n-600); }
+.preview { max-width: 300px; color: var(--n-500); }
+
+.bulkbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-md);
+  padding: 9px 13px;
+}
+.bulkbar .count { font-size: 12px; color: var(--n-500); }
+
+.pager { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 12px; margin-top: 4px; }
+.pager .pages { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+.pager .pages .btn { width: 30px; height: 30px; padding: 0; font-size: 12px; }
+.pager .ellipsis { color: var(--n-600); padding: 0 4px; font-size: 12px; }
+
+/* — reader drawer —————————————————————————————————————————————————————— */
+.backdrop { position: fixed; inset: 0; z-index: 65; background: rgba(41, 43, 49, .55); }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  z-index: 66;
+  width: min(640px, 100%);
+  display: flex; flex-direction: column;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+}
+.drawer-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 16px; }
+.drawer-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 11px 14px;
+  position: sticky; top: 0; z-index: 2;
+  background-color: var(--color-surface);
+}
+.drawer-body { padding: 20px 22px 8px; }
+.field-grid { display: grid; grid-template-columns: minmax(0, 120px) minmax(0, 1fr); gap: 9px 18px; }
+.field-key { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--n-600); }
+.field-val { font-size: 13px; word-break: break-word; }
+/* The message body is flush left with no accent border — the old .field-msg
+   left rule is deliberately dropped. */
+.message { font-size: 15px; line-height: 1.65; white-space: pre-wrap; text-wrap: pretty; }
+
+.panel-box { border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--n-800); padding: 11px 13px; }
+.rule-box { border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--n-800); padding: 9px 11px; }
+.rule-head { display: flex; align-items: center; gap: 8px; }
+.rule-head .i { font-size: 14px; color: var(--color-accent); }
+.rule-name { font-size: 12px; font-weight: 500; }
+.rule-head .tag { margin-left: auto; }
+.rule-field { font-size: 11px; color: var(--n-600); margin-top: 5px; }
+
+/* — empty states ——————————————————————————————————————————————————————— */
+.empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 32px 24px; gap: 10px; }
+.empty-icon {
+  width: 46px; height: 46px;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  background: var(--a-900);
+  box-shadow: inset 0 0 0 1px var(--a-700);
+  color: var(--a-400);
+}
+.empty-icon .i { font-size: 22px; }
+.empty h3 { font-size: 16px; font-weight: 500; }
+.empty p { font-size: 12.5px; color: var(--n-500); max-width: 34ch; text-wrap: pretty; }
+
+/* — drop zone —————————————————————————————————————————————————————————— */
+.dropzone {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 26px 20px;
+  border: 1px dashed var(--n-800);
+  border-radius: var(--radius-md);
+  text-align: center;
+  cursor: pointer;
+}
+.dropzone:hover, .dropzone.over { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 6%, transparent); }
+.dropzone .i { font-size: 22px; color: var(--color-accent); }
+
+/* New-form tile: a dashed sibling to the real cards in the forms grid. */
+.tile-new {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-height: 200px;
+  border: 1px dashed var(--n-800);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--color-text);
+  padding: 20px;
+}
+.tile-new:hover { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 5%, transparent); }
+.tile-new .i { font-size: 20px; color: var(--color-accent); }
+
+/* — sidebar collapse ———————————————————————————————————————————————————
+   The rail is driven by a class on <body> so the state survives being set
+   inline by the pre-paint script in base.html, which avoids a flash of the
+   wrong width on load. */
+body.rail .sidebar { width: var(--rail-w); }
+body.rail .sidebar .nav-item { justify-content: center; padding: 9px 0; }
+body.rail .sidebar .nav-item .label,
+body.rail .sidebar .nav-item .nav-badge,
+body.rail .sidebar .nav-group-title,
+body.rail .sidebar .brand-word,
+body.rail .sidebar .db-card,
+body.rail .sidebar .user-text,
+body.rail .sidebar .user-row .i { display: none; }
+body.rail .sidebar .brand { justify-content: center; padding-inline: 0; }
+body.rail .sidebar .user-row { justify-content: center; }
+
+/* Auto-collapse to the rail between 640 and 860px. The user's manual choice
+   overrides it at every width, which is why .rail-manual exists. */
+@media (max-width: 860px) {
+  body:not(.rail-manual) .sidebar { width: var(--rail-w); }
+  body:not(.rail-manual) .sidebar .nav-item { justify-content: center; padding: 9px 0; }
+  body:not(.rail-manual) .sidebar .nav-item .label,
+  body:not(.rail-manual) .sidebar .nav-item .nav-badge,
+  body:not(.rail-manual) .sidebar .nav-group-title,
+  body:not(.rail-manual) .sidebar .brand-word,
+  body:not(.rail-manual) .sidebar .db-card,
+  body:not(.rail-manual) .sidebar .user-text,
+  body:not(.rail-manual) .sidebar .user-row .i { display: none; }
+  body:not(.rail-manual) .sidebar .brand { justify-content: center; padding-inline: 0; }
+}
+
+/* Below 640px the sidebar leaves the flow entirely and becomes a slide-in
+   drawer over the content. */
+@media (max-width: 640px) {
+  .sidebar,
+  body.rail .sidebar,
+  body:not(.rail-manual) .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0;
+    width: 252px; max-width: 82vw;
+    height: auto;
+    z-index: 80;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    transform: translateX(-102%);
+    pointer-events: none;
+    transition: transform .22s ease;
+    background-image: none;
+  }
+  body.nav-open .sidebar { transform: translateX(0); pointer-events: auto; }
+  /* Inside the mobile drawer the sidebar is always expanded, whatever the
+     desktop rail state was. */
+  body.rail .sidebar .nav-item,
+  body:not(.rail-manual) .sidebar .nav-item { justify-content: flex-start; padding: 8px 12px; }
+  body.rail .sidebar .nav-item .label,
+  body.rail .sidebar .nav-item .nav-badge,
+  body.rail .sidebar .nav-group-title,
+  body.rail .sidebar .brand-word,
+  body.rail .sidebar .db-card,
+  body.rail .sidebar .user-text,
+  body.rail .sidebar .user-row .i,
+  body:not(.rail-manual) .sidebar .nav-item .label,
+  body:not(.rail-manual) .sidebar .nav-item .nav-badge,
+  body:not(.rail-manual) .sidebar .nav-group-title,
+  body:not(.rail-manual) .sidebar .brand-word,
+  body:not(.rail-manual) .sidebar .db-card,
+  body:not(.rail-manual) .sidebar .user-text,
+  body:not(.rail-manual) .sidebar .user-row .i { display: revert; }
+  body.rail .sidebar .brand,
+  body:not(.rail-manual) .sidebar .brand { justify-content: flex-start; padding-inline: 6px; }
+
+  .nav-backdrop { position: fixed; inset: 0; z-index: 75; background: rgba(41, 43, 49, .62); }
+  .header  { padding: 12px 14px; }
+  .content { padding: 16px 14px 48px; }
+  .banner, .flash { margin: 12px 14px 0; }
+  .header-actions .search { flex: 1 1 100%; order: 3; }
+}
+
+@media (min-width: 641px) {
+  .nav-backdrop { display: none; }
+  .brand-mobile { display: none; }
+}
+
+/* Nothing animates except the drawer and sidebar transforms. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+  html { scroll-behavior: auto; }
+}

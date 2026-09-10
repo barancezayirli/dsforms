@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-b6186ff7-2d2b-4d3a-b98e-3092787ad06a/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<script src="_ds/nocturne-b6186ff7-2d2b-4d3a-b98e-3092787ad06a/_ds_bundle.js"></script>
+<style>
+html,body{margin:0;background:#161826;min-height:100%}
+a{color:#9184d9;text-decoration:none}
+a:hover{color:#b5abfc}
+i.ph{line-height:1;display:inline-block}
+.btn{white-space:nowrap}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#3f424d;border-radius:6px}
+</style>
+</helmet>
+<div style="display:flex;min-height:100vh;font-family:Inter,system-ui,sans-serif;color:#e9e9ed;background:#161826">
+
+  <sc-if value="{{ showBackdrop }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDrawer }}" style="position:fixed;inset:0;z-index:75;background:rgba(41,43,49,.62)"></div>
+  </sc-if>
+
+  <aside style="{{ railStyle }}">
+    <div style="display:flex;align-items:center;gap:9px;padding:0 12px 4px">
+      <span style="width:26px;height:26px;flex:none;border-radius:7px;box-shadow:inset 0 0 0 1px #5d5294;background:#2b2741;display:grid;place-items:center;color:#b5abfc;font-size:15px"><i class="ph ph-tray-arrow-down"></i></span>
+      <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+        <span style="font-size:16px;font-weight:500;letter-spacing:-.02em">ds<em style="color:#9184d9;font-style:normal">forms</em></span>
+      </sc-if>
+      <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+        <span class="tag tag-neutral" style="margin-left:auto;font-size:10px">v1.4</span>
+      </sc-if>
+    </div>
+
+    <nav style="display:flex;flex-direction:column;gap:2px;margin-top:14px">
+      <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:#75798c;padding:8px 12px 4px">Overview</div>
+      </sc-if>
+      <sc-for list="{{ navOverview }}" as="n" hint-placeholder-count="1">
+        <a href="#" onClick="{{ n.go }}" title="{{ n.label }}" style="{{ n.style }}">
+          <i class="{{ n.icon }}" style="font-size:17px;flex:none"></i>
+          <span style="{{ n.textStyle }}">{{ n.label }}</span>
+        </a>
+      </sc-for>
+
+      <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:#75798c;padding:14px 12px 4px">Collect</div>
+      </sc-if>
+      <sc-for list="{{ navCollect }}" as="n" hint-placeholder-count="2">
+        <a href="#" onClick="{{ n.go }}" title="{{ n.label }}" style="{{ n.style }}">
+          <i class="{{ n.icon }}" style="font-size:17px;flex:none"></i>
+          <span style="{{ n.textStyle }}">{{ n.label }}</span>
+          <span style="{{ n.badgeStyle }}">{{ n.badge }}</span>
+        </a>
+      </sc-for>
+
+      <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:#75798c;padding:14px 12px 4px">Moderate</div>
+      </sc-if>
+      <sc-for list="{{ navModerate }}" as="n" hint-placeholder-count="1">
+        <a href="#" onClick="{{ n.go }}" title="{{ n.label }}" style="{{ n.style }}">
+          <i class="{{ n.icon }}" style="font-size:17px;flex:none"></i>
+          <span style="{{ n.textStyle }}">{{ n.label }}</span>
+          <span style="{{ n.badgeStyle }}">{{ n.badge }}</span>
+        </a>
+      </sc-for>
+
+      <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:#75798c;padding:14px 12px 4px">System</div>
+      </sc-if>
+      <sc-for list="{{ navSystem }}" as="n" hint-placeholder-count="3">
+        <a href="#" onClick="{{ n.go }}" title="{{ n.label }}" style="{{ n.style }}">
+          <i class="{{ n.icon }}" style="font-size:17px;flex:none"></i>
+          <span style="{{ n.textStyle }}">{{ n.label }}</span>
+        </a>
+      </sc-for>
+    </nav>
+
+    <div style="margin-top:auto;padding-top:18px">
+      <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="border-radius:8px;box-shadow:inset 0 0 0 1px #3f424d;padding:10px 11px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#b2b6ca"><i class="ph ph-hard-drives" style="font-size:14px;color:#9184d9"></i><span>dsforms.db</span></div>
+          <div style="font-size:11px;color:#75798c;margin-top:3px">18.4 MB · WAL · backed up 6h ago</div>
+        </div>
+      </sc-if>
+      <div style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px">
+        <span style="width:26px;height:26px;flex:none;border-radius:50%;background:#423a6a;color:#d2cefd;display:grid;place-items:center;font-size:11px;font-weight:500">BC</span>
+        <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+          <div style="min-width:0;flex:1">
+            <div style="font-size:13px;line-height:1.2">baran</div>
+            <div style="font-size:11px;color:#75798c">owner</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+          <i class="ph ph-sign-out" style="font-size:15px;color:#75798c"></i>
+        </sc-if>
+      </div>
+    </div>
+  </aside>
+
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column">
+
+    <header style="display:flex;align-items:center;gap:14px 12px;flex-wrap:wrap;padding:14px 22px;position:sticky;top:0;background:#161826;z-index:20;background-image:linear-gradient(to right,transparent,rgba(233,233,237,.16) 48px,rgba(233,233,237,.16) calc(100% - 48px),transparent);background-repeat:no-repeat;background-position:bottom;background-size:100% 1px">
+      <button onClick="{{ toggleRail }}" class="btn btn-secondary btn-icon" title="Menu"><i class="{{ railIcon }}" style="font-size:16px"></i></button>
+      <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}">
+        <span style="font-size:16px;font-weight:500;letter-spacing:-.02em">ds<em style="color:#9184d9;font-style:normal">forms</em></span>
+      </sc-if>
+      <div style="min-width:0">
+        <div style="font-size:11px;color:#75798c;letter-spacing:.04em">{{ crumb }}</div>
+        <div style="font-size:15px;font-weight:500;letter-spacing:-.01em">{{ crumbTitle }}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;flex-wrap:wrap;gap:9px">
+        <label style="display:flex;align-items:center;gap:7px;background:#232532;box-shadow:inset 0 0 0 1px #3f424d;border-radius:8px;padding:0 10px;height:34px;flex:0 1 230px;min-width:150px">
+          <i class="ph ph-magnifying-glass" style="font-size:15px;color:#75798c"></i>
+          <input placeholder="Search submissions" style="border:0;background:transparent;color:#e9e9ed;font:400 13px Inter,system-ui,sans-serif;outline:none;width:100%" />
+          <span style="font-size:10px;color:#75798c;box-shadow:inset 0 0 0 1px #3f424d;border-radius:4px;padding:1px 5px">⌘K</span>
+        </label>
+        <button class="btn btn-secondary" style="height:34px"><i class="ph ph-download-simple" style="font-size:15px"></i>Export</button>
+        <button class="btn btn-primary" style="height:34px"><i class="ph ph-plus" style="font-size:15px"></i>New form</button>
+      </div>
+    </header>
+
+    <sc-if value="{{ showBanner }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;gap:10px;margin:16px 22px 0;padding:9px 13px;border-radius:8px;background:#2b2741;box-shadow:inset 0 0 0 1px #5d5294;font-size:13px;color:#d2cefd">
+        <i class="ph ph-shield-warning" style="font-size:16px;color:#b5abfc"></i>
+        <span>The default <strong style="font-weight:500">admin / admin</strong> password is still active on this instance.</span>
+        <a href="#" style="margin-left:auto;font-size:13px">Change it now →</a>
+      </div>
+    </sc-if>
+
+    <div style="padding:20px 22px 56px;display:flex;flex-direction:column;gap:16px">
+
+      <!-- ══ HOME · dense metrics ══ -->
+      <sc-if value="{{ isHomeMetrics }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap">
+            <div>
+              <h3 style="margin:0 0 3px">Good afternoon, baran</h3>
+              <p class="text-muted" style="font-size:13px;margin:0">4 forms and 1 waitlist across this instance · 12 submissions held in quarantine</p>
+            </div>
+            <div class="seg">
+              <label class="seg-opt"><input type="radio" name="range" /><span>7d</span></label>
+              <label class="seg-opt"><input type="radio" name="range" defaultChecked="{{ true }}" /><span>30d</span></label>
+              <label class="seg-opt"><input type="radio" name="range" /><span>90d</span></label>
+              <label class="seg-opt"><input type="radio" name="range" /><span>All</span></label>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:12px">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+              <div class="card elev-sm" style="padding:14px 15px 46px;gap:0;position:relative;overflow:hidden">
+                <div style="display:flex;align-items:center;gap:7px">
+                  <i class="{{ k.icon }}" style="font-size:15px;color:#9184d9"></i>
+                  <span style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#9397ab">{{ k.label }}</span>
+                </div>
+                <div style="display:flex;align-items:flex-end;gap:9px;margin-top:9px">
+                  <span style="font-size:31px;line-height:1;font-weight:500;letter-spacing:-.03em">{{ k.value }}</span>
+                  <span style="font-size:12px;color:#b2b6ca;padding-bottom:3px">{{ k.delta }}</span>
+                </div>
+                <div style="font-size:11px;color:#75798c;margin-top:6px">{{ k.sub }}</div>
+                <svg viewBox="0 0 220 40" preserveAspectRatio="none" style="position:absolute;right:0;bottom:0;left:0;height:40px;width:100%;opacity:.55">
+                  <path d="{{ k.sparkFill }}" fill="#423a6a"></path>
+                  <path d="{{ k.spark }}" fill="none" stroke="#968ae0" stroke-width="1.5"></path>
+                </svg>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch">
+            <div class="card elev-sm" style="padding:15px 16px 12px;gap:0;flex:2 1 440px;min-width:0">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <span class="card-title">Submissions over time</span>
+                <span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#9397ab;margin-left:auto"><span style="width:9px;height:9px;border-radius:2px;background:#968ae0"></span>Accepted</span>
+                <span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#9397ab"><span style="width:9px;height:9px;border-radius:2px;background:#423a6a"></span>Quarantined</span>
+              </div>
+              <div style="position:relative;flex:1 1 auto;min-height:190px;margin-top:14px">
+                <sc-for list="{{ gridLines }}" as="g" hint-placeholder-count="4">
+                  <div style="{{ g.rowStyle }}">
+                    <span style="width:26px;flex:none;text-align:right;font-size:9.5px;color:#75798c;line-height:1">{{ g.label }}</span>
+                    <span style="flex:1;height:1px;background:#292b31"></span>
+                  </div>
+                </sc-for>
+                <svg viewBox="0 0 620 100" preserveAspectRatio="none" style="position:absolute;left:34px;right:0;top:0;bottom:0;width:calc(100% - 34px);height:100%">
+                  <sc-for list="{{ bars }}" as="b" hint-placeholder-count="30">
+                    <g>
+                      <rect x="{{ b.x }}" y="{{ b.spamY }}" width="14" height="{{ b.spamH }}" rx="2" fill="#423a6a"></rect>
+                      <rect x="{{ b.x }}" y="{{ b.y }}" width="14" height="{{ b.h }}" rx="2" fill="#968ae0"></rect>
+                    </g>
+                  </sc-for>
+                </svg>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:#75798c;margin:6px 0 0 34px">
+                <span>Feb 4</span><span>Feb 11</span><span>Feb 18</span><span>Feb 25</span><span>Mar 4</span>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:12px;flex:1 1 280px;min-width:0">
+              <div class="card elev-sm" style="padding:15px 16px;gap:0">
+                <span class="card-title">Top spam signals</span>
+                <p class="text-muted" style="font-size:11px;margin:3px 0 12px">Weighted hits from <code>internal/spam</code>, last 30 days</p>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <sc-for list="{{ signals }}" as="s" hint-placeholder-count="5">
+                    <div>
+                      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                        <span>{{ s.name }}</span>
+                        <span style="color:#75798c">{{ s.count }} · w{{ s.weight }}</span>
+                      </div>
+                      <div style="height:6px;border-radius:3px;background:#292b31;overflow:hidden">
+                        <div style="{{ s.barStyle }}"></div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div class="card elev-sm" style="padding:15px 16px;gap:0;flex:1">
+                <div style="display:flex;align-items:center;gap:8px"><span class="card-title">Rate-limit activity</span><span class="tag tag-outline" style="margin-left:auto">5 / min</span></div>
+                <div style="display:flex;flex-direction:column;margin-top:10px">
+                  <sc-for list="{{ ips }}" as="p" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:center;gap:9px;padding:7px 0;background:linear-gradient(to right,rgba(233,233,237,.08),rgba(233,233,237,.08)) no-repeat bottom/100% 1px">
+                      <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#cfd3e5;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis">{{ p.ip }}</span>
+                      <span style="font-size:11px;color:#75798c">{{ p.hits }}</span>
+                      <span class="{{ p.tagClass }}">{{ p.state }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+            <div class="card elev-sm" style="padding:15px 4px 6px;gap:0;flex:1.4 1 420px;min-width:0;overflow-x:auto">
+              <div style="display:flex;align-items:center;padding:0 12px 8px"><span class="card-title">By form</span><a href="#" onClick="{{ goForms }}" style="margin-left:auto;font-size:12px">All forms →</a></div>
+              <table class="table" style="min-width:460px">
+                <thead><tr><th>Form</th><th>Received</th><th>Held</th><th>Unread</th><th>Read rate</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ byForm }}" as="f" hint-placeholder-count="4">
+                    <tr>
+                      <td style="padding-left:12px"><a href="#" onClick="{{ goForm }}">{{ f.name }}</a></td>
+                      <td>{{ f.received }}</td>
+                      <td><span class="{{ f.heldClass }}">{{ f.held }}</span></td>
+                      <td>{{ f.unread }}</td>
+                      <td style="padding-right:12px">
+                        <div style="display:flex;align-items:center;gap:8px">
+                          <div style="width:64px;height:5px;border-radius:3px;background:#292b31;overflow:hidden"><div style="{{ f.rateStyle }}"></div></div>
+                          <span style="font-size:11px;color:#75798c">{{ f.rate }}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card elev-sm" style="padding:15px 16px 8px;gap:0;flex:1 1 300px;min-width:0">
+              <div style="display:flex;align-items:center"><span class="card-title">Recent</span><a href="#" onClick="{{ goInbox }}" style="margin-left:auto;font-size:12px">Open inbox →</a></div>
+              <div style="display:flex;flex-direction:column;margin-top:6px">
+                <sc-for list="{{ recent }}" as="r" hint-placeholder-count="5">
+                  <a href="#" onClick="{{ goReader }}" style="display:flex;gap:10px;padding:9px 0;color:inherit;background:linear-gradient(to right,rgba(233,233,237,.08),rgba(233,233,237,.08)) no-repeat bottom/100% 1px">
+                    <span style="{{ r.avatarStyle }}">{{ r.initials }}</span>
+                    <span style="min-width:0;flex:1">
+                      <span style="display:flex;align-items:baseline;gap:7px">
+                        <span style="{{ r.nameStyle }}">{{ r.name }}</span>
+                        <span style="font-size:11px;color:#75798c;margin-left:auto;white-space:nowrap">{{ r.time }}</span>
+                      </span>
+                      <span style="display:block;font-size:12px;color:#9397ab;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.preview }}</span>
+                      <span style="display:block;font-size:11px;color:#75798c;margin-top:2px">{{ r.form }}</span>
+                    </span>
+                  </a>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ HOME · focused inbox ══ -->
+      <sc-if value="{{ isHomeInbox }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:16px;max-width:1000px">
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+            <h3 style="margin:0">Inbox</h3>
+            <span class="tag tag-accent">17 unread</span>
+            <div class="seg" style="margin-left:auto">
+              <label class="seg-opt"><input type="radio" name="ifilter" defaultChecked="{{ true }}" /><span>Unread</span></label>
+              <label class="seg-opt"><input type="radio" name="ifilter" /><span>All</span></label>
+              <label class="seg-opt"><input type="radio" name="ifilter" /><span>Held</span></label>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:22px;flex-wrap:wrap;padding:13px 16px;border-radius:8px;background:#232532;box-shadow:var(--shadow-sm)">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:10px">
+                <i class="{{ k.icon }}" style="font-size:17px;color:#9184d9"></i>
+                <div>
+                  <div style="font-size:19px;line-height:1.05;font-weight:500;letter-spacing:-.02em">{{ k.value }}</div>
+                  <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">{{ k.label }}</div>
+                </div>
+              </div>
+            </sc-for>
+            <svg viewBox="0 0 220 40" preserveAspectRatio="none" style="height:38px;flex:1;min-width:120px;opacity:.8">
+              <path d="{{ trendFill }}" fill="#2b2741"></path>
+              <path d="{{ trend }}" fill="none" stroke="#968ae0" stroke-width="1.5"></path>
+            </svg>
+          </div>
+
+          <div class="card elev-sm" style="padding:4px 0 0;gap:0">
+            <sc-for list="{{ inbox }}" as="r" hint-placeholder-count="8">
+              <a href="#" onClick="{{ goReader }}" style="display:flex;gap:12px;align-items:flex-start;padding:13px 16px;color:inherit;background:linear-gradient(to right,transparent,rgba(233,233,237,.08) 48px,rgba(233,233,237,.08) calc(100% - 48px),transparent) no-repeat bottom/100% 1px">
+                <span style="{{ r.avatarStyle }}">{{ r.initials }}</span>
+                <span style="min-width:0;flex:1">
+                  <span style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+                    <span style="{{ r.nameStyle }}">{{ r.name }}</span>
+                    <span style="font-size:12px;color:#75798c">{{ r.email }}</span>
+                    <span class="{{ r.tagClass }}">{{ r.tag }}</span>
+                    <span style="font-size:11px;color:#75798c;margin-left:auto;white-space:nowrap">{{ r.time }}</span>
+                  </span>
+                  <span style="display:block;font-size:13px;color:#b2b6ca;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.preview }}</span>
+                </span>
+                <i class="ph ph-caret-right" style="font-size:14px;color:#595d6c;margin-top:4px"></i>
+              </a>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ FORMS ══ -->
+      <sc-if value="{{ isForms }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr));gap:12px">
+            <sc-for list="{{ formCards }}" as="f" hint-placeholder-count="4">
+              <div class="card elev-sm" style="padding:15px 16px;gap:0">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span class="card-kicker">{{ f.kind }}</span>
+                  <i class="ph ph-dots-three" style="font-size:16px;color:#75798c;margin-left:auto"></i>
+                </div>
+                <a href="#" onClick="{{ goForm }}" style="font-size:17px;font-weight:500;color:#e9e9ed;margin-top:5px;display:block">{{ f.name }}</a>
+                <div style="font-size:12px;color:#75798c;margin-top:2px">→ {{ f.email }}</div>
+                <div style="display:flex;gap:18px;margin-top:14px">
+                  <div><div style="font-size:19px;font-weight:500;letter-spacing:-.02em">{{ f.total }}</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">total</div></div>
+                  <div><div style="font-size:19px;font-weight:500;letter-spacing:-.02em;color:#b5abfc">{{ f.unread }}</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">unread</div></div>
+                  <div><div style="font-size:19px;font-weight:500;letter-spacing:-.02em">{{ f.held }}</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">held</div></div>
+                </div>
+                <svg viewBox="0 0 220 34" preserveAspectRatio="none" style="width:100%;height:34px;margin-top:12px">
+                  <path d="{{ f.spark }}" fill="none" stroke="#5d5294" stroke-width="1.5"></path>
+                </svg>
+                <div style="display:flex;gap:7px;margin-top:12px">
+                  <button class="btn btn-secondary" style="flex:1;font-size:13px" onClick="{{ goForm }}">Submissions</button>
+                  <button class="btn btn-secondary btn-icon" onClick="{{ goSettings }}" title="Settings"><i class="ph ph-gear-six" style="font-size:15px"></i></button>
+                </div>
+              </div>
+            </sc-for>
+            <button onClick="{{ goSettings }}" class="btn" style="min-height:200px;border:1px dashed #3f424d;border-radius:8px;flex-direction:column;gap:8px;color:#9397ab">
+              <i class="ph ph-plus" style="font-size:22px;color:#9184d9"></i>
+              <span style="font-size:13px">New form</span>
+              <span style="font-size:11px;color:#75798c;font-weight:400">Name it, pick a notify address, paste the snippet</span>
+            </button>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ FORM DETAIL ══ -->
+      <sc-if value="{{ isForm }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <h4 style="margin:0">Contact form</h4>
+            <span class="tag tag-neutral" style="font-family:ui-monospace,Menlo,monospace">/f/4b91c0</span>
+            <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:8px">
+              <button class="btn btn-secondary"><i class="ph ph-envelope-open" style="font-size:15px"></i>Mark all read</button>
+              <button class="btn btn-secondary"><i class="ph ph-file-csv" style="font-size:15px"></i>Export CSV</button>
+              <button class="btn btn-primary" onClick="{{ goSettings }}"><i class="ph ph-gear-six" style="font-size:15px"></i>Settings</button>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <sc-for list="{{ formStats }}" as="s" hint-placeholder-count="4">
+              <div class="card elev-sm" style="padding:12px 16px;gap:0;min-width:150px;flex:1">
+                <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#75798c">{{ s.label }}</div>
+                <div style="display:flex;align-items:baseline;gap:7px;margin-top:5px">
+                  <span style="font-size:24px;font-weight:500;letter-spacing:-.02em">{{ s.value }}</span>
+                  <span style="font-size:11px;color:#75798c">{{ s.note }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:8px 12px;border-radius:8px;background:#232532;box-shadow:var(--shadow-sm)">
+            <label class="radio"><input type="checkbox" /><span class="dot"></span></label>
+            <span style="font-size:12px;color:#9397ab">3 selected</span>
+            <div style="display:flex;flex-wrap:wrap;gap:7px;margin-left:auto">
+              <button class="btn btn-secondary" style="font-size:12px"><i class="ph ph-envelope-open" style="font-size:14px"></i>Mark read</button>
+              <button class="btn btn-secondary" style="font-size:12px"><i class="ph ph-shield-warning" style="font-size:14px"></i>Move to quarantine</button>
+              <button class="btn btn-secondary" style="font-size:12px;color:#cfd3e5"><i class="ph ph-trash" style="font-size:14px"></i>Delete</button>
+            </div>
+          </div>
+
+          <div class="card elev-sm" style="padding:8px 0 0;gap:0;overflow-x:auto">
+            <table class="table" style="min-width:640px">
+              <thead>
+                <tr>
+                  <th style="width:34px;padding-left:14px"></th>
+                  <th>From</th><th>Preview</th><th>Signals</th><th>Received</th><th style="text-align:right;padding-right:14px">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ subs }}" as="s" hint-placeholder-count="8">
+                  <tr>
+                    <td style="padding-left:14px"><label class="radio"><input type="checkbox" defaultChecked="{{ s.checked }}" /><span class="dot"></span></label></td>
+                    <td>
+                      <div style="display:flex;align-items:center;gap:9px">
+                        <span style="{{ s.dotStyle }}"></span>
+                        <span>
+                          <a href="#" onClick="{{ goReader }}" style="{{ s.nameStyle }}">{{ s.name }}</a>
+                          <span style="display:block;font-size:11px;color:#75798c">{{ s.email }}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <td style="max-width:300px;color:#9397ab;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.preview }}</td>
+                    <td><span class="{{ s.tagClass }}">{{ s.tag }}</span></td>
+                    <td style="white-space:nowrap;color:#9397ab;font-size:13px">{{ s.date }}</td>
+                    <td style="text-align:right;padding-right:14px;white-space:nowrap">
+                      <button class="btn btn-ghost btn-icon" title="Open" onClick="{{ goReader }}"><i class="ph ph-arrow-up-right" style="font-size:14px"></i></button>
+                      <button class="btn btn-ghost btn-icon" title="Quarantine"><i class="ph ph-shield-warning" style="font-size:14px"></i></button>
+                      <button class="btn btn-ghost btn-icon" title="Delete"><i class="ph ph-trash" style="font-size:14px"></i></button>
+                    </td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+            <div style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:11px 16px;background:linear-gradient(to right,transparent,rgba(233,233,237,.16) 48px,rgba(233,233,237,.16) calc(100% - 48px),transparent) no-repeat top/100% 1px">
+              <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:#75798c">
+                <span>Rows</span>
+                <select class="input" style="width:auto;min-height:28px;padding:2px 6px;font-size:12px">
+                  <option>25</option><option>50</option><option>100</option>
+                </select>
+              </label>
+              <span style="font-size:12px;color:#9397ab">1–25 of 612</span>
+              <div style="display:flex;align-items:center;gap:4px;margin-left:auto">
+                <button class="btn btn-secondary btn-icon" disabled="{{ true }}" style="width:30px;height:30px" title="First page"><i class="ph ph-caret-double-left" style="font-size:13px"></i></button>
+                <button class="btn btn-secondary btn-icon" disabled="{{ true }}" style="width:30px;height:30px" title="Previous page"><i class="ph ph-caret-left" style="font-size:13px"></i></button>
+                <sc-for list="{{ pages }}" as="p" hint-placeholder-count="5">
+                  <button class="{{ p.class }}" disabled="{{ p.dim }}" style="{{ p.style }}">{{ p.label }}</button>
+                </sc-for>
+                <button class="btn btn-secondary btn-icon" style="width:30px;height:30px" title="Next page"><i class="ph ph-caret-right" style="font-size:13px"></i></button>
+                <button class="btn btn-secondary btn-icon" style="width:30px;height:30px" title="Last page"><i class="ph ph-caret-double-right" style="font-size:13px"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ READER ══ -->
+      <sc-if value="{{ isReader }}" hint-placeholder-val="{{ false }}">
+        <div onClick="{{ closeSub }}" style="position:fixed;inset:0;z-index:65;background:rgba(41,43,49,.55)"></div>
+        <div style="position:fixed;top:0;right:0;bottom:0;z-index:66;width:min(640px,100%);display:flex;flex-direction:column;background:#232532;box-shadow:var(--shadow-lg)">
+          <div style="display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;overflow-y:auto;padding-bottom:16px">
+            <div style="display:flex;flex-direction:column">
+              <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:11px 14px;position:sticky;top:0;z-index:2;background:#232532;background-image:linear-gradient(to right,rgba(233,233,237,.16),rgba(233,233,237,.16));background-repeat:no-repeat;background-position:bottom;background-size:100% 1px">
+                <button class="btn btn-secondary btn-icon" onClick="{{ closeSub }}" title="Close"><i class="ph ph-x" style="font-size:15px"></i></button>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <button class="btn btn-secondary btn-icon" disabled="{{ true }}" style="width:30px;height:30px" title="Newer"><i class="ph ph-caret-up" style="font-size:14px"></i></button>
+                  <button class="btn btn-secondary btn-icon" style="width:30px;height:30px" title="Older"><i class="ph ph-caret-down" style="font-size:14px"></i></button>
+                  <span style="font-size:11px;color:#75798c;margin-left:5px;white-space:nowrap">1 of 612</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-left:auto">
+                  <button class="btn btn-secondary btn-icon" title="Mark read"><i class="ph ph-check" style="font-size:15px"></i></button>
+                  <button class="btn btn-secondary btn-icon" title="Move to quarantine"><i class="ph ph-shield-warning" style="font-size:15px"></i></button>
+                  <button class="btn btn-secondary btn-icon" title="Delete"><i class="ph ph-trash" style="font-size:15px"></i></button>
+                  <button class="btn btn-primary" style="font-size:12px"><i class="ph ph-arrow-bend-up-left" style="font-size:14px"></i>Reply</button>
+                </div>
+              </div>
+              <div style="padding:20px 22px 8px">
+                <div style="display:flex;align-items:center;gap:11px">
+                  <span style="width:38px;height:38px;flex:none;border-radius:50%;background:#423a6a;color:#d2cefd;display:grid;place-items:center;font-size:14px;font-weight:500">MO</span>
+                  <div>
+                    <div style="font-size:17px;font-weight:500;letter-spacing:-.01em">Maya Oduya</div>
+                    <div style="font-size:12px;color:#9397ab">maya.oduya@northlight.studio</div>
+                  </div>
+                  <div style="margin-left:auto;text-align:right">
+                    <div style="font-size:12px;color:#9397ab">Mar 4, 2026 · 2:18 PM</div>
+                    <div style="font-size:11px;color:#75798c;font-family:ui-monospace,Menlo,monospace">91.214.44.10 · SE</div>
+                  </div>
+                </div>
+                <div class="hr" style="margin:18px 0"></div>
+                <div style="display:grid;grid-template-columns:minmax(0,120px) minmax(0,1fr);gap:9px 18px;font-size:13px">
+                  <sc-for list="{{ readerFields }}" as="f" hint-placeholder-count="4">
+                    <div style="color:#75798c;font-size:11px;letter-spacing:.07em;text-transform:uppercase;padding-top:2px">{{ f.key }}</div>
+                    <div style="color:#e9e9ed">{{ f.val }}</div>
+                  </sc-for>
+                </div>
+                <div style="margin-top:20px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#75798c;margin-bottom:7px">message</div>
+                <div style="font-size:15px;line-height:1.65;color:#e9e9ed;white-space:pre-wrap;text-wrap:pretty">We're moving our marketing site to Astro next month and need a form endpoint we can host ourselves. Does dsforms handle multiple forms on one instance, and can each one notify a different address?
+
+Happy to sponsor the project if it works out for us.</div>
+              </div>
+            </div>
+
+            <div style="padding:13px 15px;margin:0 22px;border-radius:8px;box-shadow:inset 0 0 0 1px #3f424d">
+              <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px"><i class="ph ph-shield-check" style="font-size:16px;color:#9184d9"></i><span class="card-title" style="font-size:15px">Spam check passed</span><span class="tag tag-outline" style="margin-left:auto">score 0 / 6</span></div>
+              <p class="text-muted" style="font-size:12px;margin:6px 0 0">No link markup, no keyword hits, no gibberish tokens, one submission from this IP. Delivered to <code>hello@northlight.studio</code> in 1.2s.</p>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ QUARANTINE ══ -->
+      <sc-if value="{{ isSpam }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:center;gap:11px;flex-wrap:wrap">
+            <h4 style="margin:0">Quarantine</h4>
+            <span class="tag tag-accent">12 held</span>
+            <span class="text-muted" style="font-size:12px">Auto-deleted after 30 days · threshold 6</span>
+            <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:8px">
+              <button class="btn btn-secondary" onClick="{{ goRules }}"><i class="ph ph-sliders-horizontal" style="font-size:15px"></i>Tune filter</button>
+              <button class="btn btn-secondary"><i class="ph ph-trash" style="font-size:15px"></i>Empty quarantine</button>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:12px">
+            <sc-for list="{{ spamStats }}" as="s" hint-placeholder-count="4">
+              <div class="card elev-sm" style="padding:12px 16px;gap:0">
+                <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#75798c">{{ s.label }}</div>
+                <div style="display:flex;align-items:baseline;gap:7px;margin-top:5px">
+                  <span style="font-size:24px;font-weight:500;letter-spacing:-.02em">{{ s.value }}</span>
+                  <span style="font-size:11px;color:#75798c">{{ s.note }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+            <div class="card elev-sm" style="padding:8px 0 0;gap:0;overflow-x:auto;flex:1.5 1 440px;min-width:0">
+              <div style="display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:6px 14px 10px">
+                <label class="radio"><input type="checkbox" /><span class="dot"></span></label>
+                <span style="font-size:12px;color:#9397ab">2 selected</span>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-left:auto">
+                  <button class="btn btn-primary" style="font-size:12px"><i class="ph ph-arrow-u-up-left" style="font-size:14px"></i>Not spam</button>
+                  <button class="btn btn-secondary" style="font-size:12px"><i class="ph ph-trash" style="font-size:14px"></i>Confirm spam</button>
+                </div>
+              </div>
+              <table class="table">
+                <thead><tr><th style="width:34px;padding-left:14px"></th><th>From</th><th>Signals</th><th>Score</th><th style="padding-right:14px">Form</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ held }}" as="h" hint-placeholder-count="7">
+                    <tr style="{{ h.rowStyle }}">
+                      <td style="padding-left:14px"><label class="radio"><input type="checkbox" defaultChecked="{{ h.checked }}" /><span class="dot"></span></label></td>
+                      <td>
+                        <a href="#" onClick="{{ h.select }}" style="{{ h.nameStyle }}">{{ h.name }}</a>
+                        <span style="display:block;font-size:11px;color:#75798c;font-family:ui-monospace,Menlo,monospace">{{ h.ip }}</span>
+                      </td>
+                      <td>
+                        <div style="display:flex;gap:4px;flex-wrap:wrap">
+                          <sc-for list="{{ h.signals }}" as="sg" hint-placeholder-count="2">
+                            <span class="tag tag-neutral" style="font-size:10px;white-space:nowrap;padding:3px 7px">{{ sg }}</span>
+                          </sc-for>
+                        </div>
+                      </td>
+                      <td><span style="{{ h.scoreStyle }}">{{ h.score }}</span></td>
+                      <td style="padding-right:14px">
+                        <span style="display:block;font-size:12px;color:#9397ab;white-space:nowrap">{{ h.form }}</span>
+                        <span style="display:block;font-size:11px;color:#75798c;white-space:nowrap">{{ h.age }}</span>
+                      </td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card elev-sm" style="padding:0;gap:0;overflow:hidden;flex:1 1 320px;min-width:0">
+              <div style="padding:13px 16px;background:linear-gradient(to right,rgba(233,233,237,.16),rgba(233,233,237,.16)) no-repeat bottom/100% 1px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#9397ab">Why it was held</span>
+                  <span class="tag tag-accent" style="margin-left:auto">score {{ sel.score }} / 6</span>
+                </div>
+                <div style="font-size:15px;font-weight:500;margin-top:7px">{{ sel.name }}</div>
+                <div style="font-size:12px;color:#75798c;font-family:ui-monospace,Menlo,monospace">{{ sel.ip }} · {{ sel.form }} · {{ sel.age }}</div>
+              </div>
+
+              <div style="padding:14px 16px">
+                <div style="position:relative;height:8px;border-radius:4px;background:#292b31;overflow:hidden">
+                  <div style="{{ sel.meterStyle }}"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:#75798c;margin-top:4px">
+                  <span>0</span><span>threshold 6</span><span>{{ sel.max }}</span>
+                </div>
+
+                <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px">
+                  <sc-for list="{{ sel.breakdown }}" as="b" hint-placeholder-count="3">
+                    <div style="padding:9px 11px;border-radius:8px;box-shadow:inset 0 0 0 1px #3f424d">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <i class="{{ b.icon }}" style="font-size:14px;color:#9184d9"></i>
+                        <span style="font-size:12px;font-weight:500">{{ b.rule }}</span>
+                        <span class="tag tag-outline" style="margin-left:auto;font-size:10px">+{{ b.weight }}</span>
+                      </div>
+                      <div style="font-size:11px;color:#75798c;margin-top:5px">field <code>{{ b.field }}</code> · matched</div>
+                      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#cfd3e5;background:#161826;border-radius:5px;padding:6px 8px;margin-top:5px;overflow-x:auto;white-space:pre">{{ b.match }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:16px">
+                  <button class="btn btn-primary" style="font-size:12px"><i class="ph ph-arrow-u-up-left" style="font-size:14px"></i>Not spam</button>
+                  <button class="btn btn-secondary" style="font-size:12px"><i class="ph ph-trash" style="font-size:14px"></i>Confirm spam</button>
+                  <button class="btn btn-secondary" onClick="{{ goRules }}" style="font-size:12px"><i class="ph ph-prohibit" style="font-size:14px"></i>Block this IP</button>
+                  <button class="btn btn-secondary" onClick="{{ goRules }}" style="font-size:12px"><i class="ph ph-envelope-simple-slash" style="font-size:14px"></i>Block sender</button>
+                  <button class="btn btn-secondary" onClick="{{ goRules }}" style="font-size:12px"><i class="ph ph-user-check" style="font-size:14px"></i>Allowlist sender</button>
+                  <button class="btn btn-ghost" style="grid-column:1 / -1;font-size:12px"><i class="ph ph-flag" style="font-size:14px"></i>Report as false positive — retune weights</button>
+                </div>
+                <p class="text-muted" style="font-size:11px;margin:9px 0 0">Restoring moves the submission back into <strong style="font-weight:500">Contact form</strong> as unread and sends the notification that was withheld.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ FILTER RULES ══ -->
+      <sc-if value="{{ isRules }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:center;gap:11px;flex-wrap:wrap">
+            <h4 style="margin:0">Filter rules</h4>
+            <span class="text-muted" style="font-size:12px">Rules are evaluated before scoring — a blocked sender never reaches the threshold logic</span>
+          </div>
+
+          <div class="card elev-sm" style="padding:15px 16px;gap:0">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <div>
+                <span class="card-title">Score threshold</span>
+                <p class="text-muted" style="font-size:12px;margin:3px 0 0">Submissions at or above this score are held. Default 6.</p>
+              </div>
+              <div class="seg" style="margin-left:auto">
+                <label class="seg-opt"><input type="radio" name="thr" /><span>Lenient · 9</span></label>
+                <label class="seg-opt"><input type="radio" name="thr" defaultChecked="{{ true }}" /><span>Balanced · 6</span></label>
+                <label class="seg-opt"><input type="radio" name="thr" /><span>Strict · 4</span></label>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+            <div class="card elev-sm" style="padding:15px 0 8px;gap:0;overflow-x:auto;flex:1.2 1 420px;min-width:0">
+              <div style="padding:0 16px">
+                <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+                  <i class="ph ph-prohibit" style="font-size:17px;color:#9184d9"></i>
+                  <span class="card-title">Blocklist</span>
+                  <span class="tag tag-accent" style="margin-left:auto">{{ blockCount }} rules</span>
+                </div>
+                <p class="text-muted" style="font-size:12px;margin:5px 0 11px">Anything matching a rule here is held as spam on arrival, whatever it scores.</p>
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <div class="seg">
+                    <label class="seg-opt"><input type="radio" name="btype" defaultChecked="{{ true }}" /><span>Email</span></label>
+                    <label class="seg-opt"><input type="radio" name="btype" /><span>Domain</span></label>
+                    <label class="seg-opt"><input type="radio" name="btype" /><span>IP / CIDR</span></label>
+                  </div>
+                  <input class="input" placeholder="spammer@example.com, example.ru, or 45.155.204.0/24" style="flex:1 1 220px;min-width:0" />
+                  <button class="btn btn-primary"><i class="ph ph-plus" style="font-size:15px"></i>Block</button>
+                </div>
+              </div>
+              <table class="table" style="min-width:460px;margin-top:12px">
+                <thead><tr><th style="padding-left:16px">Rule</th><th>Type</th><th>Blocked</th><th>Added</th><th style="padding-right:16px"></th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ blocked }}" as="b" hint-placeholder-count="6">
+                    <tr>
+                      <td style="padding-left:16px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">{{ b.value }}</td>
+                      <td><span class="tag tag-neutral" style="font-size:10px;white-space:nowrap">{{ b.type }}</span></td>
+                      <td style="font-size:12px;color:#9397ab;white-space:nowrap">{{ b.hits }}</td>
+                      <td style="font-size:12px;color:#75798c;white-space:nowrap">{{ b.added }}</td>
+                      <td style="padding-right:16px;text-align:right"><button class="btn btn-ghost btn-icon" title="Remove rule"><i class="ph ph-x" style="font-size:14px"></i></button></td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:12px;flex:1 1 320px;min-width:0">
+              <div class="card elev-sm" style="padding:15px 16px;gap:0">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <i class="ph ph-user-check" style="font-size:17px;color:#9184d9"></i>
+                  <span class="card-title">Allowlist</span>
+                </div>
+                <p class="text-muted" style="font-size:12px;margin:5px 0 11px">Never held, whatever the score. Use it after a false positive.</p>
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <input class="input" placeholder="name@client.com or client.com" style="flex:1 1 160px;min-width:0" />
+                  <button class="btn btn-secondary"><i class="ph ph-plus" style="font-size:15px"></i>Allow</button>
+                </div>
+                <div style="display:flex;flex-direction:column;margin-top:10px">
+                  <sc-for list="{{ allowed }}" as="a" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:center;gap:9px;padding:8px 0;background:linear-gradient(to right,rgba(233,233,237,.08),rgba(233,233,237,.08)) no-repeat bottom/100% 1px">
+                      <span style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis">{{ a.value }}</span>
+                      <span style="font-size:11px;color:#75798c;white-space:nowrap">{{ a.note }}</span>
+                      <button class="btn btn-ghost btn-icon" title="Remove"><i class="ph ph-x" style="font-size:13px"></i></button>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div class="card elev-sm" style="padding:15px 16px;gap:0">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <i class="ph ph-text-aa" style="font-size:17px;color:#9184d9"></i>
+                  <span class="card-title">Custom keywords</span>
+                </div>
+                <p class="text-muted" style="font-size:12px;margin:5px 0 11px">Added to the built-in list. Each hit scores +5 — a single keyword never holds a submission alone.</p>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <sc-for list="{{ keywords }}" as="k" hint-placeholder-count="6">
+                    <span class="tag tag-neutral" style="gap:5px;white-space:nowrap">{{ k }}<i class="ph ph-x" style="font-size:11px;opacity:.6"></i></span>
+                  </sc-for>
+                </div>
+                <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:11px">
+                  <input class="input" placeholder="guest post" style="flex:1 1 160px;min-width:0" />
+                  <button class="btn btn-secondary"><i class="ph ph-plus" style="font-size:15px"></i>Add</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ FORM SETTINGS ══ -->
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;max-width:1080px">
+          <div style="display:flex;flex-direction:column;gap:12px;flex:1 1 340px;min-width:0">
+            <div class="card elev-sm" style="padding:16px;gap:0">
+              <span class="card-title">Form</span>
+              <div class="field" style="margin-top:12px"><label>Name</label><input class="input" defaultValue="Contact form" /></div>
+              <div class="field" style="margin-top:11px"><label>Notify this address</label><input class="input" defaultValue="hello@northlight.studio" /></div>
+              <div class="field" style="margin-top:11px"><label>Redirect after submit</label><input class="input" defaultValue="https://northlight.studio/thanks" /></div>
+              <div class="field" style="margin-top:11px"><label>Webhook URL (Slack, Discord, or any JSON endpoint)</label><input class="input" placeholder="https://hooks.slack.com/services/…" /></div>
+            </div>
+
+            <div class="card elev-sm" style="padding:16px;gap:0">
+              <span class="card-title">Spam &amp; abuse</span>
+              <p class="text-muted" style="font-size:12px;margin:4px 0 12px">Weighted scoring over link markup, SQL probes, keyword hits and gibberish tokens. Held submissions land in Quarantine instead of being dropped.</p>
+              <div class="field"><label>Sensitivity</label>
+                <div class="seg">
+                  <label class="seg-opt"><input type="radio" name="sens" /><span>Lenient · 9</span></label>
+                  <label class="seg-opt"><input type="radio" name="sens" defaultChecked="{{ true }}" /><span>Balanced · 6</span></label>
+                  <label class="seg-opt"><input type="radio" name="sens" /><span>Strict · 4</span></label>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:9px;margin-top:14px">
+                <sc-for list="{{ toggles }}" as="t" hint-placeholder-count="4">
+                  <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                    <span style="{{ t.knobStyle }}"></span>
+                    <span style="min-width:0">
+                      <span style="display:block;font-size:13px">{{ t.label }}</span>
+                      <span style="display:block;font-size:11px;color:#75798c">{{ t.hint }}</span>
+                    </span>
+                  </label>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:12px;flex:1 1 340px;min-width:0">
+            <div class="card elev-sm" style="padding:16px;gap:0">
+              <div style="display:flex;align-items:center"><span class="card-title">Endpoint</span><button class="btn btn-ghost" style="margin-left:auto;font-size:12px"><i class="ph ph-copy" style="font-size:14px"></i>Copy</button></div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#d2cefd;background:#161826;border-radius:8px;padding:10px 12px;margin-top:9px;overflow-x:auto;white-space:pre">POST https://forms.northlight.studio/f/4b91c0</div>
+              <div style="display:flex;align-items:center;margin-top:16px"><span class="card-title">Paste this into your site</span><button class="btn btn-ghost" style="margin-left:auto;font-size:12px"><i class="ph ph-copy" style="font-size:14px"></i>Copy</button></div>
+              <pre style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;line-height:1.7;color:#cfd3e5;background:#161826;border-radius:8px;padding:12px;margin:9px 0 0;overflow-x:auto">&lt;form action="https://forms.northlight.studio/f/4b91c0" method="POST"&gt;
+  &lt;input name="name"    placeholder="Your name"  required&gt;
+  &lt;input name="email"   placeholder="Your email" required type="email"&gt;
+  &lt;textarea name="message" required&gt;&lt;/textarea&gt;
+  &lt;input name="_honeypot" style="display:none" tabindex="-1"&gt;
+  &lt;input type="hidden" name="_redirect"
+         value="https://northlight.studio/thanks"&gt;
+  &lt;button&gt;Send&lt;/button&gt;
+&lt;/form&gt;</pre>
+            </div>
+
+            <div class="card elev-sm" style="padding:16px;gap:0">
+              <span class="card-title">Danger zone</span>
+              <p class="text-muted" style="font-size:12px;margin:5px 0 11px">Deleting the form removes all 612 submissions with it. Export a CSV first if you need the record.</p>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-secondary"><i class="ph ph-file-csv" style="font-size:15px"></i>Export CSV</button>
+                <button class="btn btn-secondary" style="box-shadow:inset 0 0 0 1px #595d6c"><i class="ph ph-trash" style="font-size:15px"></i>Delete form</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ WAITLISTS ══ -->
+      <sc-if value="{{ isWaitlists }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+          <div style="display:flex;flex-direction:column;gap:12px;flex:1.4 1 400px;min-width:0">
+            <div class="card elev-sm" style="padding:15px 16px;gap:0">
+              <div style="display:flex;align-items:center;gap:9px">
+                <span class="card-title">Launch list</span>
+                <span class="tag tag-outline">open</span>
+                <a href="#" style="margin-left:auto;font-size:12px">Settings →</a>
+              </div>
+              <div style="display:flex;gap:22px;margin-top:12px">
+                <div><div style="font-size:26px;font-weight:500;letter-spacing:-.03em">2,481</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">signups</div></div>
+                <div><div style="font-size:26px;font-weight:500;letter-spacing:-.03em;color:#b5abfc">+134</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">this week</div></div>
+                <div><div style="font-size:26px;font-weight:500;letter-spacing:-.03em">38%</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">confirm open rate</div></div>
+              </div>
+              <svg viewBox="0 0 620 90" preserveAspectRatio="none" style="width:100%;height:90px;margin-top:14px">
+                <path d="{{ waitlistFill }}" fill="#2b2741"></path>
+                <path d="{{ waitlistPath }}" fill="none" stroke="#968ae0" stroke-width="1.75"></path>
+              </svg>
+            </div>
+
+            <div class="card elev-sm" style="padding:8px 0 8px;gap:0;overflow-x:auto">
+              <table class="table">
+                <thead><tr><th style="padding-left:14px">#</th><th>Email</th><th>Source</th><th style="padding-right:14px">Joined</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ signups }}" as="s" hint-placeholder-count="6">
+                    <tr>
+                      <td style="padding-left:14px;color:#75798c;font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ s.pos }}</td>
+                      <td>{{ s.email }}</td>
+                      <td><span class="tag tag-neutral" style="font-size:10px">{{ s.source }}</span></td>
+                      <td style="padding-right:14px;font-size:12px;color:#75798c;white-space:nowrap">{{ s.joined }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card elev-sm" style="padding:16px;gap:0;flex:1 1 320px;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px"><i class="ph ph-megaphone" style="font-size:17px;color:#9184d9"></i><span class="card-title">Broadcast</span></div>
+            <p class="text-muted" style="font-size:12px;margin:5px 0 12px">Restart-safe queue — 200ms between sends, 3 attempts per recipient.</p>
+            <div class="field"><label>Subject</label><input class="input" defaultValue="dsforms 2.0 is live" /></div>
+            <div class="field" style="margin-top:11px"><label>Body</label><textarea class="input" style="min-height:120px">Hi {{name}}, you were #{{position}} on the list — your instance is ready.</textarea></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:12px">
+              <span style="font-size:12px;color:#75798c">2,481 recipients · ~8 min</span>
+              <button class="btn btn-primary" style="margin-left:auto"><i class="ph ph-paper-plane-tilt" style="font-size:15px"></i>Send broadcast</button>
+            </div>
+            <div class="hr"></div>
+            <span style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#9397ab">Recent sends</span>
+            <div style="display:flex;flex-direction:column;margin-top:6px">
+              <sc-for list="{{ broadcasts }}" as="b" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:9px;padding:8px 0;background:linear-gradient(to right,rgba(233,233,237,.08),rgba(233,233,237,.08)) no-repeat bottom/100% 1px">
+                  <span style="font-size:13px;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ b.subject }}</span>
+                  <span style="font-size:11px;color:#75798c">{{ b.sent }}</span>
+                  <span class="{{ b.tagClass }}">{{ b.state }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ USERS ══ -->
+      <sc-if value="{{ isUsers }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;max-width:1040px">
+          <div class="card elev-sm" style="padding:8px 0 8px;gap:0;overflow-x:auto;flex:1.3 1 400px;min-width:0">
+            <div style="display:flex;align-items:center;padding:8px 16px 10px"><span class="card-title">Users</span><button class="btn btn-primary" style="margin-left:auto;font-size:12px"><i class="ph ph-plus" style="font-size:14px"></i>Add user</button></div>
+            <table class="table">
+              <thead><tr><th style="padding-left:16px">User</th><th>Last seen</th><th>Sessions</th><th style="padding-right:16px"></th></tr></thead>
+              <tbody>
+                <sc-for list="{{ users }}" as="u" hint-placeholder-count="3">
+                  <tr>
+                    <td style="padding-left:16px">
+                      <div style="display:flex;align-items:center;gap:10px">
+                        <span style="width:28px;height:28px;flex:none;border-radius:50%;background:#3f424d;color:#e4e7f5;display:grid;place-items:center;font-size:11px;font-weight:500">{{ u.initials }}</span>
+                        <span>
+                          <span style="display:flex;align-items:center;gap:6px"><span style="font-size:13px">{{ u.name }}</span><span class="{{ u.tagClass }}">{{ u.tag }}</span></span>
+                          <span style="display:block;font-size:11px;color:#75798c">added {{ u.added }}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <td style="font-size:12px;color:#9397ab">{{ u.seen }}</td>
+                    <td style="font-size:12px;color:#9397ab">{{ u.sessions }}</td>
+                    <td style="padding-right:16px;text-align:right"><button class="btn btn-ghost" style="font-size:12px">{{ u.action }}</button></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="card elev-sm" style="padding:16px;gap:0;flex:1 1 300px;min-width:0">
+            <span class="card-title">Your account</span>
+            <p class="text-muted" style="font-size:12px;margin:5px 0 12px">Changing your password signs out every session on every device.</p>
+            <div class="field"><label>Current password</label><input class="input" type="password" defaultValue="admin" /></div>
+            <div class="field" style="margin-top:11px"><label>New password</label><input class="input" type="password" /></div>
+            <div style="display:flex;gap:5px;margin-top:9px">
+              <sc-for list="{{ strength }}" as="s" hint-placeholder-count="4">
+                <span style="{{ s }}"></span>
+              </sc-for>
+            </div>
+            <div style="font-size:11px;color:#75798c;margin-top:6px">bcrypt cost 12 · minimum 12 characters</div>
+            <button class="btn btn-primary btn-block" style="margin-top:14px">Update password</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ BACKUPS ══ -->
+      <sc-if value="{{ isBackups }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;max-width:1040px">
+          <div style="display:flex;flex-direction:column;gap:12px;flex:1 1 320px;min-width:0">
+            <div class="card elev-sm" style="padding:16px;gap:0">
+              <div style="display:flex;align-items:center;gap:9px"><i class="ph ph-database" style="font-size:17px;color:#9184d9"></i><span class="card-title">dsforms.db</span><span class="tag tag-outline" style="margin-left:auto">healthy</span></div>
+              <div style="display:flex;gap:22px;margin-top:14px">
+                <div><div style="font-size:22px;font-weight:500;letter-spacing:-.02em">18.4 MB</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">size</div></div>
+                <div><div style="font-size:22px;font-weight:500;letter-spacing:-.02em">3,847</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">rows</div></div>
+                <div><div style="font-size:22px;font-weight:500;letter-spacing:-.02em">WAL</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#75798c">journal</div></div>
+              </div>
+              <button class="btn btn-primary btn-block" style="margin-top:16px"><i class="ph ph-download-simple" style="font-size:15px"></i>Download snapshot</button>
+              <p class="text-muted" style="font-size:11px;margin:8px 0 0">VACUUM INTO a temp file, then streamed — safe while the server is running.</p>
+            </div>
+
+            <div class="card elev-sm" style="padding:16px;gap:0">
+              <span class="card-title">Restore</span>
+              <div style="margin-top:11px;padding:10px 12px;border-radius:8px;background:#2b2741;box-shadow:inset 0 0 0 1px #5d5294;font-size:12px;color:#d2cefd;display:flex;gap:9px">
+                <i class="ph ph-warning" style="font-size:16px;flex:none;margin-top:1px"></i>
+                <span>This replaces every form, submission and user with the uploaded file's contents. It cannot be undone.</span>
+              </div>
+              <label style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:12px;padding:22px;border:1px dashed #3f424d;border-radius:8px;cursor:pointer">
+                <i class="ph ph-upload-simple" style="font-size:22px;color:#9184d9"></i>
+                <span style="font-size:13px">Drop a <code>.db</code> file, or browse</span>
+                <span style="font-size:11px;color:#75798c">up to 100 MB</span>
+              </label>
+              <button class="btn btn-secondary btn-block" disabled="{{ true }}" style="margin-top:11px">Restore database</button>
+            </div>
+          </div>
+
+          <div class="card elev-sm" style="padding:16px 0 8px;gap:0;overflow-x:auto;flex:1 1 320px;min-width:0">
+            <div style="padding:0 16px 10px"><span class="card-title">Snapshots</span><p class="text-muted" style="font-size:12px;margin:4px 0 0">Written to <code>BACKUP_LOCAL_DIR</code> by the CLI</p></div>
+            <table class="table">
+              <thead><tr><th style="padding-left:16px">Taken</th><th>Size</th><th>Source</th><th style="padding-right:16px"></th></tr></thead>
+              <tbody>
+                <sc-for list="{{ snapshots }}" as="s" hint-placeholder-count="5">
+                  <tr>
+                    <td style="padding-left:16px;font-size:13px">{{ s.when }}</td>
+                    <td style="font-size:12px;color:#9397ab">{{ s.size }}</td>
+                    <td><span class="tag tag-neutral" style="font-size:10px">{{ s.source }}</span></td>
+                    <td style="padding-right:16px;text-align:right"><button class="btn btn-ghost" style="font-size:12px">Download</button></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ══ EMPTY STATES ══ -->
+      <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px">
+          <sc-for list="{{ empties }}" as="e" hint-placeholder-count="4">
+            <div class="card elev-sm" style="padding:32px 24px;gap:0;align-items:center;text-align:center">
+              <span style="width:46px;height:46px;border-radius:12px;box-shadow:inset 0 0 0 1px #5d5294;background:#2b2741;color:#b5abfc;display:grid;place-items:center;font-size:22px"><i class="{{ e.icon }}"></i></span>
+              <div style="font-size:16px;font-weight:500;margin-top:13px">{{ e.title }}</div>
+              <p class="text-muted" style="font-size:12.5px;margin:6px 0 0;max-width:34ch;text-wrap:pretty">{{ e.body }}</p>
+              <button class="{{ e.btnClass }}" style="margin-top:15px">{{ e.cta }}</button>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+    </div>
+  </main>
+
+  <!-- ══ LOGIN ══ -->
+  <sc-if value="{{ isLogin }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:60;background:#161826;display:grid;place-items:center;padding:24px">
+      <div style="position:absolute;top:-160px;left:50%;transform:translateX(-50%);width:760px;height:420px;border-radius:50%;background:radial-gradient(closest-side,#2b2741,transparent);pointer-events:none"></div>
+      <div style="width:min(380px,100%);position:relative">
+        <div style="display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:22px">
+          <span style="width:30px;height:30px;border-radius:8px;box-shadow:inset 0 0 0 1px #5d5294;background:#2b2741;display:grid;place-items:center;color:#b5abfc;font-size:17px"><i class="ph ph-tray-arrow-down"></i></span>
+          <span style="font-size:20px;font-weight:500;letter-spacing:-.02em">ds<em style="color:#9184d9;font-style:normal">forms</em></span>
+        </div>
+        <div class="card elev-md" style="padding:22px;gap:0">
+          <div class="field"><label>Username</label><input class="input" defaultValue="admin" /></div>
+          <div class="field" style="margin-top:12px"><label>Password</label><input class="input" type="password" /></div>
+          <button class="btn btn-primary btn-block" style="margin-top:16px;height:38px" onClick="{{ goHome }}">Log in</button>
+          <p class="text-muted" style="font-size:11px;margin:12px 0 0;text-align:center">5 attempts, then a 15-minute lockout on this IP.</p>
+        </div>
+        <p class="text-muted" style="font-size:11px;margin:16px 0 0;text-align:center">forms.northlight.studio · dsforms 1.4.0 · self-hosted</p>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Home&quot;,&quot;Forms&quot;,&quot;Form detail&quot;,&quot;Submission reader&quot;,&quot;Quarantine&quot;,&quot;Filter rules&quot;,&quot;Form settings&quot;,&quot;Waitlists&quot;,&quot;Users&quot;,&quot;Backups&quot;,&quot;Empty states&quot;,&quot;Login&quot;],&quot;default&quot;:&quot;Home&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Preview&quot;},&quot;homeLayout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Dense metrics&quot;,&quot;Focused inbox&quot;],&quot;default&quot;:&quot;Dense metrics&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Variations&quot;},&quot;sidebar&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Expanded&quot;,&quot;Icon rail&quot;],&quot;default&quot;:&quot;Expanded&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Variations&quot;},&quot;showDefaultPasswordBanner&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Variations&quot;}}">
+const SPARK_W = 220, SPARK_H = 40;
+
+function sparkPath(vals, w, h, pad) {
+  const min = Math.min(...vals), max = Math.max(...vals), span = max - min || 1;
+  const pts = vals.map((v, i) => [
+    (i / (vals.length - 1)) * w,
+    h - pad - ((v - min) / span) * (h - pad * 2)
+  ]);
+  return { line: "M" + pts.map(p => p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" L "),
+           fill: "M0 " + h + " L" + pts.map(p => p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" L ") + " L" + w + " " + h + " Z" };
+}
+
+function series(n, base, amp, seed) {
+  const out = [];
+  let s = seed;
+  for (let i = 0; i < n; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    out.push(Math.max(0, Math.round(base + Math.sin(i / 2.4 + seed) * amp * 0.5 + (s / 233280 - 0.5) * amp)));
+  }
+  return out;
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { screen: null, rail: null, sel: 0, narrow: false, mobile: false, drawer: false };
+  }
+
+  componentDidMount() {
+    this.onResize = () => {
+      const narrow = window.innerWidth < 860;
+      const mobile = window.innerWidth < 640;
+      if (narrow !== this.state.narrow || mobile !== this.state.mobile) {
+        this.setState({ narrow, mobile, drawer: mobile ? false : this.state.drawer });
+      }
+    };
+    this.onResize();
+    window.addEventListener("resize", this.onResize);
+  }
+
+  componentWillUnmount() { window.removeEventListener("resize", this.onResize); }
+
+  screen() { return this.state.screen ?? (this.props.screen || "Home"); }
+
+  railOpen() {
+    if (this.state.mobile) return true;
+    if (this.state.rail !== null && this.state.rail !== undefined) return this.state.rail;
+    if (this.state.narrow) return false;
+    return (this.props.sidebar || "Expanded") === "Expanded";
+  }
+
+  go(s) { return (e) => { if (e) e.preventDefault(); this.setState({ screen: s, drawer: false }); }; }
+
+  navItem(label, icon, screen, badge) {
+    const on = this.screen() === screen;
+    const open = this.railOpen();
+    return {
+      label, icon, badge: badge || null,
+      go: this.go(screen),
+      style: "display:flex;align-items:center;gap:11px;padding:8px 12px;border-radius:8px;font-size:13.5px;text-decoration:none;"
+        + (open ? "" : "justify-content:center;padding:9px 0;")
+        + (on ? "background:#2b2741;color:#d2cefd;box-shadow:inset 0 0 0 1px #423a6a;" : "color:#b2b6ca;"),
+      textStyle: open ? "min-width:0;flex:1;overflow:hidden;white-space:nowrap" : "display:none",
+      badgeStyle: badge && open
+        ? "font-size:10.5px;padding:1px 7px;border-radius:6px;background:#423a6a;color:#d2cefd"
+        : "display:none"
+    };
+  }
+
+  renderVals() {
+    const screen = this.screen();
+    const open = this.railOpen();
+    const homeMode = this.props.homeLayout || "Dense metrics";
+
+    const accepted = series(30, 26, 16, 7);
+    const spamCount = series(30, 5, 6, 19);
+    const maxTotal = Math.max(...accepted.map((a, i) => a + spamCount[i]));
+    const step = 620 / 30;
+    const scale = (v) => (v / maxTotal) * 100;
+
+    const bars = accepted.map((a, i) => {
+      const h = scale(a), sh = scale(spamCount[i]);
+      return {
+        x: (i * step + step / 2 - 7).toFixed(1),
+        y: (100 - h - sh).toFixed(2), h: h.toFixed(2),
+        spamY: (100 - sh).toFixed(2), spamH: sh.toFixed(2)
+      };
+    });
+
+    const gridLines = [0, 1, 2, 3].map(i => ({
+      label: String(Math.round((maxTotal / 3) * (3 - i))),
+      rowStyle: "position:absolute;left:0;right:0;top:" + ((i / 3) * 100).toFixed(2)
+        + "%;transform:translateY(-50%);display:flex;align-items:center;gap:8px;pointer-events:none"
+    }));
+
+    const kpiDefs = [
+      { label: "Submissions", value: "784", delta: "+12%", sub: "vs. 700 previous 30d", icon: "ph ph-tray-arrow-down", data: accepted },
+      { label: "Unread", value: "17", delta: "4 forms", sub: "oldest waiting 2 days", icon: "ph ph-envelope", data: series(30, 12, 9, 3) },
+      { label: "Spam held", value: "146", delta: "15.7%", sub: "12 awaiting review", icon: "ph ph-shield-warning", data: spamCount },
+      { label: "Waitlist", value: "2,481", delta: "+134", sub: "Launch list · open", icon: "ph ph-users-three", data: series(30, 70, 22, 11) }
+    ];
+    const kpis = kpiDefs.map(k => {
+      const p = sparkPath(k.data, SPARK_W, SPARK_H, 6);
+      return { ...k, spark: p.line, sparkFill: p.fill };
+    });
+
+    const trendP = sparkPath(accepted, SPARK_W, SPARK_H, 5);
+    const wl = sparkPath(series(30, 70, 26, 11).map((v, i) => v + i * 4), 620, 90, 8);
+
+    const sigDefs = [
+      { name: "Link markup (<a href, [url=)", count: 61, weight: 6, pct: 100 },
+      { name: "Multiple raw URLs", count: 44, weight: 2, pct: 72 },
+      { name: "Keyword hit", count: 31, weight: 5, pct: 51 },
+      { name: "Gibberish token", count: 22, weight: 3, pct: 36 },
+      { name: "SQL probe (-- -, union select)", count: 9, weight: 6, pct: 15 },
+      { name: "URL inside a name field", count: 6, weight: 4, pct: 10 }
+    ];
+    const signals = sigDefs.map(s => ({ ...s, barStyle: `height:100%;width:${s.pct}%;border-radius:3px;background:${s.pct > 60 ? "#968ae0" : "#5d5294"}` }));
+
+    const tagN = "tag tag-neutral", tagA = "tag tag-accent", tagO = "tag tag-outline";
+    const ips = [
+      { ip: "91.214.44.10", hits: "3 reqs", state: "ok", tagClass: tagN },
+      { ip: "45.155.204.187", hits: "128 reqs", state: "throttled", tagClass: tagA },
+      { ip: "2a03:2880:f10c::", hits: "41 reqs", state: "ok", tagClass: tagN },
+      { ip: "185.220.101.34", hits: "96 reqs", state: "blocked", tagClass: tagO },
+      { ip: "77.111.246.22", hits: "12 reqs", state: "ok", tagClass: tagN }
+    ];
+
+    const byForm = [
+      { name: "Contact form", received: 612, held: 84, unread: 9, rate: "88%", pct: 88 },
+      { name: "Bug reports", received: 121, held: 12, unread: 4, rate: "94%", pct: 94 },
+      { name: "Newsletter signup", received: 402, held: 41, unread: 3, rate: "71%", pct: 71 },
+      { name: "Consulting enquiries", received: 49, held: 9, unread: 1, rate: "98%", pct: 98 }
+    ].map(f => ({
+      ...f,
+      heldClass: f.held > 40 ? tagA : tagN,
+      rateStyle: `height:100%;width:${f.pct}%;border-radius:3px;background:#5d5294`,
+      goForm: this.go("Form detail")
+    }));
+
+    const av = (bg, fg) => `width:30px;height:30px;flex:none;border-radius:50%;background:${bg};color:${fg};display:grid;place-items:center;font-size:11px;font-weight:500`;
+    const people = [
+      { name: "Maya Oduya", email: "maya.oduya@northlight.studio", initials: "MO", preview: "We're moving our marketing site to Astro next month and need a form endpoint…", time: "2:18 PM", form: "Contact form", unread: true, tag: "unread", tagClass: tagA },
+      { name: "Tomas Berg", email: "tomas@bergwerk.de", initials: "TB", preview: "Does the CSV export include the IP column? Our DPO needs it stripped.", time: "11:02 AM", form: "Contact form", unread: true, tag: "unread", tagClass: tagA },
+      { name: "Priya Raman", email: "priya@ramanlabs.io", initials: "PR", preview: "Signed up for the waitlist twice by accident — can you remove the duplicate?", time: "Yesterday", form: "Launch list", unread: true, tag: "waitlist", tagClass: tagN },
+      { name: "Jon Whitlock", email: "jon@whitlock.cc", initials: "JW", preview: "Deployed on a $5 Hetzner box, works great. One question about the webhook payload.", time: "Yesterday", form: "Bug reports", unread: false, tag: "read", tagClass: tagN },
+      { name: "Elif Demir", email: "elif@demir.co", initials: "ED", preview: "Would you accept a PR adding Turkish to the confirmation email templates?", time: "Mar 2", form: "Contact form", unread: false, tag: "read", tagClass: tagN },
+      { name: "Sasha Kirillov", email: "sasha@kirillov.dev", initials: "SK", preview: "Rate limiter kicked in during our launch — raised RATE_BURST to 20, all good.", time: "Mar 2", form: "Bug reports", unread: false, tag: "read", tagClass: tagN },
+      { name: "Nadia Haddad", email: "nadia@haddad.ma", initials: "NH", preview: "Is there a way to pipe submissions into a Google Sheet without a third party?", time: "Mar 1", form: "Contact form", unread: false, tag: "read", tagClass: tagN },
+      { name: "Owen Pike", email: "owen@pike.industries", initials: "OP", preview: "Backup restore worked flawlessly moving between VPS providers. Thanks.", time: "Feb 28", form: "Contact form", unread: false, tag: "read", tagClass: tagN }
+    ].map(p => ({
+      ...p,
+      avatarStyle: p.unread ? av("#423a6a", "#d2cefd") : av("#3f424d", "#cfd3e5"),
+      nameStyle: "font-size:13.5px;" + (p.unread ? "font-weight:500;color:#e9e9ed" : "color:#b2b6ca"),
+      goReader: this.go("Submission reader")
+    }));
+
+    const subs = people.slice(0, 8).map((p, i) => ({
+      name: p.name, email: p.email, preview: p.preview, date: ["Mar 4, 2:18 PM", "Mar 4, 11:02 AM", "Mar 3, 6:40 PM", "Mar 3, 4:31 PM", "Mar 2, 8:07 AM", "Mar 2, 7:12 AM", "Mar 1, 9:20 PM", "Feb 28, 3:04 PM"][i],
+      tag: p.unread ? "new" : (i === 5 ? "flagged 4" : "read"),
+      tagClass: p.unread ? tagA : (i === 5 ? tagO : tagN),
+      checked: i < 3,
+      dotStyle: p.unread ? "width:7px;height:7px;flex:none;border-radius:50%;background:#9184d9" : "width:7px;height:7px;flex:none;border-radius:50%;background:transparent",
+      nameStyle: "font-size:13.5px;color:" + (p.unread ? "#e9e9ed;font-weight:500" : "#b2b6ca"),
+      goReader: this.go("Submission reader")
+    }));
+
+    const readerList = people.slice(0, 7).map((p, i) => ({
+      name: p.name, preview: p.preview, time: p.time,
+      itemStyle: "display:block;padding:11px 13px;color:inherit;text-decoration:none;"
+        + (i === 0 ? "background:#2b2741;box-shadow:inset 2px 0 0 #9184d9;" : "background:linear-gradient(to right,rgba(233,233,237,.08),rgba(233,233,237,.08)) no-repeat bottom/100% 1px;"),
+      nameStyle: "font-size:13px;" + (p.unread ? "font-weight:500;color:#e9e9ed" : "color:#b2b6ca")
+    }));
+
+    const heldDefs = [
+      { name: "Submission", ip: "45.155.204.187", signals: ["link markup", "keyword"], score: 11, form: "Contact form", age: "6h ago",
+        breakdown: [
+          { rule: "HTML/BBCode link markup", weight: 6, field: "message", match: "[url=http://cheap-seo-backlinks.ru]best backlinks[/url]", icon: "ph ph-link" },
+          { rule: "High-confidence keyword", weight: 5, field: "message", match: "backlinks", icon: "ph ph-text-aa" }
+        ] },
+      { name: "kd9x", ip: "185.220.101.34", signals: ["keyword", "2 links"], score: 9, form: "Contact form", age: "9h ago",
+        breakdown: [
+          { rule: "High-confidence keyword", weight: 5, field: "message", match: "casino bonus 500% — unsubscribe here", icon: "ph ph-text-aa" },
+          { rule: "Each link past the first", weight: 4, field: "message", match: "www.wzzq.top/out  ·  http://wzzq.top/a", icon: "ph ph-link" }
+        ] },
+      { name: "' or 1=1 --", ip: "5.188.62.140", signals: ["sql probe"], score: 12, form: "Bug reports", age: "1d ago",
+        breakdown: [
+          { rule: "SQL injection probe", weight: 6, field: "name", match: "' or 1=1 -- -", icon: "ph ph-bug" },
+          { rule: "SQL injection probe", weight: 6, field: "message", match: "union select null,null,version()", icon: "ph ph-bug" }
+        ] },
+      { name: "Xqzvbn Prtklm", ip: "103.155.92.7", signals: ["gibberish ×2"], score: 6, form: "Newsletter signup", age: "1d ago",
+        breakdown: [
+          { rule: "Gibberish token", weight: 3, field: "name", match: "Xqzvbn", icon: "ph ph-question" },
+          { rule: "Gibberish token", weight: 3, field: "lastname", match: "Prtklm", icon: "ph ph-question" }
+        ] },
+      { name: "http://bit.ly/3xk", ip: "77.111.246.22", signals: ["url in name", "2 links"], score: 8, form: "Contact form", age: "2d ago",
+        breakdown: [
+          { rule: "URL inside a name field", weight: 4, field: "name", match: "http://bit.ly/3xk9qz", icon: "ph ph-user-focus" },
+          { rule: "Each link past the first", weight: 4, field: "message", match: "3 links in one message", icon: "ph ph-link" }
+        ] },
+      { name: "Marta Silva", ip: "188.43.19.2", signals: ["gibberish"], score: 6, form: "Contact form", age: "3d ago",
+        breakdown: [
+          { rule: "Gibberish token", weight: 3, field: "company", match: "Zdrljvic Sobczyk Kft", icon: "ph ph-question" },
+          { rule: "Each link past the first", weight: 3, field: "message", match: "linkedin.com/in/…  ·  martasilva.pt", icon: "ph ph-link" }
+        ] },
+      { name: "seo-outreach", ip: "45.155.204.190", signals: ["keyword", "link markup"], score: 11, form: "Consulting enquiries", age: "4d ago",
+        breakdown: [
+          { rule: "High-confidence keyword", weight: 5, field: "message", match: "seo service — guest post placement", icon: "ph ph-text-aa" },
+          { rule: "HTML/BBCode link markup", weight: 6, field: "message", match: "<a href=\"https://gp-network.biz\">rates</a>", icon: "ph ph-link" }
+        ] }
+    ];
+    const selIdx = this.state.sel;
+    const held = heldDefs.map((h, i) => ({
+      ...h,
+      checked: i < 2,
+      select: (e) => { if (e) e.preventDefault(); this.setState({ sel: i }); },
+      rowStyle: i === selIdx ? "background:rgba(43,39,65,.6)" : "",
+      nameStyle: "font-size:13px;color:" + (i === selIdx ? "#d2cefd" : "#e9e9ed") + ";font-family:ui-monospace,Menlo,monospace",
+      scoreStyle: `display:inline-grid;place-items:center;min-width:26px;height:22px;border-radius:6px;font-size:12px;font-weight:500;background:${h.score >= 9 ? "#423a6a" : "#292b31"};color:${h.score >= 9 ? "#d2cefd" : "#b2b6ca"}`
+    }));
+    const s = heldDefs[selIdx];
+    const selMax = Math.max(12, s.score);
+    const sel = { ...s, max: selMax, meterStyle: `height:100%;width:${Math.min(100, (s.score / selMax) * 100)}%;border-radius:4px;background:linear-gradient(to right,#5d5294,#968ae0)` };
+
+    const knob = (on) => `width:34px;height:19px;flex:none;border-radius:10px;position:relative;background:${on ? "#5d5294" : "#292b31"};box-shadow:inset 0 0 0 1px ${on ? "#796cbf" : "#3f424d"}, ${on ? "15px" : "3px"} 0 0 -2.5px #d2cefd inset;margin-top:1px`;
+
+    const mobile = this.state.mobile;
+    const drawer = this.state.drawer;
+
+    return {
+      railOpen: open,
+      isMobile: mobile,
+      showBackdrop: mobile && drawer,
+      closeDrawer: () => this.setState({ drawer: false }),
+      railStyle: mobile
+        ? "display:flex;flex-direction:column;padding:16px 10px 14px;background:#161826;box-shadow:var(--shadow-lg);"
+          + "position:fixed;top:0;bottom:0;left:0;width:252px;max-width:82vw;z-index:80;overflow-y:auto;"
+          + "transition:transform .22s ease;transform:translateX(" + (drawer ? "0" : "-102%") + ");"
+          + (drawer ? "" : "pointer-events:none;")
+        : "flex:none;width:" + (open ? "228px" : "68px")
+          + ";display:flex;flex-direction:column;padding:16px 10px 14px;background:#161826;position:sticky;top:0;height:100vh;"
+          + "background-image:linear-gradient(to bottom,transparent,rgba(233,233,237,.16) 48px,rgba(233,233,237,.16) calc(100% - 48px),transparent);"
+          + "background-repeat:no-repeat;background-position:right;background-size:1px 100%",
+      toggleRail: () => mobile ? this.setState({ drawer: !drawer }) : this.setState({ rail: !open }),
+      railIcon: mobile ? "ph ph-list" : "ph ph-sidebar-simple",
+      showBanner: this.props.showDefaultPasswordBanner ?? true,
+
+      navOverview: [this.navItem("Home", "ph ph-chart-line-up", "Home")],
+      navCollect: [
+        this.navItem("Forms", "ph ph-tray", "Forms"),
+        this.navItem("Waitlists", "ph ph-users-three", "Waitlists", "2.4k")
+      ],
+      navModerate: [
+        this.navItem("Quarantine", "ph ph-shield-warning", "Quarantine", "12"),
+        this.navItem("Filter rules", "ph ph-funnel", "Filter rules")
+      ],
+      navSystem: [
+        this.navItem("Users", "ph ph-user-circle", "Users"),
+        this.navItem("Backups", "ph ph-database", "Backups"),
+        this.navItem("Empty states", "ph ph-selection-slash", "Empty states")
+      ],
+
+      crumb: ({ "Home": "dsforms", "Forms": "dsforms", "Form detail": "Forms", "Submission reader": "Forms · Contact form",
+        "Quarantine": "dsforms", "Form settings": "Forms · Contact form", "Waitlists": "dsforms", "Users": "Settings",
+        "Backups": "Settings", "Empty states": "Reference", "Login": "" }[screen] || "dsforms"),
+      crumbTitle: (screen === "Form detail" || screen === "Submission reader") ? "Contact form" : screen,
+
+      isHomeMetrics: screen === "Home" && homeMode === "Dense metrics",
+      isHomeInbox: screen === "Home" && homeMode === "Focused inbox",
+      isForms: screen === "Forms",
+      isForm: screen === "Form detail" || screen === "Submission reader",
+      isReader: screen === "Submission reader",
+      closeSub: (e) => { if (e) e.preventDefault(); this.setState({ screen: "Form detail" }); },
+      isSpam: screen === "Quarantine",
+      isRules: screen === "Filter rules",
+      goRules: this.go("Filter rules"),
+      blockCount: 34,
+      blocked: [
+        { value: "45.155.204.0/24", type: "IP range", hits: "61 held", added: "Mar 3" },
+        { value: "185.220.101.34", type: "IP", hits: "18 held", added: "Mar 2" },
+        { value: "cheap-seo-backlinks.ru", type: "Domain", hits: "44 held", added: "Feb 28" },
+        { value: "no-reply@wzzq.top", type: "Email", hits: "9 held", added: "Feb 26" },
+        { value: "gp-network.biz", type: "Domain", hits: "7 held", added: "Feb 21" },
+        { value: "5.188.62.140", type: "IP", hits: "31 held", added: "Feb 14" }
+      ],
+      allowed: [
+        { value: "northlight.studio", note: "domain" },
+        { value: "priya@ramanlabs.io", note: "restored Mar 3" },
+        { value: "marta@silva.pt", note: "restored Feb 27" },
+        { value: "188.43.19.2", note: "office IP" }
+      ],
+      keywords: ["guest post", "link exchange", "write for us", "crypto airdrop", "telegram @", "bulk sms"],
+      isSettings: screen === "Form settings",
+      isWaitlists: screen === "Waitlists",
+      isUsers: screen === "Users",
+      isBackups: screen === "Backups",
+      isEmpty: screen === "Empty states",
+      isLogin: screen === "Login",
+
+      goHome: this.go("Home"), goForms: this.go("Forms"), goForm: this.go("Form detail"),
+      goReader: this.go("Submission reader"), goSettings: this.go("Form settings"),
+      goInbox: this.go("Form detail"),
+
+      kpis, bars, gridLines, signals, ips, byForm,
+      trend: trendP.line, trendFill: trendP.fill,
+      waitlistPath: wl.line, waitlistFill: wl.fill,
+      recent: people.slice(0, 5),
+      inbox: people,
+      subs, readerList,
+      readerFields: [
+        { key: "name", val: "Maya Oduya" },
+        { key: "email", val: "maya.oduya@northlight.studio" },
+        { key: "company", val: "Northlight Studio" },
+        { key: "_subject", val: "Self-hosting question" }
+      ],
+      pages: ["1", "2", "3", "…", "25"].map((label, i) => ({
+        label,
+        dim: label === "…",
+        class: label === "…" ? "" : (i === 0 ? "btn btn-primary" : "btn btn-secondary"),
+        style: label === "…"
+          ? "width:20px;text-align:center;font-size:12px;color:#75798c;background:none;border:0"
+          : "width:30px;height:30px;padding:0;font-size:12px"
+      })),
+
+      formCards: [
+        { name: "Contact form", kind: "form", email: "hello@northlight.studio", total: 612, unread: 9, held: 84, data: accepted },
+        { name: "Bug reports", kind: "form", email: "dev@northlight.studio", total: 121, unread: 4, held: 12, data: series(30, 5, 5, 23) },
+        { name: "Newsletter signup", kind: "form", email: "hello@northlight.studio", total: 402, unread: 3, held: 41, data: series(30, 14, 10, 31) },
+        { name: "Consulting enquiries", kind: "form", email: "baran@northlight.studio", total: 49, unread: 1, held: 9, data: series(30, 2, 3, 41) }
+      ].map(f => ({ ...f, spark: sparkPath(f.data, 220, 34, 4).line, goForm: this.go("Form detail"), goSettings: this.go("Form settings") })),
+
+      formStats: [
+        { label: "Total", value: "612", note: "all time" },
+        { label: "Unread", value: "9", note: "oldest 2d" },
+        { label: "Held", value: "84", note: "13.7% of traffic" },
+        { label: "Median reply", value: "4h", note: "last 30d" }
+      ],
+      spamStats: [
+        { label: "Held (30d)", value: "146", note: "15.7% of traffic" },
+        { label: "Awaiting review", value: "12", note: "oldest 6d" },
+        { label: "Restored", value: "3", note: "2.1% false positive" },
+        { label: "Auto-deleted", value: "131", note: "after 30d" }
+      ],
+      held, sel,
+
+      toggles: [
+        { label: "Honeypot field", hint: "Drop submissions where _honeypot is filled", on: true },
+        { label: "Quarantine instead of drop", hint: "Held submissions stay reviewable for 30 days", on: true },
+        { label: "Email me about held submissions", hint: "One digest per day, never per submission", on: false },
+        { label: "Block IPs after 3 held submissions", hint: "Uses the in-process tracker, resets on restart", on: true }
+      ].map(t => ({ ...t, knobStyle: knob(t.on) })),
+
+      signups: [
+        { pos: "#2481", email: "lena@fieldnotes.io", source: "landing", joined: "12m ago" },
+        { pos: "#2480", email: "arjun@vellum.dev", source: "hn", joined: "1h ago" },
+        { pos: "#2479", email: "s.novak@praha.cz", source: "landing", joined: "3h ago" },
+        { pos: "#2478", email: "mei@sunkissed.tw", source: "newsletter", joined: "5h ago" },
+        { pos: "#2477", email: "dev@rooftop.agency", source: "hn", joined: "8h ago" },
+        { pos: "#2476", email: "kofi@accradesign.gh", source: "landing", joined: "Yesterday" }
+      ],
+      broadcasts: [
+        { subject: "Beta invites, batch 3", sent: "1,200 sent", state: "delivered", tagClass: tagN },
+        { subject: "We're nearly there", sent: "980 sent", state: "delivered", tagClass: tagN },
+        { subject: "dsforms 2.0 is live", sent: "412 / 2,481", state: "sending", tagClass: tagA }
+      ],
+      users: [
+        { name: "baran", initials: "BC", tag: "you · owner", tagClass: tagA, added: "Jan 8, 2026", seen: "now", sessions: "2 devices", action: "Sessions" },
+        { name: "elif", initials: "EL", tag: "admin", tagClass: tagN, added: "Feb 2, 2026", seen: "3h ago", sessions: "1 device", action: "Remove" },
+        { name: "ci-bot", initials: "CI", tag: "cli only", tagClass: tagO, added: "Feb 19, 2026", seen: "Mar 1", sessions: "—", action: "Remove" }
+      ],
+      strength: [0, 1, 2, 3].map(i => `height:4px;flex:1;border-radius:2px;background:${i === 0 ? "#796cbf" : "#292b31"}`),
+      snapshots: [
+        { when: "Today, 04:00", size: "18.4 MB", source: "cron" },
+        { when: "Yesterday, 04:00", size: "18.1 MB", source: "cron" },
+        { when: "Mar 2, 22:14", size: "18.0 MB", source: "manual" },
+        { when: "Mar 1, 04:00", size: "17.6 MB", source: "cron" },
+        { when: "Feb 28, 04:00", size: "17.2 MB", source: "cron" }
+      ],
+      empties: [
+        { icon: "ph ph-tray", title: "No forms yet", body: "A form is a name, a notify address and an endpoint. Takes about twenty seconds.", cta: "Create your first form", btnClass: "btn btn-primary" },
+        { icon: "ph ph-shield-check", title: "Quarantine is clear", body: "Nothing has crossed the threshold in the last 30 days. Held submissions appear here with their score breakdown.", cta: "Tune the filter", btnClass: "btn btn-secondary" },
+        { icon: "ph ph-envelope-open", title: "Inbox zero", body: "Every submission on this instance has been read. New ones arrive here and trigger a notification.", cta: "View all submissions", btnClass: "btn btn-secondary" },
+        { icon: "ph ph-users-three", title: "No signups yet", body: "Paste the waitlist snippet on your landing page and positions start filling in from #1.", cta: "Copy the snippet", btnClass: "btn btn-secondary" }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -202,6 +202,8 @@ All configuration is via environment variables in `.env`:
 | `LISTEN_ADDR` | No | `:8080` | HTTP listen address |
 | `BASE_URL` | No | — | Public URL (used for `Secure` cookie flag and email links) |
 | `DB_PATH` | No | `/data/dsforms.db` | SQLite database path |
+| `SPAM_THRESHOLD` | No | `6` | Score at or above which a submission is held for review. Clamped to 1–20; `0` or unset means the default. Each form can override it in its settings. |
+| `DIGEST_TO` | No | — | Address for the daily quarantine digest. Empty disables it. |
 | `RATE_BURST` | No | `5` | Max form submissions per IP in a burst |
 | `RATE_PER_MINUTE` | No | `6` | Sustained submission rate per IP per minute |
 | `BACKUP_LOCAL_DIR` | No | — | Directory for CLI backup snapshots |

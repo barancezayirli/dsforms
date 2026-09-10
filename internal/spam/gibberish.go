@@ -129,6 +129,18 @@ func isGibberishToken(token string) bool {
 //   - Tokens with very few Latin characters: the vowel-ratio heuristic only
 //     works for Latin-based text and would flag Cyrillic, Arabic, CJK, etc.
 func fieldHasGibberish(value string) bool {
+	_, ok := gibberishToken(value)
+	return ok
+}
+
+// gibberishToken returns the first token in value that trips the heuristic,
+// alongside whether one was found. It exists so Detail can report *which* token
+// fired: fieldHasGibberish found that token already and threw it away, and the
+// quarantine breakdown has to show a reviewer the exact text that held their
+// submission. The token is returned with its original casing — the heuristic is
+// deliberately run against the uncased value (see the note above), so lowering
+// it here would misreport what matched.
+func gibberishToken(value string) (string, bool) {
 	for _, token := range strings.Fields(value) {
 		if isURLShapedToken(token) || isEmailShapedToken(token) {
 			continue
@@ -137,10 +149,10 @@ func fieldHasGibberish(value string) bool {
 			continue
 		}
 		if isGibberishToken(token) {
-			return true
+			return token, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // isTokenTooNonLatin reports whether a token contains too few Latin letters

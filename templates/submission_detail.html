@@ -1,39 +1,166 @@
 {{template "base" .}}
-{{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">
-    <a href="/admin/forms/{{.Form.ID}}" class="text-muted" style="text-decoration:none">&larr; {{.Form.Name}}</a>
-  </h1>
-  <div style="display:flex;gap:8px">
-    {{if not .Submission.Read}}
-    <form method="POST" action="/admin/submissions/{{.Submission.ID}}/read" style="display:inline">
-      <button type="submit" class="btn">Mark read</button>
-    </form>
+
+<!-- The reader has two presentations of one body of content.
+     "drawer"  — the overlay app.js fetches and lays over the submissions list.
+     "content" — the same thing as an ordinary page, which is what you get with
+                 JavaScript off, when the link is opened directly, or when
+                 someone shares it. Both include "reader-body", so they cannot
+                 drift apart. -->
+
+{{define "reader-toolbar"}}
+<div class="drawer-toolbar rule-b">
+  <a class="btn btn-secondary btn-icon" data-drawer-close href="/admin/forms/{{.Form.ID}}"
+     title="Close" aria-label="Close reader">
+    <svg class="i" style="font-size:15px"><use href="#ph-x"/></svg>
+  </a>
+
+  <div style="display:flex;align-items:center;gap:4px">
+    {{if .NewerID}}
+    <a class="btn btn-secondary btn-icon sm" data-drawer href="/admin/forms/{{.Form.ID}}/submissions/{{.NewerID}}"
+       title="Newer" aria-label="Newer submission">
+      <svg class="i" style="font-size:14px"><use href="#ph-caret-up"/></svg>
+    </a>
+    {{else}}
+    <span class="btn btn-secondary btn-icon sm" aria-disabled="true" title="No newer submission">
+      <svg class="i" style="font-size:14px"><use href="#ph-caret-up"/></svg>
+    </span>
     {{end}}
-    <form method="POST" action="/admin/submissions/{{.Submission.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this submission?')">
-      <button type="submit" class="btn btn-danger">Delete</button>
+    {{if .OlderID}}
+    <a class="btn btn-secondary btn-icon sm" data-drawer href="/admin/forms/{{.Form.ID}}/submissions/{{.OlderID}}"
+       title="Older" aria-label="Older submission">
+      <svg class="i" style="font-size:14px"><use href="#ph-caret-down"/></svg>
+    </a>
+    {{else}}
+    <span class="btn btn-secondary btn-icon sm" aria-disabled="true" title="No older submission">
+      <svg class="i" style="font-size:14px"><use href="#ph-caret-down"/></svg>
+    </span>
+    {{end}}
+    <!-- Suppressed rather than rendered as "0 of 0" when Neighbours failed: a
+         position is a hard numeric claim, and one manufactured from a query
+         that did not run is worse than no counter at all. -->
+    {{if .PositionKnown}}
+    <span class="dim nowrap" style="font-size:11px;margin-left:5px">{{.Position}} of {{.Total}}</span>
+    {{end}}
+  </div>
+
+  <div class="actions">
+    <form method="POST" action="/admin/submissions/{{.Submission.ID}}/delete"
+          data-confirm="Delete this submission? This cannot be undone.">
+      <button class="btn btn-secondary btn-icon" type="submit" title="Delete" aria-label="Delete submission">
+        <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>
+      </button>
     </form>
+    {{if index .Submission.Data "email"}}
+    <a class="btn btn-primary" style="font-size:12px" href="mailto:{{index .Submission.Data "email"}}">
+      <svg class="i" style="font-size:14px"><use href="#ph-arrow-bend-up-left"/></svg>Reply
+    </a>
+    {{end}}
   </div>
 </div>
+{{end}}
 
-<div class="card" style="max-width:700px">
-  <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
-    <span>Submission Details</span>
-    <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">
-      {{.Submission.CreatedAt.Format "Jan 2, 2006 3:04 PM"}} &middot; IP: {{.Submission.IP}}
+{{define "reader-body"}}
+<div class="drawer-body">
+  <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
+    <span class="avatar avatar-lg avatar-unread" aria-hidden="true">
+      {{initial (index .Submission.Data "name")}}
+    </span>
+    <div style="min-width:0;flex:1">
+      <div style="font-size:17px;font-weight:500">
+        {{if index .Submission.Data "name"}}{{index .Submission.Data "name"}}{{else}}Submission{{end}}
+      </div>
+      {{if index .Submission.Data "email"}}
+      <div class="muted truncate" style="font-size:12px">{{index .Submission.Data "email"}}</div>
+      {{end}}
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:12px">{{.Submission.CreatedAt.Format "Jan 2, 2006 15:04"}}</div>
+      {{if .Submission.IP}}<div class="dim mono" style="font-size:11px">{{.Submission.IP}}</div>{{end}}
+    </div>
+  </div>
+
+  <hr class="hr" style="margin:18px 0">
+
+  {{if .Fields}}
+  <div class="field-grid">
+    {{range .Fields}}
+    <div class="field-key">{{.Key}}</div>
+    <div class="field-val">{{.Value}}</div>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if .Message}}
+  <div class="field-key" style="margin:18px 0 7px">message</div>
+  <div class="message">{{.Message}}</div>
+  {{end}}
+</div>
+
+<!-- Spam check. A submission that reached the inbox passed; one restored from
+     quarantine keeps the breakdown that held it, because that is the evidence
+     of a false positive. -->
+<div class="panel-box" style="margin:12px 22px 0">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <svg class="i i-accent" style="font-size:15px">
+      <use href="#ph-{{if .Signals}}shield-warning{{else}}shield-check{{end}}"/>
+    </svg>
+    <span style="font-size:13px">
+      {{if .Signals}}Was held, then restored{{else}}Spam check passed{{end}}
+    </span>
+    <span class="tag tag-outline tag-sm" style="margin-left:auto">
+      score {{.Submission.SpamScore}}
     </span>
   </div>
-  <div class="card-body">
-    {{range $key, $val := .Submission.Data}}
-    <div class="field-block">
-      <div class="field-label">{{$key}}</div>
-      {{if or (eq $key "message") (eq $key "body") (eq $key "content")}}
-      <div class="field-msg">{{$val}}</div>
-      {{else}}
-      <div class="field-val">{{$val}}</div>
+  {{if .SignalsFailed}}
+  <div class="notice" style="margin-top:8px">
+    <svg class="i"><use href="#ph-warning"/></svg>
+    <span>The reason this was held could not be read.</span>
+  </div>
+  {{end}}
+
+  {{if .Signals}}
+  <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+    {{range .Signals}}
+    <div class="rule-box">
+      <div class="rule-head">
+        <svg class="i"><use href="#ph-{{ruleIcon .Rule}}"/></svg>
+        <span class="rule-name">{{ruleLabel .Rule}}</span>
+        <span class="tag tag-outline tag-sm">+{{.Weight}}</span>
+      </div>
+      {{if .Match}}
+      <div class="rule-field">{{if .Field}}field <code>{{.Field}}</code> · {{end}}matched</div>
+      <div class="code" style="margin-top:5px">{{.Match}}</div>
       {{end}}
     </div>
     {{end}}
   </div>
+  {{else}}
+  <div class="dim" style="font-size:12px;margin-top:5px">
+    No link markup, keywords, injection probes or repeat-IP activity.
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "drawer"}}
+<div class="backdrop" data-drawer-close></div>
+<div class="drawer" role="dialog" aria-modal="true" aria-label="Submission" tabindex="-1">
+  <div class="drawer-scroll">
+{{template "degraded-notice" .}}
+    {{template "reader-toolbar" .}}
+    {{template "reader-body" .}}
+  </div>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="page-head">
+  <a class="btn btn-secondary" href="/admin/forms/{{.Form.ID}}">
+    <svg class="i" style="font-size:15px"><use href="#ph-caret-left"/></svg>{{.Form.Name}}
+  </a>
+</div>
+<div class="card elev-sm" style="padding:0;overflow:hidden">
+  {{template "reader-toolbar" .}}
+  {{template "reader-body" .}}
 </div>
 {{end}}

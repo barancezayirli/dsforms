@@ -1,55 +1,69 @@
 {{template "base" .}}
+
 {{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">Edit Waitlist</h1>
-  <a href="/admin/waitlists/{{.Waitlist.ID}}" class="btn">View Signups</a>
+<div class="page-head">
+  <h4>{{.Waitlist.Name}}</h4>
+  <span class="tag tag-neutral mono">/w/{{.Waitlist.ID}}</span>
 </div>
 
-<div class="card" style="max-width:600px">
-  <div class="card-body">
-    {{if .Error}}<div class="form-error-banner">{{.Error}}</div>{{end}}
+{{if .Error}}
+<div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
+{{end}}
+
+<div class="row" style="max-width:1000px">
+  <div class="col-main">
     <form method="POST" action="/admin/waitlists/{{.Waitlist.ID}}/edit">
-      <div class="form-group">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" value="{{.Waitlist.Name}}" required>
+      <div class="card elev-sm">
+        <span class="card-title">Waitlist</span>
+        <label class="field">
+          <span>Name</span>
+          <input class="input" name="name" value="{{.Waitlist.Name}}" required>
+        </label>
+        <label class="field">
+          <span>Redirect after signup</span>
+          <input class="input" name="redirect" value="{{.Waitlist.Redirect}}" placeholder="https://yoursite.com/joined">
+        </label>
+        <label class="field">
+          <span>Confirmation subject</span>
+          <input class="input" name="confirm_subject" value="{{.Waitlist.ConfirmSubject}}"
+                 placeholder="Leave blank to send no confirmation">
+        </label>
+        <label class="field" style="margin-bottom:0">
+          <span>Confirmation body</span>
+          <textarea class="input" name="confirm_body">{{.Waitlist.ConfirmBody}}</textarea>
+          <span class="form-hint">Variables: <code>{{`{{email}}`}}</code> <code>{{`{{name}}`}}</code> <code>{{`{{position}}`}}</code></span>
+        </label>
       </div>
-      <div class="form-group">
-        <label for="redirect">Redirect URL</label>
-        <input type="text" id="redirect" name="redirect" value="{{.Waitlist.Redirect}}" placeholder="https://yoursite.com/joined (optional)">
-      </div>
-      <div class="form-group">
-        <label for="confirm_subject">Confirmation Email Subject</label>
-        <input type="text" id="confirm_subject" name="confirm_subject" value="{{.Waitlist.ConfirmSubject}}" placeholder="Leave blank to send no confirmation">
-      </div>
-      <div class="form-group">
-        <label for="confirm_body">Confirmation Email Body</label>
-        <textarea id="confirm_body" name="confirm_body" placeholder="Hi {{`{{name}}`}}, you're #{{`{{position}}`}}!">{{.Waitlist.ConfirmBody}}</textarea>
-        <div class="form-hint">Variables: {{`{{email}}`}}, {{`{{name}}`}}, {{`{{position}}`}}</div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:20px">
-        <button type="submit" class="btn btn-mint">Save</button>
-        <a href="/admin/waitlists" class="btn">Cancel</a>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-primary" type="submit">Save changes</button>
+        <a class="btn btn-secondary" href="/admin/waitlists">Cancel</a>
       </div>
     </form>
   </div>
-</div>
 
-<div class="card" style="max-width:600px;margin-top:20px">
-  <div class="card-head">HTML Snippet</div>
-  <div class="card-body">
-    <div class="form-hint" style="margin-bottom:8px">Point your site's signup form at this endpoint. The field must be named <code>email</code>.</div>
-    <div class="snippet">&lt;form action="{{.BaseURL}}/w/{{.Waitlist.ID}}" method="POST"&gt;
+  <div class="col-side">
+    <div class="card elev-sm">
+      <span class="card-title">Endpoint</span>
+      <p class="card-body" style="flex:none">The field must be named <code>email</code>.</p>
+      <pre class="code" id="wl-snippet">&lt;form method="POST" action="{{.BaseURL}}/w/{{.Waitlist.ID}}"&gt;
   &lt;input type="email" name="email" required&gt;
   &lt;button type="submit"&gt;Join&lt;/button&gt;
-&lt;/form&gt;</div>
-  </div>
-</div>
+&lt;/form&gt;</pre>
+      <button class="btn btn-ghost" type="button" data-copy="#wl-snippet" style="margin-top:6px">
+        <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">Copy snippet</span>
+      </button>
+    </div>
 
-<div class="card" style="max-width:600px;margin-top:20px;border-color:var(--danger-border)">
-  <div class="card-body">
-    <form method="POST" action="/admin/waitlists/{{.Waitlist.ID}}/delete" onsubmit="return confirm('Delete this waitlist and all its signups?')">
-      <button type="submit" class="btn btn-danger">Delete Waitlist</button>
-    </form>
+    <div class="card elev-sm" style="margin-top:12px">
+      <span class="card-title">Danger zone</span>
+      <p class="card-body" style="flex:none">Deleting this waitlist deletes every signup on it.</p>
+      <form method="POST" action="/admin/waitlists/{{.Waitlist.ID}}/delete"
+            data-confirm="Delete this waitlist and all its signups? This cannot be undone.">
+        <button class="btn btn-danger btn-block" type="submit">
+          <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>Delete waitlist
+        </button>
+      </form>
+    </div>
   </div>
 </div>
 {{end}}

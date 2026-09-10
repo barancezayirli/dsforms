@@ -2,46 +2,31 @@ package handler
 
 import (
 	"fmt"
-	"html/template"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/backup"
-	"github.com/youruser/dsforms/internal/flash"
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/backup"
+	"github.com/barancezayirli/dsforms/internal/flash"
 )
 
 // BackupHandler handles backup export and import.
 type BackupHandler struct {
-	Store     *store.Store
-	SecretKey string
-	BaseURL   string
-	DBPath    string
-	Templates map[string]*template.Template
+	Base
 }
 
 // backupPageData holds the data passed to backups.html.
 type backupPageData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
+	PageData
 }
 
 // Page renders the backups management page.
 func (h *BackupHandler) Page(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	data := backupPageData{
-		Title:       "Backups",
-		Active:      "backups",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
+		PageData: h.Shell(w, r, "Backups", "backups"),
 	}
 
 	if err := h.Templates["backups.html"].ExecuteTemplate(w, "base", data); err != nil {

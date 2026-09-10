@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 type noopWebhookSender struct{}
@@ -35,8 +35,8 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 
 	dashTmpl, _ := baseTmpl.Clone()
 	template.Must(dashTmpl.New("content").Parse(
-		`{{range .Forms}}<span class="form-name">{{.Name}}</span><span class="unread">{{.UnreadCount}}</span>{{end}}` +
-			`{{if not .Forms}}<p>No forms yet</p>{{end}}` +
+		`{{range .Cards}}<span class="form-name">{{.Name}}</span><span class="unread">{{.Unread}}</span>{{end}}` +
+			`{{if not .Cards}}<p>No forms yet</p>{{end}}` +
 			`<span class="stat-forms">{{.TotalForms}}</span>` +
 			`<span class="stat-unread">{{.TotalUnread}}</span>` +
 			`<span class="stat-all">{{.TotalAll}}</span>`))
@@ -61,9 +61,9 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 			`{{range .Submissions}}<span class="sub-id">{{.ID}}</span>{{end}}` +
 			`<span class="total">{{.TotalCount}}</span>` +
 			`<span class="unread">{{.UnreadCount}}</span>` +
-			`<span class="page">{{.Page}}</span>` +
-			`{{if .HasPrev}}<span class="has-prev">true</span>{{end}}` +
-			`{{if .HasNext}}<span class="has-next">true</span>{{end}}` +
+			`<span class="page">{{.Pager.Page}}</span>` +
+			`{{if .Pager.HasPrev}}<span class="has-prev">true</span>{{end}}` +
+			`{{if .Pager.HasNext}}<span class="has-next">true</span>{{end}}` +
 			`{{else}}<p>No submissions yet</p>{{end}}`))
 
 	// submission_detail template
@@ -76,20 +76,22 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 			`{{range $key, $val := .Submission.Data}}<span class="field-{{$key}}">{{$val}}</span>{{end}}`))
 
 	templates := map[string]*template.Template{
-		"dashboard.html":        dashTmpl,
-		"form_new.html":         newTmpl,
-		"form_edit.html":        editTmpl,
-		"success.html":          successTmpl,
-		"form_detail.html":      detailTmpl,
+		"dashboard.html":         dashTmpl,
+		"form_new.html":          newTmpl,
+		"form_edit.html":         editTmpl,
+		"success.html":           successTmpl,
+		"form_detail.html":       detailTmpl,
 		"submission_detail.html": subDetailTmpl,
 	}
 
 	ah := &AdminHandler{
-		Store:     s,
-		SecretKey: testSecretKey,
-		BaseURL:   "https://example.com",
-		Templates: templates,
-		Webhook:   &noopWebhookSender{},
+		Base: Base{
+			Store:     s,
+			SecretKey: testSecretKey,
+			BaseURL:   "https://example.com",
+			Templates: templates,
+		},
+		Webhook: &noopWebhookSender{},
 	}
 
 	r := chi.NewRouter()
@@ -115,11 +117,26 @@ func setupAdmin(t *testing.T) (*store.Store, *chi.Mux) {
 	return s, r
 }
 
-func doAdminRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
+// loginCookie mints a session cookie for the seeded admin. Extracted from
+// doAdminRequest because tests that build their own request (to set a header,
+// say) need the same thing.
+func loginCookie(t *testing.T, s *store.Store) *http.Cookie {
 	t.Helper()
 	admin, _ := s.GetUserByUsername("admin")
 	token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
-	cookie := auth.CreateSessionCookie(token, "https://example.com")
+	return auth.CreateSessionCookie(token, "https://example.com")
+}
+
+func doAdminRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return doAdminRequestAs(t, loginCookie(t, s), r, method, path, body)
+}
+
+// doAdminRequestAs takes the session cookie rather than minting one, for tests
+// that must authenticate *before* they break the database — a login attempt
+// against a broken store never reaches the handler under test.
+func doAdminRequestAs(t *testing.T, cookie *http.Cookie, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
 
 	var req *http.Request
 	if body != "" {
@@ -384,8 +401,9 @@ func TestFormDetailPagination(t *testing.T) {
 	t.Parallel()
 	s, r := setupAdmin(t)
 	_ = s.CreateForm(store.Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
-	// Create 25 submissions (more than one page of 20)
-	for i := 1; i <= 25; i++ {
+	// More than one page. The default page size is 25 (the design's Rows
+	// selector offers 25/50/100), so 30 rows spill onto a second page.
+	for i := 1; i <= 30; i++ {
 		_ = s.CreateSubmission(store.Submission{
 			ID:      fmt.Sprintf("s%02d", i),
 			FormID:  "f1",

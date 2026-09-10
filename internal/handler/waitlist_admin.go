@@ -6,17 +6,14 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"sort"
 	"strconv"
 
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/flash"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 // BroadcastNotifier lets the handler wake the broadcast worker. Implemented by
@@ -27,35 +24,24 @@ type BroadcastNotifier interface {
 
 // WaitlistHandler handles admin waitlist pages.
 type WaitlistHandler struct {
-	Store       *store.Store
-	SecretKey   string
-	BaseURL     string
-	Templates   map[string]*template.Template
+	Base
 	Broadcaster BroadcastNotifier
 }
 
 type waitlistListData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Waitlists   []store.WaitlistSummary
+	PageData
+	Waitlists []store.WaitlistSummary
 }
 
 type waitlistFormData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Waitlist    store.Waitlist
-	BaseURL     string
-	Error       string
+	PageData
+	Waitlist store.Waitlist
+	BaseURL  string
+	Error    string
 }
 
 // List renders all waitlists.
 func (h *WaitlistHandler) List(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	wls, err := h.Store.ListWaitlists()
 	if err != nil {
@@ -65,32 +51,23 @@ func (h *WaitlistHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := waitlistListData{
-		Title:       "Waitlist",
-		Active:      "waitlists",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
-		Waitlists:   wls,
+		PageData:  h.Shell(w, r, "Waitlist", "waitlists"),
+		Waitlists: wls,
 	}
 	h.render(w, "waitlists.html", data)
 }
 
 // NewPage renders the create-waitlist form.
 func (h *WaitlistHandler) NewPage(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 	data := waitlistFormData{
-		Title:       "New Waitlist",
-		Active:      "waitlists",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
-		BaseURL:     h.BaseURL,
+		PageData: h.Shell(w, r, "New Waitlist", "waitlists"),
+		BaseURL:  h.BaseURL,
 	}
 	h.render(w, "waitlist_new.html", data)
 }
 
 // Create handles POST to create a new waitlist.
 func (h *WaitlistHandler) Create(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
 
 	wl := store.Waitlist{
 		Name:           r.FormValue("name"),
@@ -101,7 +78,7 @@ func (h *WaitlistHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if wl.Name == "" {
 		data := waitlistFormData{
-			Title: "New Waitlist", Active: "waitlists", CurrentUser: user,
+			PageData: h.Shell(w, r, "New Waitlist", "waitlists"),
 			Waitlist: wl, BaseURL: h.BaseURL, Error: "Waitlist name is required.",
 		}
 		h.render(w, "waitlist_new.html", data)
@@ -149,8 +126,6 @@ func (h *WaitlistHandler) getWaitlistOr404(w http.ResponseWriter, id string) (st
 
 // EditPage renders the edit form for a waitlist.
 func (h *WaitlistHandler) EditPage(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 	id := chi.URLParam(r, "id")
 
 	wl, ok := h.getWaitlistOr404(w, id)
@@ -158,19 +133,15 @@ func (h *WaitlistHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := waitlistFormData{
-		Title:       "Edit Waitlist",
-		Active:      "waitlists",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
-		Waitlist:    wl,
-		BaseURL:     h.BaseURL,
+		PageData: h.Shell(w, r, "Edit Waitlist", "waitlists"),
+		Waitlist: wl,
+		BaseURL:  h.BaseURL,
 	}
 	h.render(w, "waitlist_edit.html", data)
 }
 
 // Edit handles POST to update a waitlist.
 func (h *WaitlistHandler) Edit(w http.ResponseWriter, r *http.Request) {
-	user, _ := auth.UserFromContext(r.Context())
 	id := chi.URLParam(r, "id")
 
 	wl := store.Waitlist{
@@ -183,7 +154,7 @@ func (h *WaitlistHandler) Edit(w http.ResponseWriter, r *http.Request) {
 
 	if wl.Name == "" {
 		data := waitlistFormData{
-			Title: "Edit Waitlist", Active: "waitlists", CurrentUser: user,
+			PageData: h.Shell(w, r, "Edit Waitlist", "waitlists"),
 			Waitlist: wl, BaseURL: h.BaseURL, Error: "Waitlist name is required.",
 		}
 		h.render(w, "waitlist_edit.html", data)
@@ -217,18 +188,15 @@ func (h *WaitlistHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 type waitlistDetailData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Waitlist    store.Waitlist
-	Entries     []store.WaitlistEntry
-	TotalCount  int
-	Page        int
-	HasPrev     bool
-	HasNext     bool
-	PrevPage    int
-	NextPage    int
+	PageData
+	Waitlist   store.Waitlist
+	Entries    []store.WaitlistEntry
+	TotalCount int
+	Page       int
+	HasPrev    bool
+	HasNext    bool
+	PrevPage   int
+	NextPage   int
 }
 
 // Detail renders the paginated entries table for a waitlist.
@@ -247,9 +215,6 @@ func (h *WaitlistHandler) Detail(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * pageSize
 
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
-
 	entries, err := h.Store.ListEntriesPaged(id, pageSize, offset)
 	if err != nil {
 		log.Printf("waitlist detail: list entries %s: %v", id, err)
@@ -264,18 +229,15 @@ func (h *WaitlistHandler) Detail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := waitlistDetailData{
-		Title:       wl.Name,
-		Active:      "waitlists",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
-		Waitlist:    wl,
-		Entries:     entries,
-		TotalCount:  total,
-		Page:        page,
-		HasPrev:     page > 1,
-		HasNext:     offset+pageSize < total,
-		PrevPage:    page - 1,
-		NextPage:    page + 1,
+		PageData:   h.Shell(w, r, wl.Name, "waitlists"),
+		Waitlist:   wl,
+		Entries:    entries,
+		TotalCount: total,
+		Page:       page,
+		HasPrev:    page > 1,
+		HasNext:    offset+pageSize < total,
+		PrevPage:   page - 1,
+		NextPage:   page + 1,
 	}
 	h.render(w, "waitlist_detail.html", data)
 }
@@ -367,25 +329,23 @@ func (h *WaitlistHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 }
 
 type broadcastNewData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Waitlist    store.Waitlist
-	EntryCount  int
-	Broadcasts  []store.BroadcastSummary
-	Subject     string
-	Body        string
-	Error       string
+	PageData
+	Waitlist   store.Waitlist
+	EntryCount int
+	Broadcasts []store.BroadcastSummary
+	Subject    string
+	Body       string
+	Error      string
+
+	// RecipientCountKnown suppresses the count rather than rendering 0 into a
+	// confirmation dialog that says the send cannot be recalled.
+	RecipientCountKnown bool
 }
 
 type broadcastDetailData struct {
-	Title       string
-	Active      string
-	CurrentUser store.User
-	Flash       *FlashData
-	Waitlist    store.Waitlist
-	Broadcast   store.BroadcastSummary
+	PageData
+	Waitlist  store.Waitlist
+	Broadcast store.BroadcastSummary
 }
 
 // BroadcastPage renders the compose form plus past broadcasts.
@@ -395,8 +355,6 @@ func (h *WaitlistHandler) BroadcastPage(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 	count, err := h.Store.CountEntries(id)
 	if err != nil {
 		log.Printf("broadcast page: count entries %s: %v", id, err)
@@ -411,13 +369,10 @@ func (h *WaitlistHandler) BroadcastPage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.render(w, "broadcast_new.html", broadcastNewData{
-		Title:       "Broadcast",
-		Active:      "waitlists",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
-		Waitlist:    wl,
-		EntryCount:  count,
-		Broadcasts:  past,
+		PageData:   h.Shell(w, r, "Broadcast", "waitlists"),
+		Waitlist:   wl,
+		EntryCount: count,
+		Broadcasts: past,
 	})
 }
 
@@ -428,25 +383,31 @@ func (h *WaitlistHandler) CreateBroadcast(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	user, _ := auth.UserFromContext(r.Context())
 
 	subject := r.FormValue("subject")
 	body := r.FormValue("body")
 
+	// The GET path 500s on these same two queries. Degrading them to zero here
+	// renders "0 recipients" into both the page and the send-confirmation
+	// dialog for a list that may have thousands, and silently empties the past-
+	// broadcasts panel — so the reasonable read is that the signups are gone.
 	rerender := func(errMsg string) {
-		count, err := h.Store.CountEntries(id)
-		if err != nil {
-			log.Printf("broadcast rerender: count entries %s: %v", id, err)
+		count, countErr := h.Store.CountEntries(id)
+		if countErr != nil {
+			log.Printf("broadcast rerender: count entries %s: %v", id, countErr)
 		}
-		past, err := h.Store.ListBroadcasts(id)
-		if err != nil {
-			log.Printf("broadcast rerender: list broadcasts %s: %v", id, err)
+		past, listErr := h.Store.ListBroadcasts(id)
+		if listErr != nil {
+			log.Printf("broadcast rerender: list broadcasts %s: %v", id, listErr)
 		}
-		h.render(w, "broadcast_new.html", broadcastNewData{
-			Title: "Broadcast", Active: "waitlists", CurrentUser: user,
+		data := broadcastNewData{
+			PageData: h.Shell(w, r, "Broadcast", "waitlists"),
 			Waitlist: wl, EntryCount: count, Broadcasts: past,
 			Subject: subject, Body: body, Error: errMsg,
-		})
+		}
+		data.Degraded = data.Degraded || countErr != nil || listErr != nil
+		data.RecipientCountKnown = countErr == nil
+		h.render(w, "broadcast_new.html", data)
 	}
 
 	if subject == "" || body == "" {
@@ -509,15 +470,10 @@ func (h *WaitlistHandler) BroadcastDetail(w http.ResponseWriter, r *http.Request
 		http.Error(w, "broadcast not found", http.StatusNotFound)
 		return
 	}
-	user, _ := auth.UserFromContext(r.Context())
-	flashType, flashMsg := flash.Get(r, w, h.SecretKey)
 
 	h.render(w, "broadcast_detail.html", broadcastDetailData{
-		Title:       "Broadcast",
-		Active:      "waitlists",
-		CurrentUser: user,
-		Flash:       newFlash(flashType, flashMsg),
-		Waitlist:    wl,
-		Broadcast:   sum,
+		PageData:  h.Shell(w, r, "Broadcast", "waitlists"),
+		Waitlist:  wl,
+		Broadcast: sum,
 	})
 }

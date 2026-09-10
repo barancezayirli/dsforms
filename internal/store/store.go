@@ -6,19 +6,26 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 // Store wraps the SQLite database connection.
 type Store struct {
 	db *sql.DB
+}
+
+// execQuerier is the subset of *sql.DB the migration helpers need.
+type execQuerier interface {
+	Exec(string, ...any) (sql.Result, error)
+	QueryRow(string, ...any) *sql.Row
 }
 
 // User represents a user account.
@@ -39,6 +46,10 @@ type Form struct {
 	WebhookURL    string
 	WebhookFormat string
 	CreatedAt     time.Time
+
+	// SpamThreshold overrides the instance-wide threshold for this form.
+	// 0 means inherit — not "hold everything", which is why it is not nullable.
+	SpamThreshold int
 }
 
 // FormSummary is a Form with its unread submission count.
@@ -56,6 +67,35 @@ type Submission struct {
 	IP        string
 	Read      bool
 	CreatedAt time.Time
+
+	// Quarantine state. Always populated *on a read*: every read path selects
+	// heldColumns and scans through scanHeld, so these mean the same thing
+	// whichever function returned the value. Guarded by
+	// TestEverySubmissionReadUsesTheSharedColumnList rather than by this comment.
+	//
+	// Write paths are the other direction and legitimately pass zeros here —
+	// CreateSubmission ignores these columns and CreateHeldSubmission takes the
+	// score and threshold as parameters. A value built for a write therefore does
+	// not satisfy the invariant, and one is handed to the mailer and webhook on
+	// the accept path; neither reads these fields, and neither should start.
+	//
+	// That is deliberate, and it is the alternative to splitting this into
+	// separate held and accepted types. The two are one row and one lifecycle —
+	// RestoreSubmission turns one into the other with a single UPDATE — so a
+	// split would need a conversion, and a conversion is where fields get
+	// dropped. Populating every column removes the invalid state instead of
+	// renaming it.
+	//
+	// These are non-zero on a *restored* submission, which is the case that
+	// makes the invariant load-bearing: the score and threshold are kept as
+	// evidence of a false positive, so a partial read reports score 0 for a row
+	// the database says scored 11. That exact mismatch shipped once already.
+	// Notified likewise defaults to 1 in the schema, so a partial read claims an
+	// accepted submission was never notified.
+	IsHeld        bool
+	SpamScore     int
+	HeldThreshold int // the threshold actually applied when it was held
+	Notified      bool
 }
 
 // Waitlist represents an email-keyed signup list.
@@ -146,20 +186,68 @@ CREATE TABLE IF NOT EXISTS forms (
     redirect       TEXT NOT NULL DEFAULT '',
     webhook_url    TEXT NOT NULL DEFAULT '',
     webhook_format TEXT NOT NULL DEFAULT '',
-    created_at     DATETIME NOT NULL DEFAULT (datetime('now'))
+    created_at     DATETIME NOT NULL DEFAULT (datetime('now')),
+    -- Per-form spam sensitivity. 0 means inherit the instance default, not a
+    -- literal threshold of zero, which would hold every submission.
+    spam_threshold INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
-    id          TEXT PRIMARY KEY,
-    form_id     TEXT NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
-    data        TEXT NOT NULL,
-    ip          TEXT NOT NULL DEFAULT '',
-    read        INTEGER NOT NULL DEFAULT 0,
-    created_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+    id             TEXT PRIMARY KEY,
+    form_id        TEXT NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
+    data           TEXT NOT NULL,
+    ip             TEXT NOT NULL DEFAULT '',
+    read           INTEGER NOT NULL DEFAULT 0,
+    created_at     DATETIME NOT NULL DEFAULT (datetime('now')),
+    -- Quarantine. A held submission is stored but withheld from the form's
+    -- inbox until an operator restores or deletes it. notified stays 0 while
+    -- held so a restore can send the notification that was withheld.
+    is_held        INTEGER NOT NULL DEFAULT 0,
+    spam_score     INTEGER NOT NULL DEFAULT 0,
+    held_threshold INTEGER NOT NULL DEFAULT 0,
+    held_at        DATETIME NOT NULL DEFAULT '',
+    notified       INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_submissions_form_id ON submissions(form_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_read ON submissions(read);
+CREATE INDEX IF NOT EXISTS idx_submissions_created_at ON submissions(created_at);
+
+-- spam_signals records why one submission was held: which rule fired, on which
+-- field, on what text, and for how many points.
+--
+-- It is a stored record, not a re-computation. The weights and keyword list in
+-- internal/spam can be retuned and the threshold is operator-configurable, so
+-- re-scoring an old submission at review time would show a reviewer a reason
+-- that was never actually applied to it.
+--
+-- match_text is attacker-supplied: truncated on the way in and escaped on the
+-- way out by html/template. It is not named "match" because MATCH is a SQLite
+-- operator and the bare word would need quoting at every use site.
+CREATE TABLE IF NOT EXISTS spam_signals (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    rule          TEXT NOT NULL,
+    field         TEXT NOT NULL DEFAULT '',
+    match_text    TEXT NOT NULL DEFAULT '',
+    weight        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_spam_signals_submission_id ON spam_signals(submission_id);
+
+-- filter_rules are the operator's explicit overrides of the scoring filter:
+-- allow entries skip scoring entirely, block entries hold on arrival whatever
+-- the score, and keyword entries extend the built-in list at the usual weight.
+CREATE TABLE IF NOT EXISTS filter_rules (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK(kind IN ('block','allow')),
+    type       TEXT NOT NULL CHECK(type IN ('email','domain','ip','cidr','keyword')),
+    value      TEXT NOT NULL,
+    note       TEXT NOT NULL DEFAULT '',
+    hits       INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(kind, type, value)
+);
+CREATE INDEX IF NOT EXISTS idx_filter_rules_kind ON filter_rules(kind);
 
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -223,10 +311,25 @@ func runMigrations(db *sql.DB) error {
 
 // runAlterMigrations adds columns to existing tables. Only "duplicate column"
 // errors are ignored; all other errors are returned.
+//
+// Every column here is also declared in the CREATE TABLE above, so a fresh
+// database gets it from the schema and this pass is a no-op; an existing
+// database gets it from the ALTER. That double declaration is the established
+// pattern in this file (see forms.webhook_url) and is what keeps migrations
+// idempotent without a version table.
 func runAlterMigrations(db *sql.DB) error {
 	alters := []string{
 		"ALTER TABLE forms ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE forms ADD COLUMN webhook_format TEXT NOT NULL DEFAULT ''",
+		// Per-form spam sensitivity. 0 means inherit the instance default
+		// rather than NULL, matching the no-nullable-columns style of the rest
+		// of the schema.
+		"ALTER TABLE forms ADD COLUMN spam_threshold INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE submissions ADD COLUMN is_held INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE submissions ADD COLUMN spam_score INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE submissions ADD COLUMN held_threshold INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE submissions ADD COLUMN held_at DATETIME NOT NULL DEFAULT ''",
+		"ALTER TABLE submissions ADD COLUMN notified INTEGER NOT NULL DEFAULT 1",
 	}
 	for _, q := range alters {
 		_, err := db.Exec(q)
@@ -234,7 +337,31 @@ func runAlterMigrations(db *sql.DB) error {
 			return fmt.Errorf("alter migration: %w", err)
 		}
 	}
+
+	// Indexes over columns the ALTERs above may have just introduced. They
+	// cannot live in the schema constant: that runs before this function, so on
+	// an upgrade from a pre-quarantine database the column would not yet exist.
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_submissions_form_held ON submissions(form_id, is_held)",
+		"CREATE INDEX IF NOT EXISTS idx_submissions_held ON submissions(is_held)",
+	}
+	for _, q := range indexes {
+		if _, err := db.Exec(q); err != nil {
+			return fmt.Errorf("index migration: %w", err)
+		}
+	}
 	return nil
+}
+
+// runSearchMigrations creates the FTS5 index and its triggers, then brings the
+// index into step with the table. Separate from runMigrations because the
+// triggers reference submissions columns that runAlterMigrations may have only
+// just added.
+func runSearchMigrations(db execQuerier) error {
+	if _, err := db.Exec(searchSchema); err != nil {
+		return fmt.Errorf("search migrations: %w", err)
+	}
+	return syncSearchIndex(db)
 }
 
 // New opens a SQLite database and runs migrations.
@@ -249,10 +376,24 @@ func New(path string) (*Store, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
+	if path == ":memory:" {
+		// database/sql pools connections, and every new connection to an
+		// in-memory database gets its own private, empty one. A second
+		// connection would therefore see no tables at all — "no such table:
+		// submissions" from a perfectly valid query. Capping the pool at one
+		// keeps every caller on the same database.
+		//
+		// This only affects tests; the file-backed path keeps WAL concurrency.
+		db.SetMaxOpenConns(1)
+	}
+
 	if err := runMigrations(db); err != nil {
 		return nil, err
 	}
 	if err := runAlterMigrations(db); err != nil {
+		return nil, err
+	}
+	if err := runSearchMigrations(db); err != nil {
 		return nil, err
 	}
 
@@ -312,6 +453,13 @@ func (s *Store) Reopen(path string) error {
 		return fmt.Errorf("reopen: %w", err)
 	}
 	if err := runAlterMigrations(newDB); err != nil {
+		newDB.Close()
+		return fmt.Errorf("reopen: %w", err)
+	}
+	// A restored backup arrives carrying whatever search index that file had —
+	// possibly none, if it predates this feature — so the index is resynced on
+	// reopen as well as on a normal open.
+	if err := runSearchMigrations(newDB); err != nil {
 		newDB.Close()
 		return fmt.Errorf("reopen: %w", err)
 	}
@@ -470,8 +618,8 @@ func (s *Store) CheckPassword(username, password string) (User, error) {
 // CreateForm creates a new form.
 func (s *Store) CreateForm(f Form) error {
 	_, err := s.db.Exec(
-		"INSERT INTO forms (id, name, email_to, redirect, webhook_url, webhook_format) VALUES (?, ?, ?, ?, ?, ?)",
-		f.ID, f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat,
+		"INSERT INTO forms (id, name, email_to, redirect, webhook_url, webhook_format, spam_threshold) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		f.ID, f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.SpamThreshold,
 	)
 	if err != nil {
 		return fmt.Errorf("create form: %w", err)
@@ -483,9 +631,9 @@ func (s *Store) CreateForm(f Form) error {
 func (s *Store) GetForm(id string) (Form, error) {
 	var f Form
 	err := s.db.QueryRow(
-		"SELECT id, name, email_to, redirect, webhook_url, webhook_format, created_at FROM forms WHERE id = ?",
+		"SELECT id, name, email_to, redirect, webhook_url, webhook_format, created_at, spam_threshold FROM forms WHERE id = ?",
 		id,
-	).Scan(&f.ID, &f.Name, &f.EmailTo, &f.Redirect, &f.WebhookURL, &f.WebhookFormat, &f.CreatedAt)
+	).Scan(&f.ID, &f.Name, &f.EmailTo, &f.Redirect, &f.WebhookURL, &f.WebhookFormat, &f.CreatedAt, &f.SpamThreshold)
 	if err != nil {
 		return Form{}, fmt.Errorf("get form: %w", err)
 	}
@@ -495,8 +643,8 @@ func (s *Store) GetForm(id string) (Form, error) {
 // ListForms returns all forms with unread counts.
 func (s *Store) ListForms() ([]FormSummary, error) {
 	rows, err := s.db.Query(`
-		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at,
-		       COUNT(CASE WHEN s.read = 0 THEN 1 END) as unread_count
+		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at, f.spam_threshold,
+		       COUNT(CASE WHEN s.read = 0 AND s.is_held = 0 THEN 1 END) as unread_count
 		FROM forms f
 		LEFT JOIN submissions s ON s.form_id = f.id
 		GROUP BY f.id
@@ -510,7 +658,7 @@ func (s *Store) ListForms() ([]FormSummary, error) {
 	var forms []FormSummary
 	for rows.Next() {
 		var fs FormSummary
-		if err := rows.Scan(&fs.ID, &fs.Name, &fs.EmailTo, &fs.Redirect, &fs.WebhookURL, &fs.WebhookFormat, &fs.CreatedAt, &fs.UnreadCount); err != nil {
+		if err := rows.Scan(&fs.ID, &fs.Name, &fs.EmailTo, &fs.Redirect, &fs.WebhookURL, &fs.WebhookFormat, &fs.CreatedAt, &fs.SpamThreshold, &fs.UnreadCount); err != nil {
 			return nil, fmt.Errorf("list forms: %w", err)
 		}
 		forms = append(forms, fs)
@@ -524,8 +672,8 @@ func (s *Store) ListForms() ([]FormSummary, error) {
 // UpdateForm updates a form's fields.
 func (s *Store) UpdateForm(f Form) error {
 	_, err := s.db.Exec(
-		"UPDATE forms SET name = ?, email_to = ?, redirect = ?, webhook_url = ?, webhook_format = ? WHERE id = ?",
-		f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.ID,
+		"UPDATE forms SET name = ?, email_to = ?, redirect = ?, webhook_url = ?, webhook_format = ?, spam_threshold = ? WHERE id = ?",
+		f.Name, f.EmailTo, f.Redirect, f.WebhookURL, f.WebhookFormat, f.SpamThreshold, f.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update form: %w", err)
@@ -553,6 +701,22 @@ func (s *Store) DeleteForm(id string) error {
 // sort inconsistently against rows written by the column default.
 const sqliteTime = "2006-01-02 15:04:05"
 
+// sqliteTimestamp renders t in the layout SQLite's own datetime('now') produces.
+//
+// Every timestamp written from Go goes through this. Handing the driver a
+// time.Time instead stringifies it with an offset ("2026-09-09T17:22:49.9-07:00"
+// or "… +0000 UTC" depending on the value), which date() and datetime() cannot
+// parse — and since these columns are TEXT, a range comparison against a
+// differently-formatted value is a string comparison that is silently
+// meaningless. That has been the cause of three separate bugs here.
+//
+// The .UTC() is unconditional rather than left to the caller. Several call sites
+// were correct only because the value could be traced back to a time.Now().UTC()
+// a few lines up, which is not a property anyone should have to re-derive.
+func sqliteTimestamp(t time.Time) string {
+	return t.UTC().Format(sqliteTime)
+}
+
 // CreateSubmission creates a new submission. created_at is written explicitly so
 // the caller's Submission carries the same timestamp as the stored row — the
 // notification email formats its Date header from the in-memory struct, which
@@ -565,7 +729,7 @@ func (s *Store) CreateSubmission(sub Submission) error {
 	}
 	_, err := s.db.Exec(
 		"INSERT INTO submissions (id, form_id, data, ip, created_at) VALUES (?, ?, ?, ?, ?)",
-		sub.ID, sub.FormID, sub.RawData, sub.IP, createdAt.UTC().Format(sqliteTime),
+		sub.ID, sub.FormID, sub.RawData, sub.IP, sqliteTimestamp(createdAt),
 	)
 	if err != nil {
 		return fmt.Errorf("create submission: %w", err)
@@ -575,35 +739,9 @@ func (s *Store) CreateSubmission(sub Submission) error {
 
 // ListSubmissions returns all submissions for a form.
 func (s *Store) ListSubmissions(formID string) ([]Submission, error) {
-	rows, err := s.db.Query(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? ORDER BY created_at DESC",
-		formID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list submissions: %w", err)
-	}
-	defer rows.Close()
-
-	var subs []Submission
-	for rows.Next() {
-		var sub Submission
-		var rawData string
-		var readInt int
-		if err := rows.Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt); err != nil {
-			return nil, fmt.Errorf("list submissions: %w", err)
-		}
-		sub.RawData = rawData
-		sub.Read = readInt == 1
-		if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
-			log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
-			sub.Data = map[string]string{"_raw": rawData}
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list submissions: %w", err)
-	}
-	return subs, nil
+	return s.querySubmissions("list submissions",
+		"SELECT "+heldColumns+" FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id",
+		formID)
 }
 
 // MarkRead marks a submission as read.
@@ -618,7 +756,7 @@ func (s *Store) MarkRead(submissionID string) error {
 // CountAllSubmissions returns the total count of all submissions across all forms.
 func (s *Store) CountAllSubmissions() (int, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions").Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE is_held = 0").Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count all submissions: %w", err)
 	}
@@ -627,7 +765,7 @@ func (s *Store) CountAllSubmissions() (int, error) {
 
 // MarkAllRead marks all submissions for a form as read.
 func (s *Store) MarkAllRead(formID string) error {
-	_, err := s.db.Exec("UPDATE submissions SET read = 1 WHERE form_id = ?", formID)
+	_, err := s.db.Exec("UPDATE submissions SET read = 1 WHERE form_id = ? AND is_held = 0", formID)
 	if err != nil {
 		return fmt.Errorf("mark all read: %w", err)
 	}
@@ -666,61 +804,34 @@ func (s *Store) DeleteSubmissions(formID string, ids []string) error {
 
 // GetSubmission returns a single submission by ID.
 func (s *Store) GetSubmission(id string) (Submission, error) {
-	var sub Submission
-	var rawData string
-	var readInt int
-	err := s.db.QueryRow(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE id = ?", id,
-	).Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt)
+	// Reads the quarantine columns too, via the same helpers the held-submission
+	// queries use. It previously selected only the pre-quarantine columns, which
+	// left SpamScore and IsHeld at zero on every read — and the submission
+	// reader renders SpamScore beside the stored signal breakdown, so a restored
+	// submission showed "score 0" above weights summing to 11. A handler guard
+	// written against IsHeld would likewise have been a silent no-op.
+	sub, err := scanHeld(s.db.QueryRow("SELECT "+heldColumns+" FROM submissions WHERE id = ?", id))
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Callers distinguish "no such submission" from a real failure.
+			return Submission{}, err
+		}
 		return Submission{}, fmt.Errorf("get submission: %w", err)
-	}
-	sub.RawData = rawData
-	sub.Read = readInt == 1
-	if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
-		log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
-		sub.Data = map[string]string{"_raw": rawData}
 	}
 	return sub, nil
 }
 
 // ListSubmissionsPaged returns a page of submissions for a form.
 func (s *Store) ListSubmissionsPaged(formID string, limit, offset int) ([]Submission, error) {
-	rows, err := s.db.Query(
-		"SELECT id, form_id, data, ip, read, created_at FROM submissions WHERE form_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-		formID, limit, offset,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list submissions paged: %w", err)
-	}
-	defer rows.Close()
-
-	var subs []Submission
-	for rows.Next() {
-		var sub Submission
-		var rawData string
-		var readInt int
-		if err := rows.Scan(&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt); err != nil {
-			return nil, fmt.Errorf("list submissions paged: %w", err)
-		}
-		sub.RawData = rawData
-		sub.Read = readInt == 1
-		if err := json.Unmarshal([]byte(rawData), &sub.Data); err != nil {
-			log.Printf("warning: failed to unmarshal submission %s data: %v", sub.ID, err)
-			sub.Data = map[string]string{"_raw": rawData}
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list submissions paged: %w", err)
-	}
-	return subs, nil
+	return s.querySubmissions("list submissions paged",
+		"SELECT "+heldColumns+" FROM submissions WHERE form_id = ? AND is_held = 0 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+		formID, limit, offset)
 }
 
 // CountSubmissions returns the total number of submissions for a form.
 func (s *Store) CountSubmissions(formID string) (int, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ?", formID).Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM submissions WHERE form_id = ? AND is_held = 0", formID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count submissions: %w", err)
 	}
@@ -731,7 +842,7 @@ func (s *Store) CountSubmissions(formID string) (int, error) {
 func (s *Store) UnreadCount(formID string) (int, error) {
 	var count int
 	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM submissions WHERE form_id = ? AND read = 0",
+		"SELECT COUNT(*) FROM submissions WHERE form_id = ? AND read = 0 AND is_held = 0",
 		formID,
 	).Scan(&count)
 	if err != nil {
@@ -757,7 +868,11 @@ func (s *Store) CreateSession(userID string, expiry time.Duration) (string, erro
 	}
 	token := hex.EncodeToString(b)
 	tokenHash := hashToken(token)
-	expiresAt := time.Now().Add(expiry)
+	// Formatted, not bound as a time.Time. The driver stringifies one with an
+	// offset ("2026-09-09T17:22:21.69-07:00"), which datetime('now') — UTC, no
+	// offset — neither parses nor compares against correctly, so expires_at is
+	// read as a plain string that sorts by the wrong digits.
+	expiresAt := sqliteTimestamp(time.Now().Add(expiry))
 	_, err := s.db.Exec(
 		"INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
 		tokenHash, userID, expiresAt,
@@ -914,7 +1029,15 @@ func (s *Store) CreateEntry(e WaitlistEntry) (position int, alreadyJoined bool, 
 	if err != nil {
 		return 0, false, fmt.Errorf("create entry: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	// Not discarded. This is the one RowsAffected in this file whose zero value
+	// is a *claim* rather than an error: n == 0 means the ON CONFLICT fired, and
+	// the caller turns that into "you are already on the list". A swallowed
+	// error would tell a first-time signup they had already joined, which is
+	// both wrong and unarguable from their side.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, false, fmt.Errorf("create entry: rows affected: %w", err)
+	}
 	alreadyJoined = n == 0
 
 	position, err = s.entryPosition(e.WaitlistID, e.Email)
@@ -1204,4 +1327,38 @@ func (s *Store) MarkBroadcastDone(id string) error {
 		return fmt.Errorf("mark broadcast done: %w", err)
 	}
 	return nil
+}
+
+// Initials returns up to two uppercase letters for the avatar in the sidebar
+// and the submission reader. Falls back to "?" so the avatar circle is never
+// empty — an empty circle reads as a rendering bug rather than a person.
+func (u User) Initials() string {
+	fields := strings.Fields(strings.ReplaceAll(u.Username, ".", " "))
+	switch {
+	case len(fields) == 0:
+		return "?"
+	case len(fields) == 1:
+		r := []rune(fields[0])
+		if len(r) == 1 {
+			return strings.ToUpper(string(r[0]))
+		}
+		return strings.ToUpper(string(r[0:2]))
+	default:
+		return strings.ToUpper(string([]rune(fields[0])[0:1]) + string([]rune(fields[1])[0:1]))
+	}
+}
+
+// decodeSubmissionData unmarshals a stored submission payload.
+//
+// A row whose JSON will not parse is surfaced under a "_raw" key rather than
+// dropped: the payload is the whole value of a submission, and showing an
+// operator something unreadable beats showing them nothing and no error. This
+// was inlined identically at four call sites before it was extracted here.
+func decodeSubmissionData(id, rawData string) map[string]string {
+	var data map[string]string
+	if err := json.Unmarshal([]byte(rawData), &data); err != nil {
+		log.Printf("warning: failed to unmarshal submission %s data: %v", id, err)
+		return map[string]string{"_raw": rawData}
+	}
+	return data
 }

@@ -1,0 +1,267 @@
+{{template "base" .}}
+
+{{define "header-actions"}}
+<a class="btn btn-secondary btn-34" href="/admin/rules">
+  <svg class="i" style="font-size:15px"><use href="#ph-sliders-horizontal"/></svg>Tune filter
+</a>
+{{end}}
+
+<!-- The right-hand breakdown is also served on its own, so clicking a row can
+     swap just this panel instead of reloading the page. -->
+{{define "held-panel"}}
+<!-- Only when the panel *is* the response. app.js swaps it in on every row
+     click, bypassing base.html, so without this the operator reads a panel
+     built from a failed query with nothing saying so. On a full page render the
+     shell already shows it, and two stacked banners is just noise. -->
+{{if .Fragment}}{{template "degraded-notice" .}}{{end}}
+{{if .Selected}}
+{{with .Selected}}
+<div class="card elev-sm" style="gap:0">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span class="card-kicker" style="margin-right:auto">why it was held</span>
+    <span class="tag tag-outline tag-sm">score {{.SpamScore}} / {{$.Threshold}}</span>
+  </div>
+  <div style="font-size:15px;font-weight:500;margin-top:6px">{{.From}}</div>
+  <div class="dim mono" style="font-size:12px;margin-top:2px">
+    {{if .IP}}{{.IP}} · {{end}}{{.FormName}} · {{.Age}}
+  </div>
+
+  <!-- Threshold meter. The scale is max(12, score) rather than the threshold
+       itself, so a submission that scraped in at exactly the threshold does
+       not look identical to one that tripled it — which is the distinction the
+       reviewer is actually making. -->
+  <div style="margin-top:16px">
+    <div class="meter"><i style="width:{{$.MeterPercent}}%"></i></div>
+    <div class="meter-scale">
+      <span>0</span><span>threshold {{$.Threshold}}</span><span>{{$.MeterMax}}</span>
+    </div>
+  </div>
+
+  {{if .Signals}}
+  <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px">
+    {{range .Signals}}
+    <div class="rule-box">
+      <div class="rule-head">
+        <svg class="i"><use href="#ph-{{ruleIcon .Rule}}"/></svg>
+        <span class="rule-name">{{ruleLabel .Rule}}</span>
+        <span class="tag tag-outline tag-sm">+{{.Weight}}</span>
+      </div>
+      {{if .Match}}
+      <div class="rule-field">{{if .Field}}field <code>{{.Field}}</code> · {{end}}matched</div>
+      <!-- Attacker-supplied text. html/template escapes it; it must never be
+           wrapped in template.HTML. -->
+      <div class="code" style="margin-top:5px">{{.Match}}</div>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  <hr class="hr">
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <form method="POST" action="/admin/quarantine/{{.ID}}/restore">
+      <button class="btn btn-primary btn-block" type="submit">
+        <svg class="i" style="font-size:15px"><use href="#ph-arrow-u-up-left"/></svg>Not spam
+      </button>
+    </form>
+    <form method="POST" action="/admin/quarantine/delete"
+          data-confirm="Delete this submission permanently?">
+      <input type="hidden" name="ids" value="{{.ID}}">
+      <button class="btn btn-danger btn-block" type="submit">
+        <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>Confirm spam
+      </button>
+    </form>
+
+    {{if .IP}}
+    <form method="POST" action="/admin/rules">
+      <input type="hidden" name="kind" value="block">
+      <input type="hidden" name="type" value="ip">
+      <input type="hidden" name="value" value="{{.IP}}">
+      <input type="hidden" name="note" value="blocked from quarantine">
+      <button class="btn btn-secondary btn-block" type="submit">
+        <svg class="i" style="font-size:15px"><use href="#ph-prohibit"/></svg>Block this IP
+      </button>
+    </form>
+    {{end}}
+    {{$email := index .Data "email"}}
+    {{if $email}}
+    <form method="POST" action="/admin/rules">
+      <input type="hidden" name="kind" value="block">
+      <input type="hidden" name="type" value="email">
+      <input type="hidden" name="value" value="{{$email}}">
+      <input type="hidden" name="note" value="blocked from quarantine">
+      <button class="btn btn-secondary btn-block" type="submit">
+        <svg class="i" style="font-size:15px"><use href="#ph-user-minus"/></svg>Block sender
+      </button>
+    </form>
+    <form method="POST" action="/admin/rules" style="grid-column:1/-1">
+      <input type="hidden" name="kind" value="allow">
+      <input type="hidden" name="type" value="email">
+      <input type="hidden" name="value" value="{{$email}}">
+      <input type="hidden" name="note" value="allowlisted from quarantine">
+      <button class="btn btn-secondary btn-block" type="submit">
+        <svg class="i" style="font-size:15px"><use href="#ph-user-check"/></svg>Allowlist sender
+      </button>
+    </form>
+    {{end}}
+
+    <form method="POST" action="/admin/quarantine/{{.ID}}/report" style="grid-column:1/-1">
+      <button class="btn btn-ghost btn-block" type="submit">
+        <svg class="i" style="font-size:14px"><use href="#ph-flag"/></svg>Report as a false positive
+      </button>
+    </form>
+  </div>
+
+  <p class="dim" style="font-size:11px;margin-top:10px">
+    Restoring moves this submission back into <strong>{{.FormName}}</strong> as
+    unread and sends the notification that was withheld.
+  </p>
+</div>
+{{end}}
+{{else}}
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-selection-slash"/></svg></span>
+  <h3>Nothing selected</h3>
+  <p>Pick a held submission to see exactly which rules fired on it.</p>
+</div>
+{{end}}
+{{end}}
+
+{{define "content"}}
+<div class="page-head">
+  <h4>Quarantine</h4>
+  {{if .HeldTotal}}<span class="tag tag-accent">{{.HeldTotal}} held</span>{{end}}
+  <span class="muted" style="font-size:12px">
+    Auto-deleted after {{.RetentionDays}} days · threshold {{.Threshold}}
+  </span>
+  {{if .HeldTotal}}
+  <div class="actions">
+    <form method="POST" action="/admin/quarantine/empty"
+          data-confirm="Delete every held submission permanently? This cannot be undone.">
+      <button class="btn btn-danger" type="submit">
+        <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>Empty quarantine
+      </button>
+    </form>
+  </div>
+  {{end}}
+</div>
+
+{{if .Rows}}
+<div class="grid-stat">
+  <div class="card elev-sm stat">
+    <div class="stat-value">{{.HeldRecent}}</div>
+    <div class="stat-label">Held (30d)</div>
+    <div class="stat-sub">{{pct .HeldRecent .TrafficRecent}}% of traffic</div>
+  </div>
+  <div class="card elev-sm stat">
+    <div class="stat-value stat-accent">{{.AwaitingCount}}</div>
+    <div class="stat-label">Awaiting review</div>
+    <div class="stat-sub">{{if .Rows}}oldest {{(index .Rows (sub (len .Rows) 1)).Age}}{{else}}none{{end}}</div>
+  </div>
+  <div class="card elev-sm stat">
+    <div class="stat-value">{{.RetentionDays}}d</div>
+    <div class="stat-label">Retention</div>
+    <div class="stat-sub">then deleted automatically</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-main">
+    <div class="card elev-sm" data-bulk style="gap:0">
+      <form id="held-bulk" method="POST" action="/admin/quarantine/delete"
+            data-confirm="Delete the selected submissions permanently?"></form>
+
+      <div class="bulkbar" data-bulk-bar hidden>
+        <label class="radio">
+          <input type="checkbox" data-bulk-all aria-label="Select all held submissions">
+          <span class="dot"></span>
+        </label>
+        <span class="count" data-bulk-count>0 selected</span>
+        <div class="actions">
+          <button class="btn btn-danger" type="submit" form="held-bulk" data-bulk-action>
+            <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>Confirm spam
+          </button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table" style="min-width:460px">
+          <thead>
+            <tr>
+              <th style="width:28px"></th>
+              <th>From</th>
+              <th>Signals</th>
+              <th style="width:56px">Score</th>
+              <th>Form</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{$sel := ""}}{{if .Selected}}{{$sel = .Selected.ID}}{{end}}
+            {{range .Rows}}
+            <tr data-held-row class="{{if eq .ID $sel}}on{{end}}">
+              <td>
+                <label class="radio">
+                  <input type="checkbox" name="ids" value="{{.ID}}" form="held-bulk" data-bulk-item
+                         aria-label="Select this held submission">
+                  <span class="dot"></span>
+                </label>
+              </td>
+              <td>
+                <a class="mono" data-held-link href="/admin/quarantine?sel={{.ID}}"
+                   style="font-size:13px;display:block">{{.From}}</a>
+                {{if .IP}}<div class="dim mono" style="font-size:11px">{{.IP}}</div>{{end}}
+              </td>
+              <td>
+                <div style="display:flex;flex-wrap:wrap;gap:4px">
+                  {{if .SignalsFailed}}<span class="dim" style="font-size:11px">reason unavailable</span>
+                  {{else}}{{range .Rules}}<span class="tag tag-neutral tag-sm nowrap">{{.}}</span>{{end}}{{end}}
+                </div>
+              </td>
+              <td>
+                <span class="tag tag-sm {{if ge .SpamScore 9}}tag-accent{{else}}tag-neutral{{end}}"
+                      style="justify-content:center;min-width:26px">{{.SpamScore}}</span>
+              </td>
+              <td>
+                <div class="muted" style="font-size:12px">{{.FormName}}</div>
+                <div class="dim" style="font-size:11px">{{.Age}}</div>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+
+      {{if gt .Pager.TotalPages 1}}
+      <div class="pager rule-b" style="background-position:top">
+        <span class="muted" style="font-size:12px">{{.Pager.From}}–{{.Pager.To}} of {{.Pager.Total}}</span>
+        <nav class="pages" aria-label="Pagination">
+          {{$cur := .Pager.Page}}
+          {{range .Pager.Pages}}
+            {{if eq . 0}}<span class="ellipsis" aria-hidden="true">…</span>
+            {{else if eq . $cur}}<a class="btn btn-primary" href="/admin/quarantine?page={{.}}" aria-current="page">{{.}}</a>
+            {{else}}<a class="btn btn-secondary" href="/admin/quarantine?page={{.}}">{{.}}</a>{{end}}
+          {{end}}
+        </nav>
+      </div>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="col-side" id="held-panel">
+    {{template "held-panel" .}}
+  </div>
+</div>
+
+{{else}}
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-shield-check"/></svg></span>
+  <h3>Quarantine is clear</h3>
+  <p>Nothing has crossed the threshold. Held submissions appear here with the
+     score breakdown that put them there, and are deleted after {{.RetentionDays}} days.</p>
+  <a class="btn btn-primary" href="/admin/rules">
+    <svg class="i" style="font-size:15px"><use href="#ph-sliders-horizontal"/></svg>Tune the filter
+  </a>
+</div>
+{{end}}
+{{end}}

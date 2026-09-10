@@ -8,11 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
-// Mailer sends email over SMTP. It implements handler.Notifier (SendNotification)
-// as well as handler.ConfirmationMailer and broadcaster.Mailer (both via SendMail).
+// Mailer sends email over SMTP. It implements every consumer interface main.go
+// wires it into — see the var _ block there, which is the list that stays
+// correct.
 type Mailer struct {
 	Host    string
 	Port    int
@@ -130,11 +131,21 @@ type SentMail struct {
 	Body    string
 }
 
-// MockMailer records calls for testing. Use NewMockMailer() to create.
+// MockMailer records calls for testing. Use NewMockMailer() or
+// NewFailingMockMailer() to create.
+//
+// sendErr makes every send fail — both SendNotification and SendMail. Without it
+// a mock that always succeeds makes any "and then the other delivery still
+// happened" assertion vacuous, which is exactly how a restore that skipped its
+// webhook whenever email failed stayed green.
+//
+// Unexported because it is read under mu: an exported field would invite a
+// direct write from a test, racing the send it is meant to control.
 type MockMailer struct {
 	mu        sync.Mutex
 	Calls     []MockCall
 	SentMails []SentMail
+	sendErr   error
 	ch        chan struct{}
 }
 
@@ -143,13 +154,19 @@ func NewMockMailer() *MockMailer {
 	return &MockMailer{ch: make(chan struct{}, 10)}
 }
 
+// NewFailingMockMailer creates a MockMailer whose sends all return err.
+func NewFailingMockMailer(err error) *MockMailer {
+	return &MockMailer{ch: make(chan struct{}, 10), sendErr: err}
+}
+
 // SendNotification records the call and signals waiters.
 func (m *MockMailer) SendNotification(form store.Form, sub store.Submission) error {
 	m.mu.Lock()
 	m.Calls = append(m.Calls, MockCall{Form: form, Sub: sub})
+	err := m.sendErr
 	m.mu.Unlock()
 	m.ch <- struct{}{}
-	return nil
+	return err
 }
 
 // CallCount returns the number of times SendNotification was called.
@@ -159,13 +176,21 @@ func (m *MockMailer) CallCount() int {
 	return len(m.Calls)
 }
 
-// SendMail records the call and signals waiters.
+// SendMail records the call and signals waiters, honouring sendErr.
+//
+// It ignored sendErr until round 3, while the type's doc said "every send
+// fails" — so anyone writing "and the other thing still happens when email
+// fails" against the digest, the broadcaster or a waitlist confirmation (all of
+// which send through here, not SendNotification) would have got a green test
+// against a mailer that quietly succeeded. That is the vacuous assertion this
+// field was added to make impossible.
 func (m *MockMailer) SendMail(to, subject, body string) error {
 	m.mu.Lock()
 	m.SentMails = append(m.SentMails, SentMail{To: to, Subject: subject, Body: body})
+	err := m.sendErr
 	m.mu.Unlock()
 	m.ch <- struct{}{}
-	return nil
+	return err
 }
 
 // SendMailCount returns the number of SendMail calls recorded.

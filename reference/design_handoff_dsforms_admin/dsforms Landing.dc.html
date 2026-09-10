@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-b6186ff7-2d2b-4d3a-b98e-3092787ad06a/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<script src="_ds/nocturne-b6186ff7-2d2b-4d3a-b98e-3092787ad06a/_ds_bundle.js"></script>
+<style>
+html,body{margin:0;background:#161826;scroll-behavior:smooth}
+a{color:#9184d9;text-decoration:none}
+a:hover{color:#b5abfc}
+i.ph{line-height:1;display:inline-block}
+.btn{white-space:nowrap}
+pre{margin:0}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#3f424d;border-radius:6px}
+</style>
+</helmet>
+<div style="font-family:Inter,system-ui,sans-serif;color:#e9e9ed;background:#161826;overflow-x:hidden">
+
+  <nav style="position:sticky;top:0;z-index:40;display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:13px 28px;background:rgba(22,24,38,.88);backdrop-filter:blur(10px);background-image:linear-gradient(to right,transparent,rgba(233,233,237,.16) 48px,rgba(233,233,237,.16) calc(100% - 48px),transparent);background-repeat:no-repeat;background-position:bottom;background-size:100% 1px">
+    <a href="#top" style="display:flex;align-items:center;gap:9px;color:inherit">
+      <span style="width:26px;height:26px;flex:none;border-radius:7px;box-shadow:inset 0 0 0 1px #5d5294;background:#2b2741;display:grid;place-items:center;color:#b5abfc;font-size:15px"><i class="ph ph-tray-arrow-down"></i></span>
+      <span style="font-size:16px;font-weight:500;letter-spacing:-.02em">ds<em style="color:#9184d9;font-style:normal">forms</em></span>
+    </a>
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:18px;margin-left:22px">
+      <a href="#how" style="font-size:13.5px;color:#b2b6ca">How it works</a>
+      <a href="#spam" style="font-size:13.5px;color:#b2b6ca">Spam filter</a>
+      <a href="#webhooks" style="font-size:13.5px;color:#b2b6ca">Webhooks</a>
+      <a href="#waitlist" style="font-size:13.5px;color:#b2b6ca">Waitlist</a>
+      <a href="#admin" style="font-size:13.5px;color:#b2b6ca">Admin</a>
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
+      <a class="btn btn-secondary" href="https://github.com/barancezayirli/dsforms" style="height:34px"><i class="ph ph-star" style="font-size:15px"></i>Star</a>
+      <a class="btn btn-primary" href="#self-host" style="height:34px">Self-host it</a>
+    </div>
+  </nav>
+
+  <!-- ══ HERO ══ -->
+  <section id="top" style="position:relative;padding:76px 28px 64px;max-width:1240px;margin:0 auto">
+    <div style="position:absolute;top:-260px;left:-120px;width:820px;height:560px;border-radius:50%;background:radial-gradient(closest-side,#2b2741,transparent);pointer-events:none"></div>
+    <div style="position:relative;display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start">
+      <div style="flex:1 1 0%;min-width:330px;max-width:640px">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:20px">
+          <span style="width:18px;height:2px;background:#9184d9;flex:none"></span>
+          <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9184d9">Self-hosted form backend</span>
+        </div>
+        <h1 style="margin:0 0 18px;font-size:clamp(38px,5.4vw,58px);letter-spacing:-.03em;line-height:1.06;text-wrap:balance">Form submissions for static sites.</h1>
+        <p style="font-size:18px;line-height:1.6;color:#b2b6ca;max-width:52ch;margin:0 0 8px;text-wrap:pretty">Point your <code style="font-family:ui-monospace,Menlo,monospace;font-size:16px;color:#d2cefd">&lt;form&gt;</code> at your own server. One Go binary, one SQLite file, one Docker Compose command. No per-submission fees, no vendor lock-in, no surprise pricing.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:26px">
+          <a class="btn btn-primary" href="#self-host" style="height:42px;font-size:15px;padding:0 20px"><i class="ph ph-terminal-window" style="font-size:17px"></i>Self-host in 5 minutes</a>
+          <a class="btn btn-secondary" href="https://github.com/barancezayirli/dsforms" style="height:42px;font-size:15px;padding:0 20px"><i class="ph ph-github-logo" style="font-size:17px"></i>View source</a>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:24px">
+          <sc-for list="{{ heroTags }}" as="t" hint-placeholder-count="5">
+            <span class="tag tag-neutral" style="white-space:nowrap">{{ t }}</span>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="flex:1 1 380px;min-width:320px;max-width:520px">
+        <div style="border-radius:8px;overflow:hidden;background:#232532;box-shadow:var(--shadow-md)">
+          <div style="display:flex;align-items:center;gap:9px;padding:9px 13px;background-image:linear-gradient(to right,rgba(233,233,237,.16),rgba(233,233,237,.16));background-repeat:no-repeat;background-position:bottom;background-size:100% 1px">
+            <i class="ph ph-file-html" style="font-size:15px;color:#75798c"></i>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9397ab">contact.html</span>
+            <button class="btn btn-ghost" style="margin-left:auto;font-size:12px"><i class="ph ph-copy" style="font-size:14px"></i>Copy</button>
+          </div>
+          <pre style="padding:16px 15px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.85;overflow-x:auto;color:#cfd3e5"><div><span style="color:#b5abfc">&lt;form</span> <span style="color:#9397ab">method</span>=<span style="color:#d2cefd">"POST"</span></div><div>      <span style="color:#9397ab">action</span>=<span style="color:#d2cefd">"https://forms.yoursite.com/f/4b91c0"</span><span style="color:#b5abfc">&gt;</span></div><div>  <span style="color:#b5abfc">&lt;input</span>    <span style="color:#9397ab">name</span>=<span style="color:#d2cefd">"name"</span>    <span style="color:#968ae0">required</span><span style="color:#b5abfc">&gt;</span></div><div>  <span style="color:#b5abfc">&lt;input</span>    <span style="color:#9397ab">name</span>=<span style="color:#d2cefd">"email"</span>   <span style="color:#9397ab">type</span>=<span style="color:#d2cefd">"email"</span> <span style="color:#968ae0">required</span><span style="color:#b5abfc">&gt;</span></div><div>  <span style="color:#b5abfc">&lt;textarea</span> <span style="color:#9397ab">name</span>=<span style="color:#d2cefd">"message"</span> <span style="color:#968ae0">required</span><span style="color:#b5abfc">&gt;&lt;/textarea&gt;</span></div><div>  <span style="color:#b5abfc">&lt;input</span> <span style="color:#9397ab">type</span>=<span style="color:#d2cefd">"hidden"</span> <span style="color:#9397ab">name</span>=<span style="color:#d2cefd">"_redirect"</span></div><div>         <span style="color:#9397ab">value</span>=<span style="color:#d2cefd">"https://yoursite.com/thanks"</span><span style="color:#b5abfc">&gt;</span></div><div>  <span style="color:#b5abfc">&lt;button&gt;</span>Send<span style="color:#b5abfc">&lt;/button&gt;</span></div><div><span style="color:#b5abfc">&lt;/form&gt;</span></div></pre>
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background-image:linear-gradient(to right,rgba(233,233,237,.16),rgba(233,233,237,.16));background-repeat:no-repeat;background-position:top;background-size:100% 1px">
+            <i class="ph ph-check-circle" style="font-size:15px;color:#9184d9"></i>
+            <span style="font-size:12px;color:#9397ab">That's the whole integration. No JS, no SDK, no account.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ HOW IT WORKS ══ -->
+  <section id="how" style="padding:28px 28px 66px;max-width:1240px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+      <span style="width:18px;height:2px;background:#9184d9;flex:none"></span>
+      <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9184d9">How it works</span>
+    </div>
+    <h2 style="margin:0 0 8px;font-size:clamp(27px,3.2vw,34px);letter-spacing:-.02em">Three steps, then it's yours forever.</h2>
+    <p style="font-size:15px;color:#9397ab;max-width:56ch;margin:0 0 30px">Drop it on a $5 VPS. Every submission lands in a local SQLite file you can export, back up, or query directly.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:12px">
+      <sc-for list="{{ steps }}" as="s" hint-placeholder-count="3">
+        <div class="card elev-sm" style="padding:20px;gap:0">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#75798c">{{ s.num }}</span>
+            <span style="width:34px;height:34px;flex:none;border-radius:9px;box-shadow:inset 0 0 0 1px #5d5294;background:#2b2741;color:#b5abfc;display:grid;place-items:center;font-size:17px;margin-left:auto"><i class="{{ s.icon }}"></i></span>
+          </div>
+          <div style="font-size:17px;font-weight:500;margin-top:14px">{{ s.title }}</div>
+          <p style="font-size:13.5px;color:#9397ab;margin:6px 0 0;text-wrap:pretty">{{ s.body }}</p>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ══ SPAM ══ -->
+  <sc-if value="{{ showSpam }}" hint-placeholder-val="{{ true }}">
+    <section id="spam" style="padding:10px 28px 66px;max-width:1240px;margin:0 auto">
+      <div style="display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start">
+        <div style="flex:1 1 0%;min-width:320px">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+            <span style="width:18px;height:2px;background:#9184d9;flex:none"></span>
+            <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9184d9">Spam filter</span>
+          </div>
+          <h2 style="margin:0 0 10px;font-size:clamp(27px,3.2vw,34px);letter-spacing:-.02em">No CAPTCHA. No third party reading your mail.</h2>
+          <p style="font-size:15px;color:#9397ab;max-width:56ch;margin:0 0 16px;text-wrap:pretty">A honeypot field, a per-IP token bucket, and a deliberately conservative weighted score over link markup, SQL probes, keyword hits and synthetic-looking text. Held submissions go to a quarantine you can review — not a black hole.</p>
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <sc-for list="{{ spamPoints }}" as="p" hint-placeholder-count="4">
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <i class="ph ph-check" style="font-size:15px;color:#9184d9;margin-top:3px;flex:none"></i>
+                <span style="font-size:14px;color:#cfd3e5;text-wrap:pretty">{{ p }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="flex:1 1 380px;min-width:300px;max-width:520px">
+          <div class="card elev-sm" style="padding:0;gap:0;overflow:hidden">
+            <div style="padding:12px 15px;background-image:linear-gradient(to right,rgba(233,233,237,.16),rgba(233,233,237,.16));background-repeat:no-repeat;background-position:bottom;background-size:100% 1px;display:flex;align-items:center;gap:9px">
+              <i class="ph ph-shield-warning" style="font-size:16px;color:#9184d9"></i>
+              <span style="font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:#9397ab">Why it was held</span>
+              <span class="tag tag-accent" style="margin-left:auto;flex:none">score 11 / 6</span>
+            </div>
+            <div style="padding:14px 15px">
+              <div style="height:8px;border-radius:4px;background:#292b31;overflow:hidden">
+                <div style="height:100%;width:92%;border-radius:4px;background:linear-gradient(to right,#5d5294,#968ae0)"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:#75798c;margin-top:4px">
+                <span>0</span><span>threshold 6</span><span>12</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:9px;margin-top:14px">
+                <sc-for list="{{ breakdown }}" as="b" hint-placeholder-count="2">
+                  <div style="padding:9px 11px;border-radius:8px;box-shadow:inset 0 0 0 1px #3f424d">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                      <i class="{{ b.icon }}" style="font-size:14px;color:#9184d9"></i>
+                      <span style="font-size:12px;font-weight:500">{{ b.rule }}</span>
+                      <span class="tag tag-outline" style="margin-left:auto;font-size:10px;flex:none">+{{ b.weight }}</span>
+                    </div>
+                    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#cfd3e5;background:#161826;border-radius:5px;padding:6px 8px;margin-top:6px;overflow-x:auto;white-space:pre">{{ b.match }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;gap:7px;margin-top:13px;flex-wrap:wrap">
+                <button class="btn btn-primary" style="font-size:12px"><i class="ph ph-arrow-u-up-left" style="font-size:14px"></i>Not spam</button>
+                <button class="btn btn-secondary" style="font-size:12px"><i class="ph ph-prohibit" style="font-size:14px"></i>Block this IP</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </sc-if>
+
+  <!-- ══ WEBHOOKS ══ -->
+  <section id="webhooks" style="padding:10px 28px 66px;max-width:1240px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+      <span style="width:18px;height:2px;background:#9184d9;flex:none"></span>
+      <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9184d9">Webhooks</span>
+    </div>
+    <h2 style="margin:0 0 8px;font-size:clamp(27px,3.2vw,34px);letter-spacing:-.02em">Told wherever you already look.</h2>
+    <p style="font-size:15px;color:#9397ab;max-width:58ch;margin:0 0 28px;text-wrap:pretty">Configured per form in the admin UI, fired in a background goroutine so the visitor's response never waits. Email stays optional. A Test Webhook button verifies your endpoint before you go live.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+      <div style="flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:12px">
+        <sc-for list="{{ hooks }}" as="h" hint-placeholder-count="3">
+          <div class="card elev-sm" style="padding:15px 16px;gap:0">
+            <div style="display:flex;align-items:center;gap:9px">
+              <i class="{{ h.icon }}" style="font-size:16px;color:#9184d9"></i>
+              <span style="font-size:15px;font-weight:500">{{ h.name }}</span>
+            </div>
+            <p style="font-size:13px;color:#9397ab;margin:6px 0 0;text-wrap:pretty">{{ h.body }}</p>
+          </div>
+        </sc-for>
+      </div>
+      <div style="flex:1 1 340px;min-width:0">
+        <div style="border-radius:8px;overflow:hidden;background:#232532;box-shadow:var(--shadow-sm)">
+          <div style="display:flex;align-items:center;gap:9px;padding:9px 13px;background-image:linear-gradient(to right,rgba(233,233,237,.16),rgba(233,233,237,.16));background-repeat:no-repeat;background-position:bottom;background-size:100% 1px">
+            <i class="ph ph-brackets-curly" style="font-size:15px;color:#75798c"></i>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9397ab">generic payload</span>
+          </div>
+          <pre style="padding:16px 15px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.85;overflow-x:auto;color:#cfd3e5">{
+  <span style="color:#9397ab">"form_name"</span>:    <span style="color:#d2cefd">"Contact form"</span>,
+  <span style="color:#9397ab">"form_id"</span>:      <span style="color:#d2cefd">"4b91c0"</span>,
+  <span style="color:#9397ab">"submitted_at"</span>: <span style="color:#d2cefd">"2026-03-04T14:18:00Z"</span>,
+  <span style="color:#9397ab">"fields"</span>: {
+    <span style="color:#9397ab">"name"</span>:    <span style="color:#d2cefd">"Maya Oduya"</span>,
+    <span style="color:#9397ab">"email"</span>:   <span style="color:#d2cefd">"maya@northlight.studio"</span>,
+    <span style="color:#9397ab">"message"</span>: <span style="color:#d2cefd">"Hello!"</span>
+  }
+}</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WAITLIST ══ -->
+  <section id="waitlist" style="padding:10px 28px 66px;max-width:1240px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+      <span style="width:18px;height:2px;background:#9184d9;flex:none"></span>
+      <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9184d9">Waitlist mode</span>
+    </div>
+    <h2 style="margin:0 0 8px;font-size:clamp(27px,3.2vw,34px);letter-spacing:-.02em">A form notifies you. A waitlist emails them back.</h2>
+    <p style="font-size:15px;color:#9397ab;max-width:60ch;margin:0 0 28px;text-wrap:pretty">Collect unique signups by email, hand each person their place in line, and broadcast to the whole list when you launch — all self-hosted, no mailing-list SaaS.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+      <div style="flex:1 1 340px;min-width:0">
+        <div style="border-radius:8px;overflow:hidden;background:#232532;box-shadow:var(--shadow-sm)">
+          <div style="display:flex;align-items:center;gap:9px;padding:9px 13px;background-image:linear-gradient(to right,rgba(233,233,237,.16),rgba(233,233,237,.16));background-repeat:no-repeat;background-position:bottom;background-size:100% 1px">
+            <i class="ph ph-users-three" style="font-size:15px;color:#75798c"></i>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9397ab">POST /w/YOUR_WAITLIST_ID</span>
+          </div>
+          <pre style="padding:16px 15px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.85;overflow-x:auto;color:#cfd3e5"><div><span style="color:#b5abfc">&lt;form</span> <span style="color:#9397ab">action</span>=<span style="color:#d2cefd">"…/w/9f22ab"</span> <span style="color:#9397ab">method</span>=<span style="color:#d2cefd">"POST"</span><span style="color:#b5abfc">&gt;</span></div><div>  <span style="color:#b5abfc">&lt;input</span> <span style="color:#9397ab">type</span>=<span style="color:#d2cefd">"email"</span> <span style="color:#9397ab">name</span>=<span style="color:#d2cefd">"email"</span> <span style="color:#968ae0">required</span><span style="color:#b5abfc">&gt;</span></div><div>  <span style="color:#b5abfc">&lt;button&gt;</span>Join the waitlist<span style="color:#b5abfc">&lt;/button&gt;</span></div><div><span style="color:#b5abfc">&lt;/form&gt;</span></div><div> </div><div><span style="color:#75798c">// Accept: application/json</span></div><div>{</div><div>  <span style="color:#9397ab">"success"</span>:        <span style="color:#d2cefd">true</span>,</div><div>  <span style="color:#9397ab">"position"</span>:       <span style="color:#d2cefd">1247</span>,</div><div>  <span style="color:#9397ab">"already_joined"</span>: <span style="color:#d2cefd">false</span></div><div>}</div></pre>
+        </div>
+      </div>
+      <div style="flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:12px">
+        <sc-for list="{{ waitlistPoints }}" as="w" hint-placeholder-count="3">
+          <div class="card elev-sm" style="padding:15px 16px;gap:0">
+            <div style="display:flex;align-items:center;gap:9px">
+              <i class="{{ w.icon }}" style="font-size:16px;color:#9184d9"></i>
+              <span style="font-size:15px;font-weight:500">{{ w.name }}</span>
+            </div>
+            <p style="font-size:13px;color:#9397ab;margin:6px 0 0;text-wrap:pretty">{{ w.body }}</p>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ ADMIN PREVIEW ══ -->
+  <section id="admin" style="padding:10px 28px 66px;max-width:1240px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+      <span style="width:18px;height:2px;background:#9184d9;flex:none"></span>
+      <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9184d9">Admin UI</span>
+    </div>
+    <h2 style="margin:0 0 8px;font-size:clamp(27px,3.2vw,34px);letter-spacing:-.02em">Server-rendered. No JS framework. Loads instantly.</h2>
+    <p style="font-size:15px;color:#9397ab;max-width:58ch;margin:0 0 28px;text-wrap:pretty">Read submissions, search them, export CSV, review quarantine, manage users, download a database snapshot. All of it ships inside the same ~20MB binary.</p>
+
+    <div style="border-radius:10px;overflow:hidden;box-shadow:var(--shadow-md);background:#161826">
+      <div style="display:flex;min-height:300px">
+        <div style="flex:none;width:158px;padding:14px 9px;display:flex;flex-direction:column;background-image:linear-gradient(to bottom,transparent,rgba(233,233,237,.16) 40px,rgba(233,233,237,.16) calc(100% - 40px),transparent);background-repeat:no-repeat;background-position:right;background-size:1px 100%">
+          <div style="display:flex;align-items:center;gap:8px;padding:0 4px 12px">
+            <span style="width:20px;height:20px;flex:none;border-radius:6px;background:#2b2741;box-shadow:inset 0 0 0 1px #5d5294;color:#b5abfc;display:grid;place-items:center;font-size:11px"><i class="ph ph-tray-arrow-down"></i></span>
+            <span style="font-size:12.5px;font-weight:500">ds<em style="color:#9184d9;font-style:normal">forms</em></span>
+          </div>
+          <sc-for list="{{ miniNav }}" as="n" hint-placeholder-count="5">
+            <div style="{{ n.style }}"><i class="{{ n.icon }}" style="font-size:13px"></i><span>{{ n.label }}</span></div>
+          </sc-for>
+        </div>
+        <div style="flex:1;min-width:0;padding:16px 18px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <span style="font-size:15px;font-weight:500">Overview</span>
+            <span class="tag tag-neutral" style="font-size:10px">last 30 days</span>
+            <span style="margin-left:auto;font-size:11px;color:#75798c">forms.northlight.studio</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr));gap:9px">
+            <sc-for list="{{ miniKpis }}" as="k" hint-placeholder-count="4">
+              <div style="padding:11px 12px;border-radius:8px;background:#232532;box-shadow:var(--shadow-sm)">
+                <div style="font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#75798c">{{ k.label }}</div>
+                <div style="font-size:21px;font-weight:500;letter-spacing:-.02em;margin-top:3px">{{ k.value }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding:13px 14px;border-radius:8px;background:#232532;box-shadow:var(--shadow-sm);margin-top:9px">
+            <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+              <span style="font-size:12.5px;font-weight:500">Submissions over time</span>
+              <span style="display:flex;align-items:center;gap:5px;font-size:10px;color:#75798c;margin-left:auto"><span style="width:8px;height:8px;border-radius:2px;background:#968ae0"></span>Accepted</span>
+              <span style="display:flex;align-items:center;gap:5px;font-size:10px;color:#75798c"><span style="width:8px;height:8px;border-radius:2px;background:#423a6a"></span>Held</span>
+            </div>
+            <svg viewBox="0 0 620 100" preserveAspectRatio="none" style="width:100%;height:112px;margin-top:10px">
+              <sc-for list="{{ bars }}" as="b" hint-placeholder-count="30">
+                <g>
+                  <rect x="{{ b.x }}" y="{{ b.spamY }}" width="14" height="{{ b.spamH }}" rx="2" fill="#423a6a"></rect>
+                  <rect x="{{ b.x }}" y="{{ b.y }}" width="14" height="{{ b.h }}" rx="2" fill="#968ae0"></rect>
+                </g>
+              </sc-for>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:#75798c;margin:10px 0 0">A preview of the redesigned admin. Screenshots of the shipped UI live in <code style="font-family:ui-monospace,Menlo,monospace">docs/screenshots/</code>.</p>
+  </section>
+
+  <!-- ══ FEATURES ══ -->
+  <section style="padding:10px 28px 66px;max-width:1240px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+      <span style="width:18px;height:2px;background:#9184d9;flex:none"></span>
+      <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9184d9">What you get</span>
+    </div>
+    <h2 style="margin:0 0 6px;font-size:clamp(27px,3.2vw,34px);letter-spacing:-.02em">Everything, in one binary.</h2>
+    <p style="font-size:15px;color:#9397ab;max-width:58ch;margin:0 0 30px;text-wrap:pretty">Four dependencies in <code style="font-family:ui-monospace,Menlo,monospace;color:#d2cefd">go.mod</code>. No ORM, no job runner, no cache layer — the whole thing is a router, a SQLite file and a template set.</p>
+
+    <div style="display:flex;flex-direction:column;gap:26px">
+      <sc-for list="{{ featureGroups }}" as="g" hint-placeholder-count="3">
+        <div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:11px;max-width:960px">
+            <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9397ab">{{ g.name }}</span>
+            <span style="flex:1;height:1px;background:linear-gradient(to right,rgba(233,233,237,.16),transparent)"></span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:10px;max-width:960px">
+            <sc-for list="{{ g.items }}" as="f" hint-placeholder-count="4">
+              <div class="card elev-sm" style="padding:14px 15px;gap:0" style-hover="box-shadow:inset 0 0 0 1px #5d5294">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span style="width:30px;height:30px;flex:none;border-radius:8px;background:#2b2741;box-shadow:inset 0 0 0 1px #423a6a;color:#b5abfc;display:grid;place-items:center;font-size:16px"><i class="{{ f.icon }}"></i></span>
+                  <span style="font-size:14.5px;font-weight:500;letter-spacing:-.01em;text-wrap:balance">{{ f.title }}</span>
+                </div>
+                <p style="font-size:12.5px;line-height:1.55;color:#9397ab;margin:9px 0 0;text-wrap:pretty">{{ f.body }}</p>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:9px">
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#75798c">{{ f.meta }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ══ SELF-HOST ══ -->
+  <section id="self-host" style="padding:10px 28px 72px;max-width:1240px;margin:0 auto">
+    <div style="display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start">
+      <div style="flex:1 1 0%;min-width:300px;max-width:460px">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+          <span style="width:18px;height:2px;background:#9184d9;flex:none"></span>
+          <span style="font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9184d9">Self-host</span>
+        </div>
+        <h2 style="margin:0 0 10px;font-size:clamp(27px,3.2vw,34px);letter-spacing:-.02em">Five minutes, one compose file.</h2>
+        <p style="font-size:15px;color:#9397ab;margin:0 0 16px;text-wrap:pretty">Requires Docker and Docker Compose. Pre-built images publish to GitHub Container Registry on every release — pin a version or track <code style="font-family:ui-monospace,Menlo,monospace;color:#d2cefd">latest</code>.</p>
+        <div style="padding:12px 14px;border-radius:8px;box-shadow:inset 0 0 0 1px #3f424d;font-size:13px;color:#b2b6ca">
+          <div style="display:flex;align-items:center;gap:8px"><i class="ph ph-package" style="font-size:15px;color:#9184d9"></i><span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#d2cefd">ghcr.io/barancezayirli/dsforms</span></div>
+          <div style="font-size:12px;color:#75798c;margin-top:5px">~20MB image · CGO-free · no Redis, no Postgres</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:9px;margin-top:18px">
+          <a class="btn btn-primary" href="https://github.com/barancezayirli/dsforms" style="height:38px"><i class="ph ph-book-open" style="font-size:16px"></i>Read the docs</a>
+          <a class="btn btn-secondary" href="https://github.com/barancezayirli/dsforms/issues" style="height:38px"><i class="ph ph-chat-circle-dots" style="font-size:16px"></i>Open an issue</a>
+        </div>
+      </div>
+      <div style="flex:1 1 380px;min-width:300px;display:flex;flex-direction:column;gap:10px">
+        <sc-for list="{{ commands }}" as="c" hint-placeholder-count="3">
+          <div style="border-radius:8px;overflow:hidden;background:#232532;box-shadow:var(--shadow-sm)">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 13px;background-image:linear-gradient(to right,rgba(233,233,237,.16),rgba(233,233,237,.16));background-repeat:no-repeat;background-position:bottom;background-size:100% 1px">
+              <i class="ph ph-terminal-window" style="font-size:14px;color:#75798c"></i>
+              <span style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#9397ab">{{ c.label }}</span>
+              <button class="btn btn-ghost" style="margin-left:auto;font-size:11px"><i class="ph ph-copy" style="font-size:13px"></i>Copy</button>
+            </div>
+            <pre style="padding:13px 15px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.9;overflow-x:auto;color:#cfd3e5">{{ c.lines }}</pre>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ CLOSE ══ -->
+  <section style="padding:0 28px 72px;max-width:1240px;margin:0 auto">
+    <div style="position:relative;border-radius:12px;overflow:hidden;padding:44px 32px;background:#262a60;background-image:radial-gradient(110% 200% at 88% -30%,#353b80,transparent)">
+      <div style="position:relative;max-width:52ch">
+        <h2 style="margin:0 0 10px;font-size:clamp(26px,3.4vw,36px);letter-spacing:-.025em;text-wrap:balance">Your forms, your server, your data.</h2>
+        <p style="font-size:15.5px;color:#d2cefd;margin:0 0 22px;text-wrap:pretty">MIT licensed. No account, no telemetry, no per-submission fee — ever. If it saves you a subscription, star it and tell someone who still pays for one.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          <a class="btn" href="https://github.com/barancezayirli/dsforms" style="height:40px;font-size:14.5px;padding:0 18px;border-color:#e9e9ed;color:#e9e9ed" style-hover="background:rgba(233,233,237,.12)"><i class="ph ph-star" style="font-size:16px"></i>Star on GitHub</a>
+          <a class="btn" href="#self-host" style="height:40px;font-size:14.5px;padding:0 18px;border-color:#4c5397;color:#d2cefd" style-hover="background:rgba(233,233,237,.08)">Deploy it now</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer style="padding:26px 28px 40px;background-image:linear-gradient(to right,transparent,rgba(233,233,237,.16) 48px,rgba(233,233,237,.16) calc(100% - 48px),transparent);background-repeat:no-repeat;background-position:top;background-size:100% 1px">
+    <div style="max-width:1240px;margin:0 auto;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+      <div style="display:flex;align-items:center;gap:9px">
+        <span style="width:22px;height:22px;flex:none;border-radius:6px;box-shadow:inset 0 0 0 1px #5d5294;background:#2b2741;display:grid;place-items:center;color:#b5abfc;font-size:13px"><i class="ph ph-tray-arrow-down"></i></span>
+        <span style="font-size:14px;font-weight:500">ds<em style="color:#9184d9;font-style:normal">forms</em></span>
+        <span style="font-size:12.5px;color:#75798c">· MIT · Go + SQLite</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:18px;margin-left:auto">
+        <a href="https://github.com/barancezayirli/dsforms" style="font-size:13px;color:#b2b6ca">GitHub</a>
+        <a href="https://github.com/barancezayirli/dsforms/issues" style="font-size:13px;color:#b2b6ca">Issues</a>
+        <a href="https://barancezayirli.com" style="font-size:13px;color:#b2b6ca">Baran Cezayirli</a>
+      </div>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showSpamSection&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;}}">
+function series(n, base, amp, seed) {
+  const out = [];
+  let s = seed;
+  for (let i = 0; i < n; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    out.push(Math.max(0, Math.round(base + Math.sin(i / 2.4 + seed) * amp * 0.5 + (s / 233280 - 0.5) * amp)));
+  }
+  return out;
+}
+
+class Component extends DCLogic {
+  renderVals() {
+    const accepted = series(30, 26, 16, 7);
+    const spamCount = series(30, 5, 6, 19);
+    const maxTotal = Math.max(...accepted.map((a, i) => a + spamCount[i]));
+    const step = 620 / 30;
+    const sc = (v) => (v / maxTotal) * 100;
+    const bars = accepted.map((a, i) => {
+      const h = sc(a), sh = sc(spamCount[i]);
+      return {
+        x: (i * step + step / 2 - 7).toFixed(1),
+        y: (100 - h - sh).toFixed(2), h: h.toFixed(2),
+        spamY: (100 - sh).toFixed(2), spamH: sh.toFixed(2)
+      };
+    });
+
+    const navItem = (label, icon, on) => ({
+      label, icon,
+      style: "display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:11.5px;margin-bottom:2px;"
+        + (on ? "background:#2b2741;color:#d2cefd;box-shadow:inset 0 0 0 1px #423a6a;" : "color:#b2b6ca;")
+    });
+
+    return {
+      showSpam: this.props.showSpamSection ?? true,
+
+      heroTags: ["One Go binary", "SQLite, no ORM", "MIT licensed", "~20MB image", "No SaaS"],
+
+      steps: [
+        { num: "01", icon: "ph ph-cloud-arrow-up", title: "Deploy it", body: "docker compose up on any box you already pay for. A $5 VPS is plenty." },
+        { num: "02", icon: "ph ph-plus-circle", title: "Create a form", body: "Name it, pick a notify address, and copy the endpoint URL out of the admin UI." },
+        { num: "03", icon: "ph ph-clipboard-text", title: "Paste the snippet", body: "One plain HTML form tag. Submissions arrive, notifications fire, CSV export waits." }
+      ],
+
+      spamPoints: [
+        "Honeypot field plus a per-IP token bucket — no CAPTCHA, nothing for visitors to solve.",
+        "A weighted score, not a blocklist: one weak signal never drops a real message on its own.",
+        "Held submissions sit in quarantine for 30 days with the exact rule, field and matched text.",
+        "Block or allow any email, domain, IP or CIDR — and keep your own keyword list."
+      ],
+      breakdown: [
+        { rule: "HTML/BBCode link markup", weight: 6, icon: "ph ph-link", match: "[url=http://cheap-seo-backlinks.ru]best backlinks[/url]" },
+        { rule: "High-confidence keyword", weight: 5, icon: "ph ph-text-aa", match: "backlinks" }
+      ],
+
+      hooks: [
+        { name: "Slack", icon: "ph ph-slack-logo", body: "Block Kit layout — short fields sit side by side, long fields get their own row. Paste your Incoming Webhook URL and you're done." },
+        { name: "Discord", icon: "ph ph-discord-logo", body: "Rich embed with inline fields: up to three short values per row, long values span full width." },
+        { name: "Generic JSON", icon: "ph ph-brackets-curly", body: "A flat payload for Zapier, n8n, Make, or your own handler — form name, form id, timestamp and every submitted field." }
+      ],
+
+      waitlistPoints: [
+        { name: "Dedup by email", icon: "ph ph-fingerprint", body: "One row per address. A repeat signup returns the existing position instead of a duplicate." },
+        { name: "Position", icon: "ph ph-list-numbers", body: "Every signup gets a place in line — \"you're #1,247\" — returned instantly so your page can show it." },
+        { name: "Broadcast", icon: "ph ph-megaphone", body: "Compose once, send to everyone. A restart-safe queue throttles and retries, and picks up where it left off." }
+      ],
+
+      miniNav: [
+        navItem("Home", "ph ph-chart-line-up", true),
+        navItem("Forms", "ph ph-tray", false),
+        navItem("Waitlists", "ph ph-users-three", false),
+        navItem("Quarantine", "ph ph-shield-warning", false),
+        navItem("Backups", "ph ph-database", false)
+      ],
+      miniKpis: [
+        { label: "Submissions", value: "784" },
+        { label: "Unread", value: "17" },
+        { label: "Spam held", value: "146" },
+        { label: "Waitlist", value: "2,481" }
+      ],
+      bars,
+
+      featureGroups: [
+        { name: "Notifications", items: [
+          { icon: "ph ph-envelope-simple", title: "Email on every submission", body: "Any SMTP provider — Gmail, Resend, Brevo, or Mailpit in development. Sent in a goroutine, so the visitor never waits on your mail server.", meta: "SMTP_HOST · SMTP_FROM" },
+          { icon: "ph ph-webhooks-logo", title: "Webhooks, per form", body: "Slack Block Kit, Discord embeds, or flat JSON for Zapier and n8n. A Test Webhook button verifies the endpoint before you go live.", meta: "Slack · Discord · JSON" },
+          { icon: "ph ph-users-three", title: "Waitlist with broadcasts", body: "Dedups by email, returns a position instantly, sends an optional confirmation, and broadcasts to the whole list from a restart-safe queue.", meta: "BROADCAST_THROTTLE_MS" },
+          { icon: "ph ph-arrow-u-up-right", title: "Redirect or JSON", body: "Plain posts redirect to your thank-you page; send Accept: application/json and get a JSON body back for an AJAX form instead.", meta: "_redirect · _subject" }
+        ] },
+        { name: "Data", items: [
+          { icon: "ph ph-database", title: "Plain SQLite, yours to query", body: "One file on disk in WAL mode. Open it with any SQLite client, or point your own scripts straight at it — no export step required.", meta: "DB_PATH · journal_mode(WAL)" },
+          { icon: "ph ph-file-csv", title: "CSV export", body: "Every form and every waitlist exports to CSV in one click, columns derived from the fields actually submitted.", meta: "/admin/forms/{id}/export" },
+          { icon: "ph ph-download-simple", title: "Backup and restore in the browser", body: "Download a consistent snapshot with VACUUM INTO while the server runs, then restore by uploading the file — validated, then swapped atomically.", meta: "BACKUP_LOCAL_DIR" },
+          { icon: "ph ph-magnifying-glass", title: "Admin UI, server-rendered", body: "Read, search, mark read, bulk delete, review quarantine. Go templates and a little vanilla JS — nothing to build, nothing to hydrate.", meta: "html/template" }
+        ] },
+        { name: "Security", items: [
+          { icon: "ph ph-shield-warning", title: "Weighted spam scoring", body: "Link markup, SQL probes, keyword hits and synthetic-looking text each carry a weight. One weak signal never drops a real message alone.", meta: "threshold 6" },
+          { icon: "ph ph-gauge", title: "Honeypot and rate limiting", body: "A hidden field bots fill and humans don't, plus a per-IP token bucket on the public submit endpoint. No CAPTCHA anywhere.", meta: "RATE_BURST · RATE_PER_MINUTE" },
+          { icon: "ph ph-fingerprint", title: "Sessions you can't steal", body: "Tokens stored as SHA-256 hashes, so a leaked cookie exposes nothing. Changing your password invalidates every session on every device.", meta: "bcrypt cost 12" },
+          { icon: "ph ph-lock-key", title: "Locked down by default", body: "HttpOnly, SameSite=Lax cookies with Secure when BASE_URL is https, signed flash cookies, security headers, a 64KB body limit, and login lockout after 5 attempts.", meta: "CSP · X-Frame-Options" }
+        ] }
+      ],
+
+      commands: [
+        { label: "Clone and configure", lines: "$ git clone https://github.com/barancezayirli/dsforms\n$ cd dsforms\n$ cp .env.example .env\n# set SECRET_KEY and your SMTP details" },
+        { label: "Start it", lines: "$ make dev-up      # includes Mailpit for email testing\n$ make docker-up   # production, bring your own SMTP" },
+        { label: "Log in", lines: "$ open http://localhost:8080\n# default login: admin / admin — change it immediately" }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 const CookieName = "dsforms_session"
@@ -58,22 +58,37 @@ func ClearSessionCookie() *http.Cookie {
 func RequireAuth(ss SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// A fragment request gets 401, not a redirect to the login page.
+			//
+			// fetch follows redirects transparently, and /admin/login answers
+			// 200 with a full HTML document — so an expired session made r.ok
+			// true and the login page was injected into the reader drawer,
+			// where none of the close controls exist. 401 makes the failure a
+			// failure, so the client can navigate deliberately.
+			unauthorized := func() {
+				if r.Header.Get("X-Fragment") != "" {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				http.Redirect(w, r, "/admin/login", http.StatusFound)
+			}
+
 			token, ok := GetSessionToken(r)
 			if !ok {
-				http.Redirect(w, r, "/admin/login", http.StatusFound)
+				unauthorized()
 				return
 			}
 			userID, err := ss.GetSession(token)
 			if err != nil {
 				http.SetCookie(w, ClearSessionCookie())
-				http.Redirect(w, r, "/admin/login", http.StatusFound)
+				unauthorized()
 				return
 			}
 			user, err := ss.GetUserByID(userID)
 			if err != nil {
 				log.Printf("auth: failed to load user %s: %v", userID, err)
 				http.SetCookie(w, ClearSessionCookie())
-				http.Redirect(w, r, "/admin/login", http.StatusFound)
+				unauthorized()
 				return
 			}
 			ctx := context.WithValue(r.Context(), userContextKey, user)

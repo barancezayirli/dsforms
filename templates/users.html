@@ -1,39 +1,71 @@
 {{template "base" .}}
+
+{{define "header-actions"}}
+<a class="btn btn-primary btn-34" href="/admin/users/new">
+  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Add user
+</a>
+{{end}}
+
 {{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">Users</h1>
-  <a class="btn btn-mint" href="/admin/users/new">+ Add user</a>
+<div class="page-head">
+  <h4>Users</h4>
+  <span class="muted" style="font-size:13px">Everyone who can sign in to this instance.</span>
 </div>
 
-<div class="card">
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Username</th>
-        <th>Created</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Users}}
-      <tr>
-        <td>
-          {{.Username}}
-          {{if .IsYou}}<span class="badge" style="margin-left:6px;font-size:11px">you</span>{{end}}
-        </td>
-        <td class="text-muted">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
-        <td class="actions">
-          {{if .IsYou}}
-          <span class="text-muted" style="font-size:12px">Cannot delete yourself</span>
-          {{else}}
-          <form method="POST" action="/admin/users/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete user {{.Username}}?')">
-            <button type="submit" class="btn-ghost btn-ghost-danger">Delete</button>
-          </form>
-          {{end}}
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+{{if .Error}}
+<div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
+{{end}}
+
+<div class="row">
+  <div class="col-main" style="flex:1.3 1 400px">
+    <div class="card elev-sm">
+      <div class="table-wrap">
+        <table class="table" style="min-width:420px">
+          <thead><tr><th>User</th><th>Added</th><th style="width:120px"></th></tr></thead>
+          <tbody>
+            {{range .Users}}
+            <tr>
+              <td>
+                <div style="display:flex;align-items:center;gap:9px">
+                  <span class="avatar {{if .IsYou}}avatar-unread{{end}}" aria-hidden="true">{{initial .Username}}</span>
+                  <div style="min-width:0">
+                    <div style="font-size:13.5px">
+                      {{.Username}}
+                      {{if .IsYou}}<span class="tag tag-accent tag-sm" style="margin-left:6px">you</span>{{end}}
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
+              <td style="text-align:right">
+                {{if .IsYou}}
+                <span class="dim" style="font-size:11px">Cannot remove yourself</span>
+                {{else}}
+                <form method="POST" action="/admin/users/{{.ID}}/delete"
+                      data-confirm="Remove {{.Username}}? Their sessions end immediately.">
+                  <button class="btn btn-quiet" type="submit">Remove</button>
+                </form>
+                {{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-side" style="flex:1 1 300px">
+    <div class="card elev-sm">
+      <span class="card-title">Your account</span>
+      <p class="card-body" style="flex:none">
+        Changing your password signs out every session on every device — this is
+        real, not a warning: the stored sessions are deleted.
+      </p>
+      <a class="btn btn-secondary btn-block" href="/admin/account">
+        <svg class="i" style="font-size:15px"><use href="#ph-lock-key"/></svg>Change password
+      </a>
+    </div>
+  </div>
 </div>
 {{end}}

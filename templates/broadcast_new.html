@@ -1,47 +1,83 @@
 {{template "base" .}}
-{{define "content"}}
-<div class="page-header">
-  <h1 class="page-title">Broadcast — {{.Waitlist.Name}}</h1>
-  <a href="/admin/waitlists/{{.Waitlist.ID}}" class="btn">Back</a>
-</div>
 
-<div class="card" style="max-width:600px">
-  <div class="card-body">
-    {{if .Error}}<div class="form-error-banner">{{.Error}}</div>{{end}}
-    <p class="form-hint" style="margin-bottom:16px">This message will be sent to all <strong>{{.EntryCount}}</strong> signups.</p>
-    <form method="POST" action="/admin/waitlists/{{.Waitlist.ID}}/broadcast">
-      <div class="form-group">
-        <label for="subject">Subject</label>
-        <input type="text" id="subject" name="subject" value="{{.Subject}}" required>
-      </div>
-      <div class="form-group">
-        <label for="body">Body</label>
-        <textarea id="body" name="body" rows="8" required>{{.Body}}</textarea>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:20px">
-        <button type="submit" class="btn btn-mint" onclick="return confirm('Send to {{.EntryCount}} recipients?')">Send Broadcast</button>
-        <a href="/admin/waitlists/{{.Waitlist.ID}}" class="btn">Cancel</a>
-      </div>
-    </form>
+{{define "content"}}
+<div class="page-head">
+  <h4>Broadcast</h4>
+  <span class="muted" style="font-size:13px">{{.Waitlist.Name}}</span>
+  <div class="actions">
+    <a class="btn btn-secondary" href="/admin/waitlists/{{.Waitlist.ID}}">
+      <svg class="i" style="font-size:15px"><use href="#ph-caret-left"/></svg>Back
+    </a>
   </div>
 </div>
 
-{{if .Broadcasts}}
-<div class="card" style="max-width:600px;margin-top:20px">
-  <div class="card-head">Past Broadcasts</div>
-  <table class="table">
-    <thead><tr><th>Subject</th><th>Status</th><th>Sent</th><th>Sent At</th></tr></thead>
-    <tbody>
-      {{range .Broadcasts}}
-      <tr>
-        <td><a href="/admin/waitlists/{{$.Waitlist.ID}}/broadcasts/{{.ID}}">{{.Subject}}</a></td>
-        <td>{{.Status}}</td>
-        <td>{{.Sent}}/{{.Total}}</td>
-        <td class="text-muted">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-</div>
+{{if .Error}}
+<div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
 {{end}}
+
+<div class="row" style="max-width:1000px">
+  <div class="col-main">
+    <form method="POST" action="/admin/waitlists/{{.Waitlist.ID}}/broadcast">
+      <div class="card elev-sm">
+        <div class="card-head">
+          <svg class="i i-accent" style="font-size:16px"><use href="#ph-megaphone"/></svg>
+          <span class="card-title">New broadcast</span>
+        </div>
+        <p class="card-body" style="flex:none">
+          Restart-safe queue — the worker throttles between sends and retries
+          each recipient, so closing this page does not stop it.
+        </p>
+
+        <label class="field">
+          <span>Subject</span>
+          <input class="input" name="subject" value="{{.Subject}}" required autofocus>
+        </label>
+        <label class="field" style="margin-bottom:0">
+          <span>Body</span>
+          <textarea class="input" name="body" style="min-height:150px" required>{{.Body}}</textarea>
+          <span class="form-hint">Variables: <code>{{`{{email}}`}}</code> <code>{{`{{name}}`}}</code> <code>{{`{{position}}`}}</code></span>
+        </label>
+
+        <hr class="hr">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <!-- Never render a count from a query that failed: this number also
+               goes into the confirmation dialog below, which tells the operator
+               the send cannot be recalled. -->
+          <span class="muted" style="font-size:12px">
+            {{if .RecipientCountKnown}}{{.EntryCount}} recipient{{if ne .EntryCount 1}}s{{end}}
+            {{else}}recipient count unavailable{{end}}
+          </span>
+          <div class="actions">
+            <button class="btn btn-primary" type="submit"
+                    data-confirm="Send this broadcast to {{if .RecipientCountKnown}}{{.EntryCount}}{{else}}all{{end}} recipients? It cannot be recalled.">
+              <svg class="i" style="font-size:15px"><use href="#ph-paper-plane-tilt"/></svg>Send broadcast
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-side">
+    <div class="card elev-sm">
+      <span class="card-title">Recent sends</span>
+      {{if .Broadcasts}}
+      <div style="display:flex;flex-direction:column;margin-top:4px">
+        {{range .Broadcasts}}
+        <a class="rule-b" style="display:flex;align-items:center;gap:8px;padding:9px 0"
+           href="/admin/waitlists/{{$.Waitlist.ID}}/broadcasts/{{.ID}}">
+          <div style="min-width:0;flex:1">
+            <div class="truncate" style="font-size:13px">{{.Subject}}</div>
+            <div class="dim" style="font-size:11px">{{.Sent}}/{{.Total}} · {{.CreatedAt.Format "Jan 2"}}</div>
+          </div>
+          <span class="tag tag-sm {{if .IsSending}}tag-accent{{else}}tag-neutral{{end}}">{{.Status}}</span>
+        </a>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="dim" style="font-size:12px">Nothing sent yet.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
 {{end}}

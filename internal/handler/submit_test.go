@@ -10,15 +10,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/mail"
-	"github.com/youruser/dsforms/internal/spam"
-	"github.com/youruser/dsforms/internal/store"
 )
+
+// webhookCall is one recorded Send. Both halves are kept because asserting only
+// that *a* webhook fired passes when the wrong form's webhook fires, or when the
+// payload carries the wrong submission.
+type webhookCall struct {
+	Form store.Form
+	Sub  store.Submission
+}
 
 type mockWebhookSender struct {
 	mu    sync.Mutex
-	calls []store.Form
+	calls []webhookCall
 	ch    chan struct{}
 }
 
@@ -28,7 +36,7 @@ func newMockWebhookSender() *mockWebhookSender {
 
 func (m *mockWebhookSender) Send(form store.Form, sub store.Submission) error {
 	m.mu.Lock()
-	m.calls = append(m.calls, form)
+	m.calls = append(m.calls, webhookCall{Form: form, Sub: sub})
 	m.mu.Unlock()
 	m.ch <- struct{}{}
 	return nil
@@ -38,6 +46,16 @@ func (m *mockWebhookSender) callCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.calls)
+}
+
+// lastCall returns the most recent recorded Send, and whether there was one.
+func (m *mockWebhookSender) lastCall() (webhookCall, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.calls) == 0 {
+		return webhookCall{}, false
+	}
+	return m.calls[len(m.calls)-1], true
 }
 
 func (m *mockWebhookSender) wait(timeout time.Duration) bool {
@@ -86,6 +104,17 @@ func TestSubmitHoneypotIgnored(t *testing.T) {
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 0 {
 		t.Errorf("submissions = %d, want 0 (honeypot)", len(subs))
+	}
+	// The honeypot is the one path that still drops rather than holds. Asserting
+	// only an empty inbox would pass just as happily if it started quarantining
+	// instead — which would bury the review queue under the highest-volume bot
+	// traffic on the instance.
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 0 {
+		t.Errorf("honeypot hits must be dropped, not held: %v", held)
 	}
 }
 
@@ -262,6 +291,43 @@ func TestSubmitInvalidEmailCaseInsensitiveField(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestSubmitTwoEmailFieldsAlwaysRejected pins the ambiguous-sender rejection,
+// and pins it as *deterministic*.
+//
+// The previous implementation ranged the data map and returned on the first key
+// that case-insensitively matched "email", so which of two such fields decided
+// the request came down to Go's randomised map iteration: the same submission
+// was a 400 or a 200 depending on the run. That nondeterminism was the visible
+// half of a security bug — the same two-field trick unlocked an allow rule and
+// skipped the spam filter entirely.
+//
+// One iteration proves nothing here, so this repeats: a "first key wins"
+// regression would show up as an occasional 201, not a consistent one.
+func TestSubmitTwoEmailFieldsAlwaysRejected(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupSubmit(t)
+
+	for i := 0; i < 50; i++ {
+		form := url.Values{
+			"email":   {"mallory@spam.example"},
+			"Email":   {"vip@customer.com"},
+			"message": {"hi"},
+		}
+		req := httptest.NewRequest("POST", "/f/test-form", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("run %d: status = %d, want 400 for two email fields", i, w.Code)
+		}
+	}
+
+	subs, _ := s.ListSubmissions("test-form")
+	if len(subs) != 0 {
+		t.Errorf("submissions = %d, want 0 (an ambiguous sender must not be stored)", len(subs))
 	}
 }
 
@@ -463,7 +529,7 @@ func TestSubmitNoWebhook(t *testing.T) {
 	}
 }
 
-func TestSubmitSpamDropped(t *testing.T) {
+func TestSubmitSpamHeld(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
 	form := url.Values{
@@ -475,17 +541,27 @@ func TestSubmitSpamDropped(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	// Mirrors the honeypot: looks successful (redirect), stores nothing.
+	// The response still looks like success — a bot must not learn it was
+	// caught — but the submission is now held for review rather than binned.
 	if w.Code != http.StatusFound {
-		t.Errorf("status = %d, want 302 (silent drop)", w.Code)
+		t.Errorf("status = %d, want 302 (indistinguishable from success)", w.Code)
 	}
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 0 {
-		t.Errorf("submissions = %d, want 0 (spam dropped)", len(subs))
+		t.Errorf("submissions = %d, want 0 (spam kept out of the inbox)", len(subs))
+	}
+	// Asserting the inbox is empty is not enough on its own: that would also
+	// hold if quarantine were reverted to a silent drop.
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("held = %d, want 1 — spam must be recoverable, not discarded", len(held))
 	}
 }
 
-func TestSubmitSpamDroppedJSON(t *testing.T) {
+func TestSubmitSpamHeldJSON(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
 	form := url.Values{
@@ -499,7 +575,7 @@ func TestSubmitSpamDroppedJSON(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 (JSON silent drop)", w.Code)
+		t.Errorf("status = %d, want 200 (JSON response indistinguishable from success)", w.Code)
 	}
 	var body map[string]bool
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
@@ -510,7 +586,16 @@ func TestSubmitSpamDroppedJSON(t *testing.T) {
 	}
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 0 {
-		t.Errorf("submissions = %d, want 0 (spam dropped)", len(subs))
+		t.Errorf("submissions = %d, want 0 (spam kept out of the inbox)", len(subs))
+	}
+	// As with the non-JSON twin: an empty inbox alone would also hold if
+	// quarantine were reverted to a silent drop.
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 {
+		t.Errorf("held = %d, want 1 — spam must be recoverable, not discarded", len(held))
 	}
 }
 
@@ -561,7 +646,7 @@ func TestSubmitNoEmailNoWebhook(t *testing.T) {
 	}
 }
 
-func TestSubmitThirdSameIPDropped(t *testing.T) {
+func TestSubmitThirdSameIPHeld(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
 
@@ -580,20 +665,26 @@ func TestSubmitThirdSameIPDropped(t *testing.T) {
 	w := submit()
 
 	if w.Code != http.StatusFound {
-		t.Errorf("3rd submission status = %d, want 302 (silent drop)", w.Code)
+		t.Errorf("3rd submission status = %d, want 302 (indistinguishable from success)", w.Code)
 	}
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 2 {
-		t.Errorf("submissions = %d, want 2 (1st and 2nd stored, 3rd dropped)", len(subs))
+		t.Errorf("submissions = %d, want 2 (1st and 2nd accepted, 3rd held)", len(subs))
+	}
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("held = %d, want 1 — the 3rd is quarantined, not discarded", len(held))
 	}
 }
 
 // TestSubmitContentSpamStillCountsTowardIPRepeat pins the invariant that
-// Tracker.Seen runs on every submission, including ones already rejected by
-// content scoring. If Seen were folded into the `||` short-circuit
-// (`spam.IsSpam(data) || h.Tracker.Seen(...)`), the two spam submissions below
-// would never be counted, and the 3rd — clean content from the same IP — would
-// be stored instead of dropped.
+// Tracker.Seen runs on every submission, including ones already caught by
+// content scoring. If Seen were moved inside the scoring branch, the two spam
+// submissions below would never be counted, and the 3rd — clean content from
+// the same IP — would be accepted instead of held.
 func TestSubmitContentSpamStillCountsTowardIPRepeat(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupSubmit(t)
@@ -611,15 +702,22 @@ func TestSubmitContentSpamStillCountsTowardIPRepeat(t *testing.T) {
 	// 1st and 2nd: markup-link spam — an instant drop on content score alone.
 	submit(`<a href="http://x.com">click</a>`)
 	submit(`<a href="http://y.com">click</a>`)
-	// 3rd: perfectly clean content, same IP — must still be dropped as a repeat.
+	// 3rd: perfectly clean content, same IP — must still be held as a repeat.
 	w := submit("hello there, loved the talk")
 
 	if w.Code != http.StatusFound {
-		t.Errorf("3rd submission status = %d, want 302 (silent drop)", w.Code)
+		t.Errorf("3rd submission status = %d, want 302 (indistinguishable from success)", w.Code)
 	}
 	subs, _ := s.ListSubmissions("test-form")
 	if len(subs) != 0 {
-		t.Errorf("submissions = %d, want 0 (2 spam dropped, 3rd dropped as IP repeat)", len(subs))
+		t.Errorf("submissions = %d, want 0 (2 spam held, 3rd held as IP repeat)", len(subs))
+	}
+	held, err := s.HeldSubmissions(10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 3 {
+		t.Errorf("held = %d, want all 3 recoverable", len(held))
 	}
 }
 

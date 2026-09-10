@@ -9,16 +9,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/store"
 )
 
 // testTemplates parses the real templates the same way main.go does.
 func testTemplates(t *testing.T) map[string]*template.Template {
 	t.Helper()
 	funcMap := template.FuncMap{"add": func(a, b int) int { return a + b }}
-	base, err := template.New("base").Funcs(funcMap).ParseFiles("../../templates/base.html")
+	// The real base.html, not a stub — these tests are the only ones that
+	// exercise the actual shell. It renders the icon sprite, so icons.html
+	// has to come with it, exactly as parseTemplates() pairs them in main.go.
+	base, err := template.New("base").Funcs(funcMap).ParseFiles(
+		"../../templates/base.html", "../../templates/icons.html")
 	if err != nil {
 		t.Fatalf("parse base: %v", err)
 	}
@@ -47,10 +51,12 @@ func setupWaitlistAdmin(t *testing.T) (*store.Store, *WaitlistHandler) {
 		t.Fatalf("store.New: %v", err)
 	}
 	h := &WaitlistHandler{
-		Store:       s,
-		SecretKey:   "test-secret",
-		BaseURL:     "https://example.com",
-		Templates:   testTemplates(t),
+		Base: Base{
+			Store:     s,
+			SecretKey: "test-secret",
+			BaseURL:   "https://example.com",
+			Templates: testTemplates(t),
+		},
 		Broadcaster: nopNotifier{},
 	}
 	return s, h
@@ -269,13 +275,13 @@ func TestWaitlistExportCSVSanitizesFormulas(t *testing.T) {
 func TestCSVSafe(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"=danger": "'=danger",
-		"+danger": "'+danger",
-		"-danger": "'-danger",
-		"@danger": "'@danger",
-		"safe":    "safe",
-		"":        "",
-		"a=b":     "a=b",
+		"=danger":  "'=danger",
+		"+danger":  "'+danger",
+		"-danger":  "'-danger",
+		"@danger":  "'@danger",
+		"safe":     "safe",
+		"":         "",
+		"a=b":      "a=b",
 		"\tdanger": "'\tdanger",
 		"\rdanger": "'\rdanger",
 	}
@@ -524,4 +530,3 @@ func TestWaitlistEntryDeleteWrongWaitlist(t *testing.T) {
 		t.Errorf("wlB entry should survive; count = %d, want 1", n)
 	}
 }
-

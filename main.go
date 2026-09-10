@@ -1,39 +1,189 @@
 package main
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/backup"
+	"github.com/barancezayirli/dsforms/internal/broadcaster"
+	"github.com/barancezayirli/dsforms/internal/config"
+	"github.com/barancezayirli/dsforms/internal/handler"
+	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/ratelimit"
+	"github.com/barancezayirli/dsforms/internal/safe"
+	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/webhook"
 	"github.com/go-chi/chi/v5"
-	"github.com/youruser/dsforms/internal/auth"
-	"github.com/youruser/dsforms/internal/backup"
-	"github.com/youruser/dsforms/internal/broadcaster"
-	"github.com/youruser/dsforms/internal/config"
-	"github.com/youruser/dsforms/internal/handler"
-	"github.com/youruser/dsforms/internal/mail"
-	"github.com/youruser/dsforms/internal/ratelimit"
-	"github.com/youruser/dsforms/internal/spam"
-	"github.com/youruser/dsforms/internal/store"
-	"github.com/youruser/dsforms/internal/webhook"
 )
 
-// Compile-time checks that *mail.Mailer satisfies the consumer interfaces it is wired into.
+// Compile-time checks that the concrete types satisfy the interfaces their
+// consumers declare. Wiring below would catch a mismatch anyway, but only at the
+// point of use and with a worse message; pinning it here also documents which
+// interfaces each type is expected to serve.
+//
+// A new consumer interface belongs here, unless its consumer pins it itself —
+// broadcaster.Store is asserted in broadcaster.go, next to the interface.
 var (
 	_ handler.Notifier           = (*mail.Mailer)(nil)
 	_ handler.ConfirmationMailer = (*mail.Mailer)(nil)
+	_ handler.DigestMailer       = (*mail.Mailer)(nil)
 	_ broadcaster.Mailer         = (*mail.Mailer)(nil)
+
+	_ handler.WebhookSender     = (*webhook.Sender)(nil)
+	_ handler.BroadcastNotifier = (*broadcaster.Worker)(nil)
+	_ auth.SessionStore         = (*store.Store)(nil)
 )
 
 //go:embed templates/*
 var templateFS embed.FS
+
+// staticFS carries the vendored stylesheet, the interaction script, and the
+// Inter variable font. They are embedded rather than fetched from a CDN for two
+// reasons: dsforms ships as a single binary with no runtime network dependency,
+// and the Content-Security-Policy set in newRouter is `default-src 'self'` with
+// no font-src, so a remote font would be blocked by our own header.
+//
+//go:embed static/*
+var staticFS embed.FS
+
+// quarantineRetention is how long a held submission stays reviewable before it
+// is deleted. It is passed to the handlers as RetentionDays, so the figure the
+// UI states tracks this constant automatically.
+const quarantineRetention = 30 * 24 * time.Hour
+
+// version is stamped at build time with -ldflags "-X main.version=…" and shown
+// in the sidebar. It stays "dev" for a plain `go build`.
+var version = "dev"
+
+// basePages extend templates/base.html and are rendered with
+// ExecuteTemplate(w, "base", data). Each must define a "content" block.
+//
+// standalonePages are full documents that do not use the shell.
+//
+// Both lists are package-level so TestTemplatesParse can walk them: nothing
+// else in the repo parses the real template files, and a broken one would
+// otherwise surface only as a log.Fatalf at startup.
+var basePages = []string{
+	"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html",
+	"submission_detail.html", "users.html", "users_new.html", "account.html",
+	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
+	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
+	"quarantine.html", "rules.html", "home.html", "search.html",
+}
+
+var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
+
+// parseTemplates parses base.html once and clones it per page.
+//
+// The clone is needed because every page defines a block named "content" and
+// html/template keeps one shared namespace per template set — parsing them all
+// into one set would leave the last page's "content" defined for every page.
+// The icon sprite is parsed into the base set so each clone inherits it.
+func parseTemplates() (map[string]*template.Template, error) {
+	// Chart geometry is exposed as template functions rather than hardcoded in
+	// the markup, so a viewBox can never drift from the coordinate space the
+	// paths in internal/handler were generated in.
+	funcMap := template.FuncMap{
+		"add":              func(a, b int) int { return a + b },
+		"sub":              func(a, b int) int { return a - b },
+		"pct":              handler.Percent,
+		"SparkViewBox":     handler.SparkViewBox,
+		"FormSparkViewBox": handler.FormSparkViewBox,
+		"ChartViewBox":     handler.ChartViewBox,
+		"BarWidth":         handler.BarWidth,
+		"ruleIcon":         handler.RuleIcon,
+		"ruleLabel":        handler.RuleLabel,
+		"initial":          handler.Initial,
+	}
+
+	baseTmpl, err := template.New("base").Funcs(funcMap).ParseFS(templateFS,
+		"templates/base.html", "templates/icons.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse base template: %w", err)
+	}
+
+	templates := make(map[string]*template.Template, len(basePages)+len(standalonePages))
+	for _, name := range basePages {
+		t, err := baseTmpl.Clone()
+		if err != nil {
+			return nil, fmt.Errorf("clone base template for %s: %w", name, err)
+		}
+		if _, err := t.ParseFS(templateFS, "templates/"+name); err != nil {
+			return nil, fmt.Errorf("parse template %s: %w", name, err)
+		}
+		templates[name] = t
+	}
+
+	for _, name := range standalonePages {
+		// The icon sprite comes along: these pages do not extend base.html but
+		// they still render icons, and a missing "icons" template is an
+		// execution-time failure that template parsing alone will not catch.
+		t, err := template.New(name).Funcs(funcMap).ParseFS(templateFS,
+			"templates/"+name, "templates/icons.html")
+		if err != nil {
+			return nil, fmt.Errorf("parse template %s: %w", name, err)
+		}
+		templates[name] = t
+	}
+
+	return templates, nil
+}
+
+// assetVersion is a short content hash over every embedded static file. Pages
+// append it to their asset URLs as ?v=…, which is what makes the long
+// Cache-Control below safe: the URL changes whenever the bytes do, so an
+// upgraded binary is picked up immediately instead of serving a cached
+// stylesheet for the rest of the hour.
+func assetVersion() string {
+	h := sha256.New()
+	err := fs.WalkDir(staticFS, "static", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := staticFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		h.Write([]byte(path))
+		h.Write(b)
+		return nil
+	})
+	if err != nil {
+		// Not fatal: fall back to a per-process value, which still busts the
+		// cache on restart, just not deterministically across replicas.
+		log.Printf("asset version: %v", err)
+		return strconv.FormatInt(time.Now().Unix(), 36)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// staticHandler serves the embedded assets. Cached hard, because every URL
+// carries the content hash from assetVersion.
+func staticHandler() http.Handler {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		log.Fatalf("static assets: %v", err)
+	}
+	fileServer := http.FileServer(http.FS(sub))
+	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		fileServer.ServeHTTP(w, r)
+	}))
+}
 
 func newRouter() *chi.Mux {
 	r := chi.NewRouter()
@@ -42,13 +192,23 @@ func newRouter() *chi.Mux {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
-				if err := recover(); err != nil {
-					log.Printf("panic recovered: %v", err)
-					w.WriteHeader(http.StatusInternalServerError)
-					if _, werr := w.Write([]byte("Internal Server Error")); werr != nil {
-						log.Printf("recovery write error: %v", werr)
-					}
+				rec := recover()
+				if rec == nil {
+					return
 				}
+				log.Printf("panic recovered: %v", rec)
+
+				// Render the styled page, but never let the recovery path panic
+				// a second time — a panic in here is unrecoverable and takes the
+				// process down, and the original panic may well have come from a
+				// template. The nested recover buys the plain-text fallback.
+				defer func() {
+					if again := recover(); again != nil {
+						log.Printf("panic while rendering the error page: %v", again)
+						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					}
+				}()
+				serverErrorPage(w)
 			}()
 			next.ServeHTTP(w, r)
 		})
@@ -85,6 +245,8 @@ func newRouter() *chi.Mux {
 		}
 	})
 
+	// Plain-text fallback so a router built without templates still answers
+	// correctly; errorPages upgrades this to the styled page in main().
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		if _, err := w.Write([]byte("Page not found")); err != nil {
@@ -93,6 +255,43 @@ func newRouter() *chi.Mux {
 	})
 
 	return r
+}
+
+// errorPages wires the styled 404 template into the router and installs the
+// styled 500 renderer. Both templates existed in templates/ since before this
+// redesign but were never parsed or routed.
+func errorPages(r *chi.Mux, templates map[string]*template.Template) {
+	render := func(w http.ResponseWriter, name string, status int, fallback string) {
+		tmpl, ok := templates[name]
+		if !ok {
+			http.Error(w, fallback, status)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		if err := tmpl.ExecuteTemplate(w, name, nil); err != nil {
+			log.Printf("%s template error: %v", name, err)
+		}
+	}
+
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		render(w, "404.html", http.StatusNotFound, "Page not found")
+	})
+
+	// Swap the plain-text fallback for the styled page now that templates are
+	// parsed. The recovery middleware in newRouter is the only caller, and it
+	// guards this call with its own recover(): rendering a 500 can itself panic
+	// if the template is the thing that broke.
+	serverErrorPage = func(w http.ResponseWriter) {
+		render(w, "500.html", http.StatusInternalServerError, "Internal Server Error")
+	}
+}
+
+// serverErrorPage renders the styled 500. It is a package-level hook because
+// the templates are not parsed until main() runs; before then, and in tests
+// that build a router directly, it falls back to plain text.
+var serverErrorPage = func(w http.ResponseWriter) {
+	http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 }
 
 func rateLimitMiddleware(l *ratelimit.Limiter) func(http.Handler) http.Handler {
@@ -275,40 +474,44 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		for range ticker.C {
-			if err := s.CleanExpiredSessions(); err != nil {
-				log.Printf("session cleanup error: %v", err)
-			}
+			// Guarded per tick, not per goroutine: one bad sweep should cost one
+			// hour, not the HTTP server. A panic here would otherwise take the
+			// process down and read as a crash loop under Docker's restart policy.
+			safe.Do("session cleanup", func() {
+				if err := s.CleanExpiredSessions(); err != nil {
+					log.Printf("session cleanup error: %v", err)
+				}
+			})
 		}
 	}()
 
-	// Parse base template once, then clone it for each page that extends it.
-	funcMap := template.FuncMap{
-		"add": func(a, b int) int { return a + b },
-	}
-	baseTmpl, err := template.New("base").Funcs(funcMap).ParseFS(templateFS, "templates/base.html")
+	// Quarantine retention. Held submissions are reviewable for 30 days and then
+	// deleted — the promise the UI makes, and the reason holding spam does not
+	// grow the database without bound. Sweeps once at startup so an instance
+	// that is restarted more often than daily still expires things.
+	go func() {
+		purge := func() {
+			safe.Do("quarantine purge", func() {
+				n, err := s.PurgeHeldOlderThan(time.Now().UTC().Add(-quarantineRetention))
+				if err != nil {
+					log.Printf("quarantine purge error: %v", err)
+					return
+				}
+				if n > 0 {
+					log.Printf("quarantine: purged %d submission(s) held longer than %s", n, quarantineRetention)
+				}
+			})
+		}
+		purge()
+		ticker := time.NewTicker(24 * time.Hour)
+		for range ticker.C {
+			purge()
+		}
+	}()
+
+	templates, err := parseTemplates()
 	if err != nil {
-		log.Fatalf("failed to parse base template: %v", err)
-	}
-
-	templates := make(map[string]*template.Template)
-	for _, name := range []string{"dashboard.html", "form_new.html", "form_edit.html", "form_detail.html", "submission_detail.html", "users.html", "users_new.html", "account.html", "backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html", "waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html"} {
-		t, err := baseTmpl.Clone()
-		if err != nil {
-			log.Fatalf("failed to clone base template: %v", err)
-		}
-		_, err = t.ParseFS(templateFS, "templates/"+name)
-		if err != nil {
-			log.Fatalf("failed to parse template %s: %v", name, err)
-		}
-		templates[name] = t
-	}
-
-	for _, name := range []string{"login.html", "success.html"} {
-		t, err := template.ParseFS(templateFS, "templates/"+name)
-		if err != nil {
-			log.Fatalf("failed to parse template %s: %v", name, err)
-		}
-		templates[name] = t
+		log.Fatalf("failed to parse templates: %v", err)
 	}
 
 	var mailer handler.Notifier
@@ -345,11 +548,12 @@ func main() {
 	}
 
 	submitHandler := &handler.SubmitHandler{
-		Store:    s,
-		Notifier: mailer,
-		Webhook:  webhookSender,
-		BaseURL:  cfg.BaseURL,
-		Tracker:  spam.NewTracker(10000),
+		Store:            s,
+		Notifier:         mailer,
+		Webhook:          webhookSender,
+		BaseURL:          cfg.BaseURL,
+		Tracker:          spam.NewTracker(10000),
+		DefaultThreshold: cfg.SpamThreshold,
 	}
 
 	limiter := ratelimit.NewLimiter(cfg.RateBurst, cfg.RatePerMinute, time.Now)
@@ -358,36 +562,38 @@ func main() {
 	loginGuard := ratelimit.NewLoginGuard(5, 15*time.Minute, time.Now)
 	loginGuard.StartCleanup(30*time.Minute, 30*time.Minute)
 
-	authHandler := &handler.AuthHandler{
-		Store:      s,
-		SecretKey:  cfg.SecretKey,
-		BaseURL:    cfg.BaseURL,
-		LoginGuard: loginGuard,
-		Templates:  templates,
-	}
-
-	adminHandler := &handler.AdminHandler{
-		Store:     s,
-		SecretKey: cfg.SecretKey,
-		BaseURL:   cfg.BaseURL,
-		Templates: templates,
-		Webhook:   webhookSender,
-	}
-
-	usersHandler := &handler.UsersHandler{
-		Store:     s,
-		SecretKey: cfg.SecretKey,
-		BaseURL:   cfg.BaseURL,
-		Templates: templates,
-	}
-
-	backupHandler := &handler.BackupHandler{
+	// Every admin handler shares the same store, secret, templates and shell
+	// state, so they share one Base rather than repeating the same field list in
+	// every handler, where the copies could drift apart.
+	base := handler.Base{
 		Store:     s,
 		SecretKey: cfg.SecretKey,
 		BaseURL:   cfg.BaseURL,
 		DBPath:    cfg.DBPath,
+		Version:   version,
+		AssetVer:  assetVersion(),
 		Templates: templates,
 	}
+
+	authHandler := &handler.AuthHandler{Base: base, LoginGuard: loginGuard}
+	overviewHandler := &handler.OverviewHandler{
+		Base:          base,
+		Limiter:       limiter,
+		RateBurst:     cfg.RateBurst,
+		RatePerMinute: cfg.RatePerMinute,
+		RetentionDays: int(quarantineRetention / (24 * time.Hour)),
+	}
+	searchHandler := &handler.SearchHandler{Base: base}
+	quarantineHandler := &handler.QuarantineHandler{
+		Base:             base,
+		Notifier:         mailer,
+		Webhook:          webhookSender,
+		RetentionDays:    int(quarantineRetention / (24 * time.Hour)),
+		DefaultThreshold: cfg.SpamThreshold,
+	}
+	adminHandler := &handler.AdminHandler{Base: base, Webhook: webhookSender}
+	usersHandler := &handler.UsersHandler{Base: base}
+	backupHandler := &handler.BackupHandler{Base: base}
 
 	waitlistSubmitHandler := &handler.WaitlistSubmitHandler{
 		Store:   s,
@@ -397,20 +603,37 @@ func main() {
 		waitlistSubmitHandler.Mailer = sendMailer
 	}
 
-	waitlistHandler := &handler.WaitlistHandler{
-		Store:       s,
-		SecretKey:   cfg.SecretKey,
-		BaseURL:     cfg.BaseURL,
-		Templates:   templates,
-		Broadcaster: worker,
+	waitlistHandler := &handler.WaitlistHandler{Base: base, Broadcaster: worker}
+
+	// Daily quarantine digest. Opt-in via DIGEST_TO, and silently inert without
+	// SMTP — the only background timer this redesign adds.
+	if sendMailer != nil && cfg.DigestTo != "" {
+		digest := &handler.Digest{
+			Store:     s,
+			Mailer:    sendMailer,
+			To:        cfg.DigestTo,
+			BaseURL:   cfg.BaseURL,
+			Retention: int(quarantineRetention / (24 * time.Hour)),
+		}
+		digest.Start(24 * time.Hour)
+		log.Printf("quarantine digest enabled (daily to %s)", cfg.DigestTo)
+	} else if cfg.DigestTo != "" {
+		// Otherwise an operator who sets DIGEST_TO waits days for a mail that
+		// was never going to arrive, with nothing in the log to explain it.
+		log.Printf("quarantine digest disabled: DIGEST_TO is set but SMTP is not configured")
 	}
 
 	r := newRouter()
+	errorPages(r, templates)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
 
+	// Embedded CSS, JS and the Inter woff2. Public and unauthenticated: the
+	// login page needs the stylesheet before anyone has a session.
+	r.Handle("/static/*", staticHandler())
+
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin/forms", http.StatusFound)
+		http.Redirect(w, r, "/admin", http.StatusFound)
 	})
 	r.Get("/admin/login", authHandler.LoginPage)
 	r.Post("/admin/login", authHandler.LoginSubmit)
@@ -419,9 +642,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth(s))
 		r.Post("/admin/logout", authHandler.Logout)
-		r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/admin/forms", http.StatusFound)
-		})
+		r.Get("/admin", overviewHandler.Page)
 		r.Get("/admin/forms", adminHandler.Dashboard)
 		r.Get("/admin/forms/new", adminHandler.NewFormPage)
 		r.Post("/admin/forms/new", adminHandler.CreateForm)
@@ -436,6 +657,15 @@ func main() {
 		r.Get("/admin/forms/{formID}/submissions/{subID}", adminHandler.SubmissionDetail)
 		r.Post("/admin/submissions/{id}/read", adminHandler.MarkRead)
 		r.Post("/admin/submissions/{id}/delete", adminHandler.DeleteSubmission)
+		r.Get("/admin/search", searchHandler.Page)
+		r.Get("/admin/quarantine", quarantineHandler.Page)
+		r.Post("/admin/quarantine/{id}/restore", quarantineHandler.Restore)
+		r.Post("/admin/quarantine/{id}/report", quarantineHandler.Report)
+		r.Post("/admin/quarantine/delete", quarantineHandler.Delete)
+		r.Post("/admin/quarantine/empty", quarantineHandler.Empty)
+		r.Get("/admin/rules", quarantineHandler.RulesPage)
+		r.Post("/admin/rules", quarantineHandler.AddRule)
+		r.Post("/admin/rules/{id}/delete", quarantineHandler.DeleteRule)
 		r.Get("/admin/waitlists", waitlistHandler.List)
 		r.Get("/admin/waitlists/new", waitlistHandler.NewPage)
 		r.Post("/admin/waitlists/new", waitlistHandler.Create)

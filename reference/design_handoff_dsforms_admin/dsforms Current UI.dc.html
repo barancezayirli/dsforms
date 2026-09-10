@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-b6186ff7-2d2b-4d3a-b98e-3092787ad06a/styles.css">
+<script src="_ds/nocturne-b6186ff7-2d2b-4d3a-b98e-3092787ad06a/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:#161826}
+a{color:#9184d9}
+a:hover{color:#b5abfc}
+.rec{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;line-height:1.5;color:#1B1F2E;background:#F0F2F5}
+.rec a{color:inherit;text-decoration:none}
+</style>
+</helmet>
+<div style="padding:32px 28px 64px;display:flex;flex-direction:column;gap:34px;max-width:1180px">
+  <div>
+    <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#9184d9;margin-bottom:6px">Baseline · recreated from templates/</div>
+    <h4 style="margin:0 0 6px">dsforms admin, as it exists today</h4>
+    <p class="text-muted" style="font-size:13px;max-width:62ch;margin:0">Rebuilt from <code>templates/base.html</code>, <code>dashboard.html</code>, <code>form_detail.html</code>, <code>submission_detail.html</code> and <code>login.html</code> — navy top bar, mint accent, 960px page, three stat tiles, one table per page.</p>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:9px">
+    <div style="display:flex;align-items:baseline;gap:9px"><span class="tag tag-neutral">templates/dashboard.html</span><span class="text-muted" style="font-size:12px">Forms list — the landing page after login</span></div>
+    <div class="rec" style="border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px #3f424d,0 16px 40px rgba(0,0,0,.5)">
+      <div style="background:#1B1F2E;height:50px;display:flex;align-items:center;padding:0 20px;gap:4px">
+        <span style="color:#fff;font-size:15px;font-weight:500;letter-spacing:-.02em;margin-right:24px">ds<em style="color:#6EE7B7;font-style:normal">forms</em></span>
+        <div style="display:flex;align-items:center;gap:2px;flex:1">
+          <span style="background:#252B3D;color:#fff;font-size:13px;padding:6px 10px;border-radius:6px">Forms</span>
+          <span style="color:#8892AA;font-size:13px;padding:6px 10px;border-radius:6px">Waitlist</span>
+          <span style="color:#8892AA;font-size:13px;padding:6px 10px;border-radius:6px">Users</span>
+          <span style="color:#8892AA;font-size:13px;padding:6px 10px;border-radius:6px">Backups</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="color:#8892AA;font-size:13px">admin</span>
+          <span style="color:#8892AA;font-size:12px;padding:5px 8px;border-radius:6px">Log out</span>
+        </div>
+      </div>
+      <div style="background:#FFFBEB;border-bottom:1px solid #FDE68A;padding:9px 20px;font-size:13px;color:#92400E;display:flex;align-items:center;gap:8px">
+        <span>Default password is active.</span>
+        <span style="font-weight:500;text-decoration:underline">Change it now →</span>
+      </div>
+      <div style="max-width:960px;margin:0 auto;padding:24px 20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px">
+          <span style="font-size:18px;font-weight:500">Forms</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;background:#6EE7B7;color:#065F46;border:1px solid #34D399">+ New form</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px">
+          <div style="background:#fff;border:1px solid #E4E8F0;border-top:3px solid #6EE7B7;border-radius:10px;padding:14px 16px">
+            <div style="font-size:12px;color:#8892AA;margin-bottom:6px">Total forms</div>
+            <div style="font-size:22px;font-weight:500">4</div>
+          </div>
+          <div style="background:#fff;border:1px solid #E4E8F0;border-radius:10px;padding:14px 16px">
+            <div style="font-size:12px;color:#8892AA;margin-bottom:6px">Unread</div>
+            <div style="font-size:22px;font-weight:500">17</div>
+          </div>
+          <div style="background:#fff;border:1px solid #E4E8F0;border-radius:10px;padding:14px 16px">
+            <div style="font-size:12px;color:#8892AA;margin-bottom:6px">All time</div>
+            <div style="font-size:22px;font-weight:500">1,284</div>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #E4E8F0;border-radius:10px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">Name</th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">Email To</th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">Unread</th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">Created</th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ oldForms }}" as="f" hint-placeholder-count="4">
+                <tr>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5"><span style="color:#065F46">{{ f.name }}</span></td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5;color:#8892AA">{{ f.email }}</td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5"><strong>{{ f.unread }}</strong></td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5;color:#8892AA">{{ f.created }}</td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5;white-space:nowrap">
+                    <span style="font-size:13px;color:#8892AA;padding:5px 8px">Edit</span>
+                    <span style="font-size:13px;color:#DC2626;padding:5px 8px">Delete</span>
+                  </td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:9px">
+    <div style="display:flex;align-items:baseline;gap:9px"><span class="tag tag-neutral">templates/form_detail.html</span><span class="text-muted" style="font-size:12px">Submissions table — unread rows tint mint, four header buttons</span></div>
+    <div class="rec" style="border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px #3f424d,0 16px 40px rgba(0,0,0,.5)">
+      <div style="background:#1B1F2E;height:50px;display:flex;align-items:center;padding:0 20px;gap:4px">
+        <span style="color:#fff;font-size:15px;font-weight:500;letter-spacing:-.02em;margin-right:24px">ds<em style="color:#6EE7B7;font-style:normal">forms</em></span>
+        <div style="display:flex;align-items:center;gap:2px;flex:1">
+          <span style="background:#252B3D;color:#fff;font-size:13px;padding:6px 10px;border-radius:6px">Forms</span>
+          <span style="color:#8892AA;font-size:13px;padding:6px 10px;border-radius:6px">Waitlist</span>
+          <span style="color:#8892AA;font-size:13px;padding:6px 10px;border-radius:6px">Users</span>
+          <span style="color:#8892AA;font-size:13px;padding:6px 10px;border-radius:6px">Backups</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="color:#8892AA;font-size:13px">admin</span>
+          <span style="color:#8892AA;font-size:12px;padding:5px 8px;border-radius:6px">Log out</span>
+        </div>
+      </div>
+      <div style="max-width:960px;margin:0 auto;padding:24px 20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+          <span style="font-size:18px;font-weight:500">Contact form</span>
+          <div style="display:flex;gap:8px">
+            <span style="display:inline-flex;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid #FECACA;color:#DC2626;background:#fff;opacity:.45">Delete selected</span>
+            <span style="display:inline-flex;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid #E4E8F0;background:#fff;color:#4A5568">Mark all read</span>
+            <span style="display:inline-flex;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid #E4E8F0;background:#fff;color:#4A5568">Export CSV</span>
+            <span style="display:inline-flex;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid #E4E8F0;background:#fff;color:#4A5568">Edit form</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:24px">
+          <div style="background:#fff;border:1px solid #E4E8F0;border-top:3px solid #6EE7B7;border-radius:10px;padding:14px 16px">
+            <div style="font-size:12px;color:#8892AA;margin-bottom:6px">Unread</div>
+            <div style="font-size:22px;font-weight:500">9</div>
+          </div>
+          <div style="background:#fff;border:1px solid #E4E8F0;border-radius:10px;padding:14px 16px">
+            <div style="font-size:12px;color:#8892AA;margin-bottom:6px">Total</div>
+            <div style="font-size:22px;font-weight:500">612</div>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #E4E8F0;border-radius:10px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;width:20px"><input type="checkbox" /></th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;width:20px"></th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">From</th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">Preview</th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">Date</th>
+                <th style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;text-align:left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ oldSubs }}" as="s" hint-placeholder-count="6">
+                <tr style="{{ s.rowStyle }}">
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5"><input type="checkbox" /></td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5">{{ s.dot }}</td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5">
+                    <div style="{{ s.nameStyle }}">{{ s.name }}</div>
+                    <div style="font-size:12px;color:#8892AA;margin-top:2px">{{ s.email }}</div>
+                  </td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5;color:#8892AA;font-size:13px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.preview }}</td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5;color:#8892AA;white-space:nowrap">{{ s.date }}</td>
+                  <td style="padding:11px 16px;border-bottom:1px solid #F0F2F5;white-space:nowrap"><span style="font-size:13px;color:#DC2626;padding:5px 8px">Delete</span></td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-top:20px">
+          <span style="color:#8892AA;font-size:13px">Page 1</span>
+          <span style="display:inline-flex;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid #E4E8F0;background:#fff;color:#4A5568">Older →</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+    <div style="display:flex;flex-direction:column;gap:9px;flex:1 1 560px;min-width:0">
+      <div style="display:flex;align-items:baseline;gap:9px"><span class="tag tag-neutral">templates/submission_detail.html</span><span class="text-muted" style="font-size:12px">700px card, one field block per key</span></div>
+      <div class="rec" style="border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px #3f424d,0 16px 40px rgba(0,0,0,.5);padding:24px 20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px">
+          <span style="font-size:18px;font-weight:500;color:#8892AA">← Contact form</span>
+          <div style="display:flex;gap:8px">
+            <span style="display:inline-flex;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid #E4E8F0;background:#fff;color:#4A5568">Mark read</span>
+            <span style="display:inline-flex;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid #FECACA;color:#DC2626;background:#fff">Delete</span>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #E4E8F0;border-radius:10px;overflow:hidden;max-width:700px">
+          <div style="padding:11px 16px;background:#F8F9FB;border-bottom:1px solid #E4E8F0;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:12px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em">Submission Details</span>
+            <span style="font-size:11px;color:#8892AA">Mar 4, 2026 2:18 PM · IP: 91.214.44.10</span>
+          </div>
+          <div style="padding:20px 16px">
+            <div style="margin-bottom:22px">
+              <div style="font-size:11px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">email</div>
+              <div style="font-size:14px;line-height:1.6">maya.oduya@northlight.studio</div>
+            </div>
+            <div style="margin-bottom:22px">
+              <div style="font-size:11px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">name</div>
+              <div style="font-size:14px;line-height:1.6">Maya Oduya</div>
+            </div>
+            <div style="margin-bottom:0">
+              <div style="font-size:11px;font-weight:500;color:#8892AA;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">message</div>
+              <div style="background:#F8F9FB;border:1px solid #E4E8F0;border-left:3px solid #6EE7B7;border-radius:0 8px 8px 0;padding:14px 16px;font-size:14px;line-height:1.7;white-space:pre-wrap">We're moving our marketing site to Astro next month and need a form endpoint we can host ourselves. Does dsforms handle multiple forms on one instance?</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:9px;flex:0 1 420px;min-width:0">
+      <div style="display:flex;align-items:baseline;gap:9px"><span class="tag tag-neutral">templates/login.html</span><span class="text-muted" style="font-size:12px">380px card, its own stylesheet</span></div>
+      <div class="rec" style="border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px #3f424d,0 16px 40px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;min-height:392px;padding:24px">
+        <div style="background:#fff;border:1px solid #E4E8F0;border-radius:8px;padding:32px;width:100%;max-width:380px">
+          <div style="text-align:center;font-size:20px;font-weight:500;color:#1B1F2E;margin-bottom:24px">ds<em style="color:#34D399;font-style:normal">forms</em></div>
+          <div style="margin-bottom:16px">
+            <label style="display:block;font-size:13px;font-weight:500;color:#4A5568;margin-bottom:4px">Username</label>
+            <input type="text" style="width:100%;padding:8px 10px;border:1px solid #E4E8F0;border-radius:6px;font-size:14px" />
+          </div>
+          <div style="margin-bottom:16px">
+            <label style="display:block;font-size:13px;font-weight:500;color:#4A5568;margin-bottom:4px">Password</label>
+            <input type="password" style="width:100%;padding:8px 10px;border:1px solid #E4E8F0;border-radius:6px;font-size:14px" />
+          </div>
+          <div style="width:100%;padding:9px;background:#6EE7B7;color:#065F46;border-radius:6px;font-size:14px;font-weight:500;text-align:center">Log in</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hr"></div>
+  <p class="text-muted" style="font-size:13px;margin:0">What the redesign has to solve: no home/overview (login lands on a list), stats are three flat counters, spam is dropped silently with nothing to review, and every page is one table on a 960px column.</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const unreadRow = "background:#ECFDF5";
+    const dot = React.createElement("span", { style: { width: 8, height: 8, borderRadius: "50%", background: "#6EE7B7", display: "inline-block" } });
+    return {
+      oldForms: [
+        { name: "Contact form", email: "hello@northlight.studio", unread: 9, created: "Jan 8, 2026" },
+        { name: "Bug reports", email: "dev@northlight.studio", unread: 4, created: "Jan 22, 2026" },
+        { name: "Newsletter signup", email: "hello@northlight.studio", unread: 3, created: "Feb 2, 2026" },
+        { name: "Consulting enquiries", email: "baran@northlight.studio", unread: 1, created: "Feb 19, 2026" }
+      ],
+      oldSubs: [
+        { name: "Maya Oduya", email: "maya.oduya@northlight.studio", preview: "We're moving our marketing site to Astro next month and need…", date: "Mar 4, 2:18 PM", read: false },
+        { name: "Tomas Berg", email: "tomas@bergwerk.de", preview: "Does the CSV export include the IP column?", date: "Mar 4, 11:02 AM", read: false },
+        { name: "Submission", email: "kd9x@mailinat.or", preview: "[url=http://cheap-seo-backlinks.ru]best backlinks[/url]", date: "Mar 3, 9:44 PM", read: false },
+        { name: "Priya Raman", email: "priya@ramanlabs.io", preview: "Signed up for the waitlist twice by accident — can you remove…", date: "Mar 3, 4:31 PM", read: true },
+        { name: "Jon Whitlock", email: "jon@whitlock.cc", preview: "Deployed on a $5 Hetzner box, works great. One question about…", date: "Mar 2, 8:07 AM", read: true },
+        { name: "Submission", email: "no-reply@wzzq.top", preview: "casino bonus 500% unsubscribe here www.wzzq.top/out", date: "Mar 1, 2:55 AM", read: true }
+      ].map(s => ({
+        ...s,
+        rowStyle: s.read ? "" : unreadRow,
+        dot: s.read ? null : dot,
+        nameStyle: s.read ? "font-weight:500;color:#1B1F2E" : "font-weight:600;color:#1B1F2E"
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

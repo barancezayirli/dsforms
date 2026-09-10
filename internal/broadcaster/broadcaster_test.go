@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/youruser/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/store"
 )
 
 // fakeStore implements the Store interface for deterministic worker tests.
@@ -46,6 +46,25 @@ func (f *fakeStore) NextPendingDeliveries(limit int) ([]store.Delivery, error) {
 		}
 	}
 	return out, nil
+}
+
+// failedCount reports how many times MarkDeliveryFailed ran for a delivery.
+func (f *fakeStore) failedCount(id string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.failed[id]
+}
+
+// statusOf reports a delivery's current status.
+func (f *fakeStore) statusOf(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, d := range f.pending {
+		if d.ID == id {
+			return d.Status
+		}
+	}
+	return ""
 }
 
 func (f *fakeStore) GetBroadcast(id string) (store.Broadcast, error) {
@@ -106,19 +125,31 @@ func (f *fakeStore) MarkBroadcastDone(id string) error {
 
 // fakeMailer records sends and can fail on demand.
 type fakeMailer struct {
-	mu      sync.Mutex
-	sent    []string
-	failAll bool
+	mu       sync.Mutex
+	sent     []string
+	failAll  bool
+	panicAll bool
+	calls    int
 }
 
 func (m *fakeMailer) SendMail(to, subject, body string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.calls++
+	if m.panicAll {
+		panic("mailer exploded")
+	}
 	if m.failAll {
 		return errors.New("smtp down")
 	}
 	m.sent = append(m.sent, to)
 	return nil
+}
+
+func (m *fakeMailer) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
 }
 
 func newTestWorker(fs *fakeStore, fm *fakeMailer) *Worker {
@@ -218,4 +249,77 @@ func TestRunOnceMarksFailedWhenGetBroadcastFails(t *testing.T) {
 	if fs.failed["a"] == 0 {
 		t.Error("delivery should be marked failed when GetBroadcast fails")
 	}
+}
+
+// TestRunOncePanicExhaustsAttempts pins that a panicking send is treated like a
+// failing send rather than like an empty queue.
+//
+// safe.Do around the worker loop stopped a panic killing the process, but left
+// n and err at their zero values — so the loop read "no error, nothing to do",
+// took the idle wait, and tried the same poisoned delivery again on the next
+// tick. Forever, at Idle cadence, with MarkDeliveryFailed never called: attempts
+// never incremented, the row stayed pending, the broadcast never finalized, and
+// the operator's progress page showed a spinner that would never resolve.
+//
+// Guarding the send itself means the poisoned row exhausts MaxAttempts and stops,
+// which is what a send that always errors already did.
+func TestRunOncePanicExhaustsAttempts(t *testing.T) {
+	t.Parallel()
+	fs := newFakeStore(store.Broadcast{ID: "b1", Subject: "Hi", Body: "Body"}, []string{"a@x.com"})
+	fm := &fakeMailer{panicAll: true}
+	w := newTestWorker(fs, fm)
+
+	for i := 0; i < w.MaxAttempts; i++ {
+		if _, err := w.RunOnce(); err != nil {
+			t.Fatalf("run %d: RunOnce returned %v; a panicking send must not abort the batch", i, err)
+		}
+	}
+
+	if got := fs.failedCount("a"); got == 0 {
+		t.Fatal("MarkDeliveryFailed was never called — the attempt counter never moved, so this row retries forever")
+	}
+	if st := fs.statusOf("a"); st != store.DeliveryStatusFailed {
+		t.Errorf("delivery status = %q after %d attempts, want %q", st, w.MaxAttempts, store.DeliveryStatusFailed)
+	}
+}
+
+// And a panic must not stop the rest of the batch: one poisoned recipient should
+// not cost the other nine.
+func TestRunOncePanicDoesNotAbortTheBatch(t *testing.T) {
+	t.Parallel()
+	fs := newFakeStore(store.Broadcast{ID: "b1", Subject: "Hi", Body: "Body"},
+		[]string{"a@x.com", "b@x.com", "c@x.com"})
+	fm := &poisonMailer{poison: "b@x.com"}
+	w := newTestWorker(fs, nil)
+	w.Mailer = fm
+
+	if _, err := w.RunOnce(); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if len(fm.delivered()) != 2 {
+		t.Errorf("delivered %v, want the two healthy recipients", fm.delivered())
+	}
+}
+
+// poisonMailer panics for one address and succeeds for the rest.
+type poisonMailer struct {
+	mu     sync.Mutex
+	poison string
+	ok     []string
+}
+
+func (m *poisonMailer) SendMail(to, subject, body string) error {
+	if to == m.poison {
+		panic("poisoned recipient")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ok = append(m.ok, to)
+	return nil
+}
+
+func (m *poisonMailer) delivered() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.ok...)
 }
