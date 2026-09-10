@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"database/sql"
+	"errors"
 	"html/template"
 	"io"
 	"mime/multipart"
@@ -17,7 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func setupBackup(t *testing.T) (*store.Store, *chi.Mux, string) {
+func setupBackup(t *testing.T) (*store.Store, *chi.Mux, string, *BackupHandler) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := dir + "/test.db"
@@ -53,7 +55,7 @@ func setupBackup(t *testing.T) (*store.Store, *chi.Mux, string) {
 		r.Post("/admin/backups/import", bh.Import)
 	})
 
-	return s, r, dbPath
+	return s, r, dbPath, bh
 }
 
 func doBackupRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path string, body io.Reader, contentType string) *httptest.ResponseRecorder {
@@ -73,7 +75,7 @@ func doBackupRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path stri
 
 func TestBackupPage(t *testing.T) {
 	t.Parallel()
-	s, r, _ := setupBackup(t)
+	s, r, _, _ := setupBackup(t)
 	w := doBackupRequest(t, s, r, "GET", "/admin/backups", nil, "")
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -82,7 +84,7 @@ func TestBackupPage(t *testing.T) {
 
 func TestBackupExportHeaders(t *testing.T) {
 	t.Parallel()
-	s, r, _ := setupBackup(t)
+	s, r, _, _ := setupBackup(t)
 	w := doBackupRequest(t, s, r, "GET", "/admin/backups/export", nil, "")
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -99,7 +101,7 @@ func TestBackupExportHeaders(t *testing.T) {
 
 func TestBackupExportValidSQLite(t *testing.T) {
 	t.Parallel()
-	s, r, _ := setupBackup(t)
+	s, r, _, _ := setupBackup(t)
 	_ = s.CreateForm(store.Form{ID: "f1", Name: "Test", EmailTo: "a@b.com"})
 	w := doBackupRequest(t, s, r, "GET", "/admin/backups/export", nil, "")
 	// Write response body to temp file and verify it's valid SQLite
@@ -110,7 +112,7 @@ func TestBackupExportValidSQLite(t *testing.T) {
 
 func TestBackupImportValid(t *testing.T) {
 	t.Parallel()
-	s, r, dbPath := setupBackup(t)
+	s, r, dbPath, _ := setupBackup(t)
 	// Create a backup DB to import
 	dir := t.TempDir()
 	backupPath := dir + "/backup.db"
@@ -142,7 +144,7 @@ func TestBackupImportValid(t *testing.T) {
 
 func TestBackupImportInvalid(t *testing.T) {
 	t.Parallel()
-	s, r, _ := setupBackup(t)
+	s, r, _, _ := setupBackup(t)
 	// Create multipart form with a text file
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
@@ -177,4 +179,114 @@ func createMultipartFile(t *testing.T, fieldName, fileName, filePath string) (*b
 	part.Write(data)
 	writer.Close()
 	return &buf, writer.FormDataContentType()
+}
+
+// failingReopenStore wraps the real store and fails Reopen, so the two
+// post-swap outcomes are reachable from a handler test.
+//
+// BackupStore is two methods, which is what makes this possible at all — while
+// the field was *store.Store there was no way to reach these branches without
+// breaking the filesystem underneath a live database.
+type failingReopenStore struct {
+	inner       *store.Store
+	failReopens int
+	reopens     int
+}
+
+func (f *failingReopenStore) DB() *sql.DB { return f.inner.DB() }
+
+func (f *failingReopenStore) Reopen(path string) error {
+	f.reopens++
+	if f.reopens <= f.failReopens {
+		return errors.New("simulated reopen failure")
+	}
+	return f.inner.Reopen(path)
+}
+
+// TestBackupImportTellsTheOperatorWhichOutcomeHappened pins the messages, not
+// just the status code.
+//
+// All three outcomes used to redirect with "Restore failed. The uploaded file
+// may be invalid or corrupted." That is wrong for two of them — the file had
+// already passed validation — and it points the operator at re-exporting and
+// re-uploading, which is the worst possible next step when the service is the
+// thing that is broken. TestBackupImportInvalid passed throughout, because it
+// only ever checked for a 302.
+func TestBackupImportTellsTheOperatorWhichOutcomeHappened(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		failReopens int
+		upload      string // "valid" or "garbage"
+		wantSays    string
+	}{
+		{
+			name:     "a file that is not a database is refused, and says so",
+			upload:   "garbage",
+			wantSays: "unchanged",
+		},
+		{
+			name:        "a failed swap says the existing database is still in use",
+			upload:      "valid",
+			failReopens: 1,
+			wantSays:    "still in use",
+		},
+		{
+			name:        "an unrecoverable failure asks for a restart",
+			upload:      "valid",
+			failReopens: 2,
+			wantSays:    "restarted",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, r, _, bh := setupBackup(t)
+
+			// Swap in a store whose Reopen fails, leaving auth and the shell on
+			// the real one. The router closes over bh, so this reaches the
+			// handler the request will hit.
+			if tc.failReopens > 0 {
+				bh.Store = &failingReopenStore{inner: s, failReopens: tc.failReopens}
+			}
+
+			var body *bytes.Buffer
+			var contentType string
+			switch tc.upload {
+			case "valid":
+				dir := t.TempDir()
+				backupPath := dir + "/backup.db"
+				sB, _ := store.New(backupPath)
+				_ = sB.CreateForm(store.Form{ID: "f-x", Name: "Imported", EmailTo: "x@y.com"})
+				sB.Close()
+				body, contentType = createMultipartFile(t, "file", "backup.db", backupPath)
+			default:
+				body = &bytes.Buffer{}
+				writer := multipart.NewWriter(body)
+				part, _ := writer.CreateFormFile("file", "bad.txt")
+				_, _ = part.Write([]byte("this is not a database"))
+				writer.Close()
+				contentType = writer.FormDataContentType()
+			}
+
+			w := doBackupRequest(t, s, r, "POST", "/admin/backups/import", body, contentType)
+			if w.Code != http.StatusFound {
+				t.Fatalf("status = %d, want 302", w.Code)
+			}
+
+			msgType, msg := flashFrom(t, w)
+			if msgType != "error" {
+				t.Errorf("flash type = %q, want %q", msgType, "error")
+			}
+			if !strings.Contains(msg, tc.wantSays) {
+				t.Errorf("the operator is told %q, which does not mention %q.\n"+
+					"These three outcomes need three different next actions; one "+
+					"message for all of them sends an operator whose service is down "+
+					"off to re-export a file that was never the problem.",
+					msg, tc.wantSays)
+			}
+		})
+	}
 }

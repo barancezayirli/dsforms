@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/backup"
@@ -105,11 +107,20 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Write uploaded file to a temp location.
-	tmp, err := os.CreateTemp("", "dsforms-import-*.db")
+	// The upload is staged BESIDE the live database, not in the system temp
+	// directory.
+	//
+	// backup.Import finishes with os.Rename, which cannot cross filesystems. The
+	// old os.CreateTemp("", …) put the file in /tmp while DB_PATH defaults to
+	// /data/dsforms.db — different mounts in any container, so the rename failed
+	// with EXDEV on every restore. That was not an edge case, it was the default
+	// deployment; it went unnoticed only because a field-name mismatch meant this
+	// handler never reached the rename at all.
+	tmp, err := os.CreateTemp(filepath.Dir(h.DBPath), "dsforms-import-*.db")
 	if err != nil {
-		log.Printf("backup import: create temp file: %v", err)
-		flash.Set(w, h.SecretKey, "error", "Internal error during restore.")
+		log.Printf("backup import: create temp file beside %s: %v", h.DBPath, err)
+		flash.Set(w, h.SecretKey, "error",
+			"Could not stage the upload next to the database. Your database is unchanged.")
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return
 	}
@@ -126,8 +137,24 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 	tmp.Close()
 
 	if err := backup.Import(h.Store, tmpPath, h.DBPath); err != nil {
+		// Three outcomes needing three different responses. One message for all
+		// of them told an operator whose database was fine that their file was
+		// corrupt, and an operator whose service was down the same thing — so the
+		// obvious next step, re-export and re-upload, was aimed at a process that
+		// could no longer answer.
 		log.Printf("backup import error: %v", err)
-		flash.Set(w, h.SecretKey, "error", "Restore failed. The uploaded file may be invalid or corrupted.")
+		switch {
+		case errors.Is(err, backup.ErrUnavailable):
+			flash.Set(w, h.SecretKey, "error",
+				"Restore failed and the database could not be reopened. "+
+					"The service needs to be restarted.")
+		case errors.Is(err, backup.ErrRolledBack):
+			flash.Set(w, h.SecretKey, "error",
+				"Restore failed. Your existing database is unchanged and still in use.")
+		default:
+			flash.Set(w, h.SecretKey, "error",
+				"That file was rejected. Your database is unchanged.")
+		}
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return
 	}
