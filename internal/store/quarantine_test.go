@@ -37,8 +37,8 @@ func TestCreateHeldSubmissionStoresScoreAndSignals(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	signals := []SpamSignal{
-		{Rule: "markup", Field: "message", Match: "[url=", Weight: 6},
-		{Rule: "extra_links", Field: "", Match: "", Weight: 2},
+		{Check: "markup", Field: "message", Match: "[url=", Weight: 6},
+		{Check: "extra_links", Field: "", Match: "", Weight: 2},
 	}
 	if err := s.CreateHeldSubmission(heldFixture("s1", "f1", 8, now), 8, 6, signals); err != nil {
 		t.Fatalf("CreateHeldSubmission: %v", err)
@@ -122,7 +122,7 @@ func TestRestoreSubmission(t *testing.T) {
 	seedForm(t, s, "f1")
 
 	now := time.Now().UTC()
-	signals := []SpamSignal{{Rule: "keyword", Field: "message", Match: "casino", Weight: 5}}
+	signals := []SpamSignal{{Check: "keyword", Field: "message", Match: "casino", Weight: 5}}
 	if err := s.CreateHeldSubmission(heldFixture("s1", "f1", 8, now), 8, 6, signals); err != nil {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestDeleteHeldCascadesSignals(t *testing.T) {
 	now := time.Now().UTC()
 	for _, id := range []string{"a", "b", "c"} {
 		if err := s.CreateHeldSubmission(heldFixture(id, "f1", 8, now), 8, 6,
-			[]SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
+			[]SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
 			t.Fatalf("CreateHeldSubmission(%s): %v", id, err)
 		}
 	}
@@ -399,7 +399,7 @@ func TestUpgradeFromPreQuarantineSchema(t *testing.T) {
 
 	// And the new machinery must work against the upgraded file.
 	if err := s.CreateHeldSubmission(heldFixture("new1", "f1", 8, time.Now().UTC()), 8, 6,
-		[]SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
+		[]SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
 		t.Fatalf("CreateHeldSubmission after upgrade: %v", err)
 	}
 	held, err := s.HeldSubmissions(10, 0)
@@ -546,8 +546,8 @@ func TestGetSubmissionPopulatesQuarantineFields(t *testing.T) {
 	seedForm(t, s, "f1")
 
 	signals := []SpamSignal{
-		{Rule: "markup", Field: "message", Match: "[url=", Weight: 6},
-		{Rule: "keyword", Field: "message", Match: "backlinks", Weight: 5},
+		{Check: "markup", Field: "message", Match: "[url=", Weight: 6},
+		{Check: "keyword", Field: "message", Match: "backlinks", Weight: 5},
 	}
 	if err := s.CreateHeldSubmission(heldFixture("s1", "f1", 11, time.Now().UTC()), 11, 6, signals); err != nil {
 		t.Fatalf("CreateHeldSubmission: %v", err)
@@ -654,7 +654,7 @@ func TestDeleteAllHeld(t *testing.T) {
 	}
 	for _, id := range []string{"a", "b", "c"} {
 		if err := s.CreateHeldSubmission(heldFixture(id, "f1", 6, now), 6, 6,
-			[]SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
+			[]SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
 			t.Fatalf("CreateHeldSubmission(%s): %v", id, err)
 		}
 	}
@@ -747,7 +747,7 @@ func TestAcceptedReadsCarryEveryColumn(t *testing.T) {
 	// on an accepted row are non-zero and therefore observable.
 	now := time.Now().UTC()
 	if err := s.CreateHeldSubmission(heldFixture("r1", "f1", 11, now), 11, 6,
-		[]SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 11}}); err != nil {
+		[]SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 11}}); err != nil {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
 	if _, err := s.RestoreSubmission("r1"); err != nil {

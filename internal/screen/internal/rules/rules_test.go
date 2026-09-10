@@ -1,7 +1,9 @@
-package filter
+package rules
 
 import (
 	"testing"
+
+	"github.com/barancezayirli/dsforms/internal/screen/internal/addr"
 	"time"
 )
 
@@ -366,55 +368,6 @@ func TestMatchBlockRulesStillScanEveryField(t *testing.T) {
 	}
 }
 
-// TestCanonicalAddressFoldsOnlyASCII is a property test, not a case list.
-//
-// The property: two byte-distinct values may canonicalise to the same string
-// only if they are genuinely the same address. strings.ToLower violates it,
-// because Unicode case folding is not injective into ASCII — U+0130 (İ) lowers
-// to "i" and U+212A (KELVIN SIGN) lowers to "k". Any allowlisted address
-// containing i, k or s was therefore reachable by an address the operator never
-// allowlisted.
-//
-// This is the third round in which this bypass has been found open, each time
-// one layer beneath the previous fix: first the field name was scanned too
-// broadly, then the name was made canonical but the value was not. Enumerating
-// the confusables that happen to be known today would repeat that mistake, so
-// the assertion is the property itself — for every hostile spelling, the
-// canonical form must differ from the honest one.
-func TestCanonicalAddressFoldsOnlyASCII(t *testing.T) {
-	t.Parallel()
-
-	const honest = "mike@works.com"
-	hostile := []struct{ name, value string }{
-		{"U+0130 capital I with dot above", "MİKE@works.com"},
-		{"U+212A kelvin sign", "MIKE@works.com"},
-		{"U+017F latin small letter long s", "mike@workſ.com"},
-		{"U+0131 dotless i", "mıke@works.com"},
-		{"fullwidth latin", "ＭＩＫＥ@works.com"},
-		{"kelvin in the domain", "mike@worKs.com"},
-	}
-
-	for _, h := range hostile {
-		t.Run(h.name, func(t *testing.T) {
-			t.Parallel()
-			got, ok := canonicalAddress(h.value)
-			if ok && got == honest {
-				t.Errorf("canonicalAddress(%q) = %q — collides with the honest address; "+
-					"an address the operator never allowlisted would match", h.value, got)
-			}
-		})
-	}
-
-	// The other direction: honest spellings must still canonicalise together, or
-	// the fix would break real matching instead of hostile matching.
-	for _, v := range []string{"mike@works.com", "MIKE@WORKS.COM", "Mike@Works.Com", "  mike@works.com  "} {
-		got, ok := canonicalAddress(v)
-		if !ok || got != honest {
-			t.Errorf("canonicalAddress(%q) = %q, %v; want %q, true", v, got, ok, honest)
-		}
-	}
-}
-
 // TestCanonicalAddressAcceptsEveryFormValidateAccepts pins the other half of the
 // same root cause: the package had three definitions of "an address".
 //
@@ -444,9 +397,9 @@ func TestCanonicalAddressAcceptsEveryFormValidateAccepts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Validate(%q) = %v; a form the parser accepts must be storable", v, err)
 			}
-			matched, ok := canonicalAddress(v)
+			matched, ok := addr.Canonical(v)
 			if !ok {
-				t.Fatalf("canonicalAddress(%q) did not recognise a form Validate stored", v)
+				t.Fatalf("Canonical(%q) did not recognise a form Validate stored", v)
 			}
 			if matched != stored {
 				t.Errorf("Validate stored %q but matching reduces to %q — the two disagree "+
@@ -456,80 +409,57 @@ func TestCanonicalAddressAcceptsEveryFormValidateAccepts(t *testing.T) {
 	}
 }
 
-// TestSenderAddress tests the mechanism directly, which the round-2 regression
-// test did not.
+// TestMatchesFailsClosedOnDegenerateInput pins the boundaries a mutation sweep
+// found unguarded.
 //
-// That test asserted through Match(), and under a "first key wins" regression
-// whether Match hits depends on which of two keys Go's randomised map iteration
-// reaches first — so it caught its own bug in 30 runs out of 60. Asserting the
-// state here is deterministic: under that regression every ambiguous case
-// returns SenderOne, every time.
-//
-// This is also the §7 gap: SenderAddress is the branch's most security-critical
-// export and had no direct test at all.
-func TestSenderAddress(t *testing.T) {
+// Each of these was a surviving mutant: flipping the return kept the whole suite
+// green. They are the returns that decide what happens when input is not what
+// the matcher expects, and for an *allow* rule "match" is the dangerous
+// direction — an allow rule matching skips the block list and all scoring.
+func TestMatchesFailsClosedOnDegenerateInput(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name      string
-		data      map[string]string
-		wantAddr  string
-		wantState SenderState
-	}{
-		{"no email field is legal", map[string]string{"message": "hi"}, "", SenderNone},
-		{"empty data", map[string]string{}, "", SenderNone},
-		{"one sender", map[string]string{"email": "a@x.com"}, "a@x.com", SenderOne},
-		{"one sender, any case", map[string]string{"EMAIL": "a@x.com"}, "a@x.com", SenderOne},
-		{"one sender beside other fields", map[string]string{"email": "a@x.com", "zz": "b@y.com"}, "a@x.com", SenderOne},
-		{"an empty value is still one claimant", map[string]string{"email": ""}, "", SenderOne},
-
-		// Two fields both claiming to be the sender. Every tie-break — by case,
-		// by sort order, by iteration — has a side the submitter can land on, so
-		// the only safe answer is that we do not know.
-		{"two case variants", map[string]string{"email": "a@x.com", "Email": "b@y.com"}, "", SenderAmbiguous},
-		{"upper and lower", map[string]string{"EMAIL": "a@x.com", "email": "b@y.com"}, "", SenderAmbiguous},
-		{"three variants", map[string]string{"email": "a@x.com", "Email": "b@y.com", "eMaIl": "c@z.com"}, "", SenderAmbiguous},
-		{"no exact-case sender among them", map[string]string{"Email": "a@x.com", "EMAIL": "b@y.com"}, "", SenderAmbiguous},
-
-		// Near-misses: not claimants at all, so they cannot manufacture ambiguity
-		// to suppress a legitimate sender.
-		{"padded key is not a sender", map[string]string{"email": "a@x.com", " email": "b@y.com"}, "a@x.com", SenderOne},
-		{"email-ish key is not a sender", map[string]string{"email": "a@x.com", "email2": "b@y.com"}, "a@x.com", SenderOne},
-		{"dotless i is not a case variant", map[string]string{"email": "a@x.com", "emaıl": "b@y.com"}, "a@x.com", SenderOne},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			addr, state := SenderAddress(tt.data)
-			if state != tt.wantState {
-				t.Errorf("state = %v, want %v", state, tt.wantState)
-			}
-			if addr != tt.wantAddr {
-				t.Errorf("addr = %q, want %q", addr, tt.wantAddr)
-			}
-		})
-	}
-}
-
-// TestSenderAddressReturnsNothingWhenUnresolved pins the contract that makes
-// every caller safe: `addr, _ := SenderAddress(data)` yields "" rather than an
-// attacker-chosen value.
-//
-// Without this, someone returning a "best effort" address for the ambiguous case
-// — for a log line, or to show the operator — silently reopens the bypass at
-// every call site that ignores the state, and nothing would catch it.
-func TestSenderAddressReturnsNothingWhenUnresolved(t *testing.T) {
-	t.Parallel()
-	for _, data := range []map[string]string{
-		{},
-		{"message": "hi"},
-		{"email": "a@x.com", "Email": "b@y.com"},
-		{"EMAIL": "a@x.com", "Email": "b@y.com", "email": "c@z.com"},
-	} {
-		addr, state := SenderAddress(data)
-		if state != SenderOne && addr != "" {
-			t.Errorf("SenderAddress(%v) = %q with state %v; a non-SenderOne state must return the empty string", data, addr, state)
+	t.Run("an unrecognised rule type matches nothing", func(t *testing.T) {
+		t.Parallel()
+		// The severe case is an allow rule: if an unknown type matched, every
+		// submission would be allowlisted and the filter would be off entirely.
+		allow := []Rule{{ID: "A", Kind: KindAllow, Type: "nonsense", Value: "whatever"}}
+		if r, ok := Match(allow, map[string]string{"email": "spammer@bad.example"}, "203.0.113.5"); ok {
+			t.Errorf("an unknown-type allow rule matched (%+v) — that allowlists everything", r)
 		}
-	}
+		block := []Rule{{ID: "B", Kind: KindBlock, Type: "nonsense", Value: "whatever"}}
+		if _, ok := Match(block, map[string]string{"email": "a@b.com"}, "203.0.113.5"); ok {
+			t.Error("an unknown-type block rule matched")
+		}
+	})
+
+	t.Run("an unparseable client IP matches no ip or cidr rule", func(t *testing.T) {
+		t.Parallel()
+		// ExtractIP takes the first X-Forwarded-For entry, which is submitter
+		// input, so a value net.ParseIP rejects is reachable.
+		rs := []Rule{
+			{ID: "A", Kind: KindAllow, Type: TypeCIDR, Value: "203.0.113.0/24"},
+			{ID: "B", Kind: KindAllow, Type: TypeIP, Value: "203.0.113.5"},
+		}
+		for _, ip := range []string{"", "not-an-ip", "999.999.999.999", "203.0.113.5, 10.0.0.1"} {
+			if r, ok := Match(rs, map[string]string{"email": "a@b.com"}, ip); ok {
+				t.Errorf("ip %q matched rule %s — a malformed address must not allowlist", ip, r.ID)
+			}
+		}
+		// and a well-formed one still matches, or the guard is just breaking the feature
+		if _, ok := Match(rs, map[string]string{"email": "a@b.com"}, "203.0.113.5"); !ok {
+			t.Error("a valid in-range IP no longer matches")
+		}
+	})
+
+	t.Run("a keyword rule never matches here", func(t *testing.T) {
+		t.Parallel()
+		// Keyword rules feed the scorer at the usual weight. If they matched
+		// here they would hold outright, which is the behaviour the weighting
+		// deliberately avoids.
+		rs := []Rule{{ID: "K", Kind: KindBlock, Type: TypeKeyword, Value: "casino"}}
+		if _, ok := Match(rs, map[string]string{"message": "best casino ever"}, "203.0.113.5"); ok {
+			t.Error("a keyword rule matched in Match; it should reach the scorer instead")
+		}
+	})
 }

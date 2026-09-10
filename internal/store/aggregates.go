@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
 // DayCounts is one day's split of accepted against held submissions.
@@ -191,7 +191,7 @@ func (s *Store) RecentSubmissions(n int) ([]RecentSubmission, error) {
 
 // SignalTally is one row of the "Top spam signals" panel.
 type SignalTally struct {
-	Rule   spam.Rule
+	Check  screen.Check
 	Hits   int
 	Weight int // the weight this rule was recorded at, for the "w6" label
 }
@@ -218,7 +218,7 @@ func (s *Store) TopSpamSignals(days int) ([]SignalTally, error) {
 	var out []SignalTally
 	for rows.Next() {
 		var t SignalTally
-		if err := rows.Scan(&t.Rule, &t.Hits, &t.Weight); err != nil {
+		if err := rows.Scan(&t.Check, &t.Hits, &t.Weight); err != nil {
 			return nil, fmt.Errorf("top spam signals: %w", err)
 		}
 		out = append(out, t)

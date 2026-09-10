@@ -28,3 +28,7 @@ c.out
 
 # Remember plugin
 .remember/
+
+# Fuzz corpora and golden diffs are local artefacts
+testdata/fuzz/
+*.actual

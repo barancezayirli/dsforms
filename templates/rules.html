@@ -15,6 +15,26 @@
 </div>
 {{end}}
 
+<!-- A rule stored in a form the matcher can no longer produce is inert. For a
+     block rule that is fail-open: it is listed here, looks active, and protects
+     nothing. Naming it is the whole point — the operator cannot see this from
+     the row itself. -->
+{{if .Problems}}
+<div class="notice" style="align-items:flex-start">
+  <svg class="i"><use href="#ph-warning"/></svg>
+  <div>
+    <div><strong>{{len .Problems}} rule{{if ne (len .Problems) 1}}s{{end}} can never match.</strong>
+      They were saved in a form this version no longer produces, so they are not
+      filtering anything. Remove and re-add each one.</div>
+    <ul style="margin:6px 0 0;padding-left:18px">
+      {{range .Problems}}
+      <li class="dim" style="font-size:12px"><code class="mono">{{.Value}}</code> — {{.Reason}}</li>
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{end}}
+
 <div class="row">
   <div class="col-main">
     <div class="card elev-sm">

@@ -1,4 +1,4 @@
-package spam
+package repeat
 
 import "sync"
 
@@ -17,7 +17,7 @@ type Tracker struct {
 // NewTracker creates a Tracker bounded to maxEntries distinct (formID, ip) pairs.
 func NewTracker(maxEntries int) *Tracker {
 	if maxEntries <= 0 {
-		panic("spam: maxEntries must be > 0")
+		panic("screen: maxEntries must be > 0")
 	}
 	return &Tracker{
 		counts:     make(map[string]int),

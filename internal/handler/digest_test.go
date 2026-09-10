@@ -64,7 +64,7 @@ func TestDigestSummarisesHeldSubmissions(t *testing.T) {
 			Data:      map[string]string{"name": "Bot " + id, "message": "buy cheap pills at evil.example"},
 			RawData:   `{"name":"Bot ` + id + `","message":"buy cheap pills at evil.example"}`,
 			CreatedAt: time.Now().UTC(),
-		}, 6+i, 6, []store.SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
+		}, 6+i, 6, []store.SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
 			t.Fatalf("CreateHeldSubmission: %v", err)
 		}
 	}

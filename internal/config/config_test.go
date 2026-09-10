@@ -1,6 +1,8 @@
 package config
 
 import (
+	"github.com/barancezayirli/dsforms/internal/screen"
+
 	"testing"
 )
 
@@ -212,7 +214,7 @@ func TestSpamThreshold(t *testing.T) {
 		{name: "in range is taken as given", set: "4", want: 4},
 		{name: "upper bound is allowed", set: "20", want: 20},
 		{name: "above range clamps down", set: "500", want: 20},
-		{name: "negative clamps up to the floor", set: "-3", want: 1},
+		{name: "negative falls back to the default, not the floor", set: "-3", want: screen.DefaultThreshold},
 	}
 
 	for _, tt := range tests {

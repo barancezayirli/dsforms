@@ -1,4 +1,4 @@
-package spam
+package repeat
 
 import (
 	"sync"

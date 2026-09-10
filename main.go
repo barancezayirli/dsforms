@@ -24,7 +24,7 @@ import (
 	"github.com/barancezayirli/dsforms/internal/mail"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/barancezayirli/dsforms/internal/safe"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/barancezayirli/dsforms/internal/webhook"
 	"github.com/go-chi/chi/v5"
@@ -547,12 +547,29 @@ func main() {
 		log.Println("broadcast worker started without SMTP — broadcasts will be marked failed until SMTP_HOST/SMTP_FROM are configured")
 	}
 
+	// One screener for the process: it carries the repeat-IP tally, which is the
+	// only state the hold/accept decision keeps.
+	screener := screen.New(10000)
+
+	// A rule stored under an older normalisation can be permanently unmatchable,
+	// and a block rule in that state fails open while still appearing on the
+	// rules screen. Said once at boot so it is visible without anyone visiting
+	// that page; the page itself names the individual rules.
+	if rules, err := s.ListFilterRules(); err != nil {
+		log.Printf("startup: could not check filter rules: %v", err)
+	} else if problems := screen.CheckRules(rules); len(problems) > 0 {
+		log.Printf("⚠  %d filter rule(s) can never match and are protecting nothing — see /admin/rules", len(problems))
+		for _, p := range problems {
+			log.Printf("   rule %s (%q): %s", p.RuleID, p.Value, p.Reason)
+		}
+	}
+
 	submitHandler := &handler.SubmitHandler{
 		Store:            s,
 		Notifier:         mailer,
 		Webhook:          webhookSender,
 		BaseURL:          cfg.BaseURL,
-		Tracker:          spam.NewTracker(10000),
+		Screener:         screener,
 		DefaultThreshold: cfg.SpamThreshold,
 	}
 

@@ -11,10 +11,9 @@ import (
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/auth"
-	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/flash"
 	"github.com/barancezayirli/dsforms/internal/mail"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -57,9 +56,14 @@ func setupQuarantineWithMailer(t *testing.T, m *mail.MockMailer) (*store.Store, 
 			`{{if .Selected}}<span class="sel">{{.Selected.ID}}</span>` +
 			`<span class="meter">{{$.MeterPercent}}</span>{{end}}{{end}}` +
 			`{{define "held-panel"}}<span class="panel">{{if .Selected}}{{.Selected.ID}}{{end}}</span>{{end}}`))
+	// The stub mirrors the real rules.html closely enough to assert on: the
+	// problems block is what these tests check, and a stub that omitted it would
+	// make a passing test meaningless.
 	rules := template.Must(template.Must(base.Clone()).Parse(
 		`{{define "content"}}{{range .Block}}<span class="block">{{.Value}}</span>{{end}}` +
 			`{{range .Allow}}<span class="allow">{{.Value}}</span>{{end}}` +
+			`{{if .Problems}}<div class="problems">{{len .Problems}} rule(s) can never match:` +
+			`{{range .Problems}}<span class="problem">{{.Value}} — {{.Reason}}</span>{{end}}</div>{{end}}` +
 			`{{if .Error}}<span class="err">{{.Error}}</span>{{end}}{{end}}`))
 
 	wh := newMockWebhookSender()
@@ -73,7 +77,7 @@ func setupQuarantineWithMailer(t *testing.T, m *mail.MockMailer) (*store.Store, 
 		Notifier:         m,
 		Webhook:          wh,
 		RetentionDays:    30,
-		DefaultThreshold: spam.DefaultThreshold,
+		DefaultThreshold: screen.DefaultThreshold,
 	}
 
 	r := chi.NewRouter()
@@ -117,7 +121,7 @@ func seedHeld(t *testing.T, s *store.Store, id string, score int, signals []stor
 		IP:        "203.0.113.5",
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := s.CreateHeldSubmission(sub, score, spam.DefaultThreshold, signals); err != nil {
+	if err := s.CreateHeldSubmission(sub, score, screen.DefaultThreshold, signals); err != nil {
 		t.Fatalf("CreateHeldSubmission(%s): %v", id, err)
 	}
 }
@@ -125,7 +129,7 @@ func seedHeld(t *testing.T, s *store.Store, id string, score int, signals []stor
 func TestQuarantinePageListsHeld(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupQuarantine(t)
-	seedHeld(t, s, "h1", 6, []store.SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}})
+	seedHeld(t, s, "h1", 6, []store.SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}})
 	seedHeld(t, s, "h2", 12, nil)
 
 	w := doAdminRequest(t, s, r, "GET", "/admin/quarantine", "")
@@ -187,7 +191,7 @@ func TestQuarantinePanelFragment(t *testing.T) {
 func TestQuarantineRestoreSendsWithheldNotification(t *testing.T) {
 	t.Parallel()
 	s, m, r := setupQuarantine(t)
-	seedHeld(t, s, "h1", 6, []store.SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}})
+	seedHeld(t, s, "h1", 6, []store.SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}})
 
 	w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/h1/restore", "")
 	if w.Code != http.StatusSeeOther {
@@ -303,10 +307,10 @@ func TestRulesPageAddAndValidate(t *testing.T) {
 func TestRulesSplitByKind(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupQuarantine(t)
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "spam.example", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
-	if _, err := s.AddFilterRule(filter.KindAllow, filter.TypeEmail, "vip@example.com", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindAllow, screen.TypeEmail, "vip@example.com", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 
@@ -544,11 +548,11 @@ func TestDeleteRuleRemovesOnlyTheNamedRule(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupQuarantine(t)
 
-	keep, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", "")
+	keep, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "spam.example", "")
 	if err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
-	drop, err := s.AddFilterRule(filter.KindBlock, filter.TypeEmail, "bot@spam.example", "")
+	drop, err := s.AddFilterRule(screen.KindBlock, screen.TypeEmail, "bot@spam.example", "")
 	if err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
@@ -578,7 +582,7 @@ func TestDeleteRuleRemovesOnlyTheNamedRule(t *testing.T) {
 func TestDeleteRuleUnknownIDDoesNotClaimSuccess(t *testing.T) {
 	t.Parallel()
 	s, _, r := setupQuarantine(t)
-	if _, err := s.AddFilterRule(filter.KindBlock, filter.TypeDomain, "spam.example", ""); err != nil {
+	if _, err := s.AddFilterRule(screen.KindBlock, screen.TypeDomain, "spam.example", ""); err != nil {
 		t.Fatalf("AddFilterRule: %v", err)
 	}
 
@@ -686,5 +690,59 @@ func TestSenderLabelIsDeterministic(t *testing.T) {
 				t.Fatalf("senderLabel(%v) returned %q then %q — the queue would reshuffle per render", data, first, got)
 			}
 		}
+	}
+}
+
+// TestRulesPageSurfacesDeadRules covers the wiring, not the rendering.
+//
+// The template test asserts rules.html renders a Problems block when given one.
+// Nothing asserted that RulesPage actually calls CheckRules and passes the
+// result — so replacing that call with an empty slice silently removed the whole
+// user-facing point of the feature, with every test still green.
+func TestRulesPageSurfacesDeadRules(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupQuarantine(t)
+
+	// A rule the current matcher can never produce. Written straight to the
+	// table, because AddFilterRule would reject it — which is the situation: it
+	// was stored by a binary whose validator accepted it.
+	if _, err := s.DB().Exec(
+		`INSERT INTO filter_rules (id, kind, type, value, note, hits, created_at)
+		 VALUES ('legacy1','block','email','bot@localhost','',0,datetime('now'))`); err != nil {
+		t.Fatalf("seeding the legacy rule: %v", err)
+	}
+
+	body := doAdminRequest(t, s, r, "GET", "/admin/rules", "").Body.String()
+
+	// Assert on the warning, not on the rule value: the value also appears in
+	// the block-list table below, so checking for it passes whether or not
+	// CheckRules ran at all. The first version of this test did exactly that,
+	// and a mutant removing the CheckRules call survived it.
+	if !strings.Contains(body, "can never match") {
+		t.Errorf("the rules page rendered no warning for a rule that cannot fire; "+
+			"an operator would see it listed as active and believe they were "+
+			"protected.\nbody = %q", body)
+	}
+	if !strings.Contains(body, "bot@localhost") {
+		t.Error("the warning did not name which rule is dead")
+	}
+}
+
+// A store failure must not read as a clean bill of health. "No problems found"
+// and "I could not look" are different statements, and only one of them is true
+// when the query failed.
+func TestRulesPageDoesNotClaimHealthWhenItCannotLook(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupQuarantine(t)
+	cookie := loginCookie(t, s)
+
+	if _, err := s.DB().Exec("DROP TABLE filter_rules"); err != nil {
+		t.Fatalf("DROP TABLE: %v", err)
+	}
+
+	w := doAdminRequestAs(t, cookie, r, "GET", "/admin/rules", "")
+	if w.Code == http.StatusOK {
+		t.Errorf("status = 200 with an unreadable rules table; the page would render " +
+			"an empty, problem-free rule list that the operator has no reason to doubt")
 	}
 }

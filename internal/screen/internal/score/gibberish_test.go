@@ -1,4 +1,4 @@
-package spam
+package score
 
 import "testing"
 

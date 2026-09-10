@@ -217,7 +217,7 @@ CREATE INDEX IF NOT EXISTS idx_submissions_created_at ON submissions(created_at)
 -- field, on what text, and for how many points.
 --
 -- It is a stored record, not a re-computation. The weights and keyword list in
--- internal/spam can be retuned and the threshold is operator-configurable, so
+-- internal/screen can be retuned and the threshold is operator-configurable, so
 -- re-scoring an old submission at review time would show a reviewer a reason
 -- that was never actually applied to it.
 --

@@ -193,7 +193,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 		for _, t := range tallies {
 			p := Percent(t.Hits, maxHits)
 			data.Signals = append(data.Signals, signalBar{
-				Label: RuleLabel(t.Rule), Icon: RuleIcon(t.Rule),
+				Label: RuleLabel(t.Check), Icon: RuleIcon(t.Check),
 				Hits: t.Hits, Weight: t.Weight, Percent: p, Hot: p > 60,
 			})
 		}

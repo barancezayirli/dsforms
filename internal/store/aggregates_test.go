@@ -174,9 +174,9 @@ func TestTopSpamSignals(t *testing.T) {
 
 	now := time.Now().UTC()
 	for i, id := range []string{"a", "b", "c"} {
-		signals := []SpamSignal{{Rule: "markup", Field: "message", Match: "[url=", Weight: 6}}
+		signals := []SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}}
 		if i == 0 {
-			signals = append(signals, SpamSignal{Rule: "keyword", Field: "message", Match: "casino", Weight: 5})
+			signals = append(signals, SpamSignal{Check: "keyword", Field: "message", Match: "casino", Weight: 5})
 		}
 		if err := s.CreateHeldSubmission(heldFixture(id, "f1", 8, now), 8, 6, signals); err != nil {
 			t.Fatalf("CreateHeldSubmission(%s): %v", id, err)
@@ -190,7 +190,7 @@ func TestTopSpamSignals(t *testing.T) {
 	if len(tallies) != 2 {
 		t.Fatalf("got %d rules, want 2: %+v", len(tallies), tallies)
 	}
-	if tallies[0].Rule != "markup" || tallies[0].Hits != 3 {
+	if tallies[0].Check != "markup" || tallies[0].Hits != 3 {
 		t.Errorf("top tally = %+v, want markup with 3 hits", tallies[0])
 	}
 	if tallies[0].Weight != 6 {

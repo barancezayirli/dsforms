@@ -8,18 +8,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
 // SpamSignal is one stored reason a submission was held: which rule fired, on
 // which field, on what text, and for how many points.
 //
-// Separate from spam.Signal because this one is a row: it is scanned from the
+// Separate from screen.Signal because this one is a row: it is scanned from the
 // database, carries whatever an older binary wrote, and is rendered rather than
-// computed. The Rule field is typed by internal/spam all the same, so the value
-// set has one definition — the same reason store returns filter.Rule directly.
+// computed. The Check field is typed by internal/screen all the same, so the value
+// set has one definition — the same reason store returns screen.Rule directly.
 type SpamSignal struct {
-	Rule   spam.Rule
+	Check  screen.Check
 	Field  string
 	Match  string
 	Weight int
@@ -201,9 +201,9 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 		if _, err := tx.Exec(`
 			INSERT INTO spam_signals (submission_id, rule, field, match_text, weight)
 			VALUES (?, ?, ?, ?, ?)`,
-			sub.ID, sig.Rule, sig.Field, sig.Match, sig.Weight,
+			sub.ID, sig.Check, sig.Field, sig.Match, sig.Weight,
 		); err != nil {
-			return fmt.Errorf("create held submission: signal %s: %w", sig.Rule, err)
+			return fmt.Errorf("create held submission: signal %s: %w", sig.Check, err)
 		}
 	}
 
@@ -246,7 +246,7 @@ func (s *Store) HeldCount() (int, error) {
 }
 
 // SubmissionSignals returns the stored breakdown for a submission, in insertion
-// order — which is the order internal/spam emitted them, and the order the
+// order — which is the order internal/screen emitted them, and the order the
 // quarantine panel renders them.
 func (s *Store) SubmissionSignals(submissionID string) ([]SpamSignal, error) {
 	rows, err := s.db.Query(
@@ -261,7 +261,7 @@ func (s *Store) SubmissionSignals(submissionID string) ([]SpamSignal, error) {
 	var out []SpamSignal
 	for rows.Next() {
 		var sig SpamSignal
-		if err := rows.Scan(&sig.Rule, &sig.Field, &sig.Match, &sig.Weight); err != nil {
+		if err := rows.Scan(&sig.Check, &sig.Field, &sig.Match, &sig.Weight); err != nil {
 			return nil, fmt.Errorf("submission signals: %w", err)
 		}
 		out = append(out, sig)

@@ -7,13 +7,11 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/mail"
 	"strings"
 	"time"
 
-	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/safe"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -63,10 +61,10 @@ type SubmitHandler struct {
 	Notifier Notifier
 	Webhook  WebhookSender
 	BaseURL  string
-	Tracker  *spam.Tracker
+	Screener *screen.Screener
 
 	// DefaultThreshold is the instance-wide spam threshold from config. A form
-	// may override it; zero falls back to spam.DefaultThreshold.
+	// may override it; zero falls back to screen.DefaultThreshold.
 	DefaultThreshold int
 }
 
@@ -81,7 +79,7 @@ func (h *SubmitHandler) effectiveThreshold(form store.Form) int {
 	if h.DefaultThreshold > 0 {
 		return h.DefaultThreshold
 	}
-	return spam.DefaultThreshold
+	return screen.DefaultThreshold
 }
 
 // internalFields lists form field names that are never stored in submission data.
@@ -89,39 +87,6 @@ var internalFields = map[string]bool{
 	"_honeypot": true,
 	"_redirect": true,
 	"_subject":  true,
-}
-
-// emailFieldValid reports whether the submission's sender field is a well-formed
-// address. A missing email field is valid — not every form has one. This is a
-// hard rejection distinct from the spam filter: a malformed email is a
-// form-usage error, not a signal to silently drop.
-//
-// Two fields named "email" is also a rejection. It is a broken form rather than
-// a real submission, and resolving it by picking one would put the choice of
-// which address we read in the submitter's hands — see filter.SenderAddress,
-// which this shares so the validator and the allow-rule matcher cannot disagree
-// about who the sender is.
-//
-// This deliberately parses rather than calling filter's canonicalAddress. The
-// two answer different questions: validation asks "did the visitor type a
-// well-formed address", matching asks "what is the comparable form". Matching
-// requires a dot after the @ because it scans every field of every submission
-// and must not treat prose tokens as addresses; validation must not, or an
-// intranet form posting user@localhost would be rejected. Do not "unify" them.
-func emailFieldValid(data map[string]string) bool {
-	value, state := filter.SenderAddress(data)
-	switch state {
-	case filter.SenderNone:
-		// No email field at all is legal — not every form has one.
-		return true
-	case filter.SenderOne:
-		_, err := mail.ParseAddress(value)
-		return err == nil
-	default:
-		// SenderAmbiguous today, and anything added later. The permissive
-		// outcome must never be the one a new state falls into by default.
-		return false
-	}
 }
 
 // Handle processes a form submission.
@@ -197,7 +162,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !emailFieldValid(data) {
+	if !h.Screener.SenderOK(data) {
 		log.Printf("submit: rejected submission for form %s from %s (invalid or ambiguous email field)", formID, ExtractIP(r))
 		http.Error(w, "invalid email", http.StatusBadRequest)
 		return
@@ -206,12 +171,6 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	redirectURL := determineRedirect(r.FormValue("_redirect"), form.Redirect)
 	ip := ExtractIP(r)
 
-	// Tracker.Seen must run unconditionally — it also *records* the submission,
-	// so short-circuiting it behind a content check would undercount this IP's
-	// repeat tally whenever content scoring caught the submission first.
-	// Guarded by TestSubmitContentSpamStillCountsTowardIPRepeat.
-	repeated := h.Tracker.Seen(formID, ip)
-
 	// Operator overrides beat the scorer in both directions. A failure to read
 	// them is not fatal: fall through to scoring rather than refusing the
 	// submission, since losing real mail is the worse error.
@@ -219,52 +178,34 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("submit: form %s: reading filter rules: %v", formID, err)
 	}
-	matched, ruleHit := filter.Match(rules, data, ip)
+	v := h.Screener.Decide(screen.Input{
+		FormID:    formID,
+		Fields:    data,
+		IP:        ip,
+		Rules:     rules,
+		Threshold: h.effectiveThreshold(form),
+	})
+	// The threshold comes back from the verdict, not from the local: Decide
+	// clamps, and persisting the unclamped value would record a bar the
+	// submission was never judged against.
+	score, signals, held, threshold := v.Score, v.Signals, v.Hold, v.Threshold
 
-	threshold := h.effectiveThreshold(form)
-	var (
-		score   int
-		signals []spam.Signal
-		held    bool
-	)
-
-	switch {
-	case ruleHit && matched.Kind == filter.KindAllow:
-		// Accepted outright, scoring skipped — including the repeat-IP check,
-		// which is the point of an allowlist entry for a busy office NAT.
-		h.countRuleHit(matched.ID)
-
-	case ruleHit && matched.Kind == filter.KindBlock:
-		// Held whatever the content scores. The score is stamped at the
-		// threshold so the breakdown still adds up, and the single "rule"
-		// signal carries the same weight — the content itself scored nothing,
-		// and the meter should not imply otherwise.
-		held = true
-		score = threshold
-		// Field stays empty: it means "the form field whose value matched", and
-		// putting the rule's *type* there rendered "field cidr · matched" to
-		// the operator. The label already says a filter rule fired, and Match
-		// carries the rule value.
-		signals = []spam.Signal{{Rule: spam.RuleBlocked, Match: matched.Value, Weight: threshold}}
-		h.countRuleHit(matched.ID)
-
-	default:
-		score, signals = spam.DetailWith(data, filter.Keywords(rules))
-		if repeated {
-			// Repeat-IP is stateful and lives outside the scorer, so it is
-			// stamped here. Weighted at the threshold so it holds on its own —
-			// matching the old behaviour, where a repeat IP was an outright
-			// drop — while keeping the breakdown's weights summing to the score.
-			signals = append(signals, spam.Signal{Rule: spam.RuleRepeatIP, Match: ip, Weight: threshold})
-			score += threshold
+	// Counting the hit is a database write, so it stays out of the decision:
+	// screening is pure and this is a side effect of having made it.
+	if v.Matched {
+		if v.MatchedRuleID == "" {
+			// A rule decided this and we cannot say which. Loud, because the
+			// silent version loses the operator's "N blocked" count.
+			log.Printf("submit: form %s: a filter rule matched with no ID; hit not counted", formID)
+		} else {
+			h.countRuleHit(v.MatchedRuleID)
 		}
-		held = score >= threshold
 	}
 
 	if held {
 		// Held, not dropped. The response below is indistinguishable from
 		// success so a bot learns nothing, but the submission is now
-		// recoverable: internal/spam used to bin it with no record at all, and
+		// recoverable: the pre-quarantine scorer used to bin it with no record at all, and
 		// a false positive was unrecoverable.
 		//
 		// Field values are never logged — the reason is diagnosable without
@@ -282,7 +223,7 @@ func (h *SubmitHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		storeSignals := make([]store.SpamSignal, 0, len(signals))
 		for _, sig := range signals {
 			storeSignals = append(storeSignals, store.SpamSignal{
-				Rule: sig.Rule, Field: sig.Field, Match: sig.Match, Weight: sig.Weight,
+				Check: sig.Check, Field: sig.Field, Match: sig.Match, Weight: sig.Weight,
 			})
 		}
 		if err := h.Store.CreateHeldSubmission(sub, score, threshold, storeSignals); err != nil {

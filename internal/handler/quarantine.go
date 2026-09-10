@@ -9,17 +9,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/barancezayirli/dsforms/internal/filter"
 	"github.com/barancezayirli/dsforms/internal/flash"
 	"github.com/barancezayirli/dsforms/internal/safe"
-	"github.com/barancezayirli/dsforms/internal/spam"
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
 )
 
 // QuarantineHandler serves the spam review queue and the filter rules screen.
 //
-// The queue exists because internal/spam used to drop a matching submission
+// The queue exists because the pre-quarantine scorer used to drop a matching submission
 // with no record kept, which made a false positive unrecoverable. Every action
 // here is about making that recoverable: see why it was held, put it back, or
 // confirm it was right.
@@ -57,14 +56,14 @@ type heldRow struct {
 
 // Rules returns the rule names that fired, for the Signals column.
 func (h heldRow) Rules() []string {
-	seen := map[spam.Rule]bool{}
+	seen := map[screen.Check]bool{}
 	var out []string
 	for _, sig := range h.Signals {
-		if seen[sig.Rule] {
+		if seen[sig.Check] {
 			continue
 		}
-		seen[sig.Rule] = true
-		out = append(out, RuleLabel(sig.Rule))
+		seen[sig.Check] = true
+		out = append(out, RuleLabel(sig.Check))
 	}
 	return out
 }
@@ -374,12 +373,12 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 
 	rules := make([]string, 0, len(signals))
 	for _, sig := range signals {
-		rules = append(rules, string(sig.Rule))
+		rules = append(rules, string(sig.Check))
 	}
 	// Field values are deliberately not logged, here as everywhere else: the
 	// rules and the score are what a weight-tuning exercise needs, and the
 	// submission itself stays in the database where it already is.
-	log.Printf("spam: FALSE POSITIVE reported for submission %s (form %s) — score %d, threshold %d, rules [%s]",
+	log.Printf("screen: FALSE POSITIVE reported for submission %s (form %s) — score %d, threshold %d, rules [%s]",
 		sub.ID, sub.FormID, sub.SpamScore, sub.HeldThreshold, strings.Join(rules, " "))
 
 	flash.Set(w, h.SecretKey, "success",
@@ -447,11 +446,16 @@ func plural(n int, word string) string {
 // filterRulesData backs the Filter rules screen.
 type filterRulesData struct {
 	PageData
-	Block     []filter.Rule
-	Allow     []filter.Rule
-	Keywords  []filter.Rule
+	Block     []screen.Rule
+	Allow     []screen.Rule
+	Keywords  []screen.Rule
 	Threshold int
 	Error     string
+
+	// Problems are stored rules that can never fire — typically written under an
+	// older normalisation. A block rule in that state fails open while looking
+	// active, so the operator is told rather than left to discover it.
+	Problems []screen.RuleProblem
 }
 
 // RulesPage renders the operator's block/allow lists and custom keywords.
@@ -467,10 +471,16 @@ func (h *QuarantineHandler) renderRules(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	problems := screen.CheckRules(rules)
+	if len(problems) > 0 {
+		log.Printf("rules: %d rule(s) can never match; see the filter rules screen", len(problems))
+	}
+
 	data := filterRulesData{
 		PageData:  h.Shell(w, r, "Filter rules", "rules"),
 		Threshold: h.DefaultThreshold,
 		Error:     errMsg,
+		Problems:  problems,
 	}
 	for _, rule := range rules {
 		// Every column is named explicitly. A rule with an unrecognised Kind used
@@ -479,11 +489,11 @@ func (h *QuarantineHandler) renderRules(w http.ResponseWriter, r *http.Request, 
 		// — never matched it. Claiming a protection that does not exist is worse
 		// than omitting the row.
 		switch {
-		case rule.Type == filter.TypeKeyword:
+		case rule.Type == screen.TypeKeyword:
 			data.Keywords = append(data.Keywords, rule)
-		case rule.Kind == filter.KindAllow:
+		case rule.Kind == screen.KindAllow:
 			data.Allow = append(data.Allow, rule)
-		case rule.Kind == filter.KindBlock:
+		case rule.Kind == screen.KindBlock:
 			data.Block = append(data.Block, rule)
 		default:
 			log.Printf("rules: rule %s has unknown kind %q; not displayed", rule.ID, rule.Kind)
