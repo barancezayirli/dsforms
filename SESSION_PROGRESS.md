@@ -335,6 +335,38 @@ restored row records a notification that was never sent, and nothing reads the
 column — no sweep, no retry, no admin action. Closing it properly means deciding
 what the operator sees and does, which is product design rather than debt.
 
+## Seventh pass — running every feature
+
+Not a review: the product started with a real SMTP sink and webhook receiver
+wired up, and every feature exercised through HTTP and the CLI. Two live bugs
+came out of it, neither of which any amount of reading had found.
+
+**An account could be created with no password at all.** Nothing enforced a
+length on any of the four paths that set one. Verified against a running
+instance: user "empty" with password "", HTTP 302 and the account created; then
+logged in with an empty password and got 200 on /admin and /admin/users, and
+created another user from that session. Reachable by accident — a form submitted
+with the field blank, or a deploy script with an unset variable. Now enforced in
+the store, where all four paths converge; the CLI needed no change because it
+already prints the store's error. Not enforced on login, so an upgraded instance
+does not lock anyone out.
+
+**An unrecognised subcommand started the server.** The switch over os.Args had no
+default, so `dsforms --help` served, and so would any typo. AGENT.md §4 already
+states the rule — in a switch over a closed set the default denies — written
+about handler code and true here unchanged.
+
+**Three things I misread as bugs before checking.** Worth recording because the
+pattern cost more time than the real findings. A batch of submissions was held
+that should not have been; the reason was the repeat-IP tracker, since every
+request came from 127.0.0.1 — the fix was a distinct X-Forwarded-For per
+submission. Search "found nothing" because the result row renders the sender's
+*name* and I grepped for the email. And url_in_name, gibberish and a custom
+keyword all appeared not to score, because they weigh 4, 3 and 5 against a
+threshold of 6 — confirmed firing by dropping the form's threshold to 1, which
+showed exactly those weights. In each case the product was right and the test
+was wrong.
+
 ## Accepted risks
 
 | Risk | Why accepted |
