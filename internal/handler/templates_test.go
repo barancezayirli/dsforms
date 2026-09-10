@@ -27,18 +27,7 @@ const templateDir = "../../templates"
 func realTemplates(t *testing.T) map[string]*template.Template {
 	t.Helper()
 
-	funcMap := template.FuncMap{
-		"add":              func(a, b int) int { return a + b },
-		"sub":              func(a, b int) int { return a - b },
-		"pct":              Percent,
-		"SparkViewBox":     SparkViewBox,
-		"FormSparkViewBox": FormSparkViewBox,
-		"ChartViewBox":     ChartViewBox,
-		"BarWidth":         BarWidth,
-		"ruleIcon":         RuleIcon,
-		"ruleLabel":        RuleLabel,
-		"initial":          Initial,
-	}
+	funcMap := TemplateFuncs()
 
 	base, err := template.New("base").Funcs(funcMap).ParseFiles(
 		filepath.Join(templateDir, "base.html"), filepath.Join(templateDir, "icons.html"))

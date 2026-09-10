@@ -30,7 +30,7 @@ func setupBackup(t *testing.T) (*store.Store, *chi.Mux, string, *BackupHandler) 
 		t.Fatalf("store.New error: %v", err)
 	}
 
-	funcMap := template.FuncMap{"add": func(a, b int) int { return a + b }}
+	funcMap := TemplateFuncs()
 	templates := make(map[string]*template.Template)
 
 	baseTmpl := template.Must(template.New("base").Funcs(funcMap).Parse(`{{define "base"}}{{template "content" .}}{{end}}`))

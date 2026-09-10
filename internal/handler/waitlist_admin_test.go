@@ -20,7 +20,7 @@ import (
 // testTemplates parses the real templates the same way main.go does.
 func testTemplates(t *testing.T) map[string]*template.Template {
 	t.Helper()
-	funcMap := template.FuncMap{"add": func(a, b int) int { return a + b }}
+	funcMap := TemplateFuncs()
 	// The real base.html, not a stub — these tests are the only ones that
 	// exercise the actual shell. It renders the icon sprite, so icons.html
 	// has to come with it, exactly as parseTemplates() pairs them in main.go.
