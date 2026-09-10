@@ -570,7 +570,28 @@ func (s *Store) ListUsers() ([]User, error) {
 }
 
 // CreateUser creates a new user with a bcrypt-hashed password.
+// MinPasswordLength is the shortest password this instance will store.
+//
+// Enforced on write, in the store, because that is where all four ways of
+// setting a password converge: the admin form, the account page, `dsforms user
+// add` and `dsforms user set-password`. There was no check on any of them, so an
+// account could be created with an EMPTY password and would then log in normally
+// with full admin rights — verified against a running instance before this was
+// added.
+//
+// Deliberately not enforced on login. An instance upgraded from a version
+// without this rule may hold shorter passwords, and rejecting them at the door
+// would lock people out of their own data to fix a problem they cannot then log
+// in to fix.
+const MinPasswordLength = 8
+
+// ErrPasswordTooShort is returned by CreateUser and UpdatePassword.
+var ErrPasswordTooShort = fmt.Errorf("password must be at least %d characters", MinPasswordLength)
+
 func (s *Store) CreateUser(username, password string) error {
+	if len(password) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if err != nil {
 		return fmt.Errorf("create user: %w", err)
@@ -588,6 +609,9 @@ func (s *Store) CreateUser(username, password string) error {
 
 // UpdatePassword updates a user's password and clears IsDefaultPassword.
 func (s *Store) UpdatePassword(userID, newPassword string) error {
+	if len(newPassword) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), 12)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)

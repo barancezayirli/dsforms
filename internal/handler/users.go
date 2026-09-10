@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -129,6 +130,13 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The store enforces this too, and that is the guarantee — this exists so the
+	// operator gets a specific sentence rather than a generic failure.
+	if len(password) < store.MinPasswordLength {
+		renderError(fmt.Sprintf("Password must be at least %d characters.", store.MinPasswordLength))
+		return
+	}
+
 	if err := h.Store.CreateUser(username, password); err != nil {
 		// Detect UNIQUE constraint violation as a duplicate username
 		if strings.Contains(err.Error(), "UNIQUE constraint") || strings.Contains(err.Error(), "duplicate") {
@@ -211,6 +219,11 @@ func (h *UsersHandler) UpdatePassword(w http.ResponseWriter, r *http.Request) {
 
 	if newPassword != confirmPassword {
 		renderError("Passwords do not match.")
+		return
+	}
+
+	if len(newPassword) < store.MinPasswordLength {
+		renderError(fmt.Sprintf("New password must be at least %d characters.", store.MinPasswordLength))
 		return
 	}
 
