@@ -577,7 +577,8 @@ only for icons, external requests and anchors.
 
 ## Open from the tenth pass
 
-- **A data race on `serverErrorPage`, already on main.** The review round on
+- **A data race on `serverErrorPage`, already on main. Closed in the eleventh
+  pass, below; the line numbers here predate the fix.** The review round on
   this branch found it, and it reproduces independently: one run in twenty of
   `TestEveryAdminRouteRequiresAuth` plus
   `TestPublicRoutesAreReachableWithoutASession` reported `DATA RACE`.
@@ -589,3 +590,86 @@ only for icons, external requests and anchors.
     has to move with it.
   - Not fixed here, to keep one concern per branch. Target: its own `fix/`
     branch, next.
+
+## Eleventh pass — each router owns its error pages
+
+The `serverErrorPage` race above is fixed on `fix/server-error-page-race`.
+`newRouter` now takes the templates and renders both error pages for its own
+router. `errorPages` and the package-level variable are gone, so nothing in
+`package main` is written at runtime any more.
+
+- **Why the hook existed.** chi's `Use` panics once a route is registered,
+  and `newRouter` registers `/healthz` straight after the middleware. So the
+  recovery middleware was fixed at construction, and a renderer chosen later
+  had to be reached through something it already held. A package variable was
+  the choice, and that is what made it shared. `routes()` had the templates
+  all along.
+- **Reproduced before fixing, with no race detector.**
+  `TestRoutersDoNotShareErrorPages` builds a plain router and then a styled
+  one. The plain router's 500 came back styled in five of five runs.
+- **Watched the guard fail.** I put one renderer back in a package variable
+  that every `newRouter` assigns. `plain 500` then failed with "a page this
+  router was never given". Restored from the commit, it passes.
+- **Before and after under `-race`**, running the two route tests with
+  `-count=50`: before, one of the 50 iterations reported `DATA RACE`, failing
+  both tests; after, none of the 50.
+- **Two more writers**, found on the way and gone with the variable:
+  - `TestErrorPagesRenderStyled404` also called `errorPages`, in parallel.
+  - `TestRecoveryRendersStyled500` restored the global in a cleanup. It now
+    runs with `t.Parallel()`.
+- **The wiring is now pinned too.** The silent-failure review found that no
+  test checked whether `routes()` hands its templates to `newRouter`: passing
+  `nil` there left the whole suite green. `TestRoutesServeTheStyledErrorPages`
+  asserts the styled 404 and 500 from the real route table. With that `nil`
+  put back, both of its rows fail.
+- **The per-template fallback is pinned.** The test review found that the
+  contract every nil-templates test relies on was unchecked: an all-or-nothing
+  `templates == nil` check left the suite green. `TestErrorPagesFallBackPerTemplate`
+  covers:
+  - a map missing each page
+  - each page failing to execute, where the status must survive
+  - a nil `500.html`, which is the one input that reaches the nested `recover()`
+
+  I broke the code three ways and each break failed the row meant for it:
+  - removing the nested recover crashes the test binary
+  - an all-or-nothing fallback serves the styled 500 page on a 404
+  - rendering into a buffer before writing the status sends 200 for both
+    pages
+- **A comment corrected.** The nested-recover comment said a second panic
+  "takes the process down". It doesn't: net/http recovers it and drops the
+  connection with no response.
+- **Declined:** folding `TestRecoveryRendersStyled500` and
+  `TestErrorPagesRenderStyled404` into the new tables. Two reviewers suggested
+  it. Both tests also check the stylesheet link and the Content-Type, which the
+  tables don't.
+- **One visible change.** The plain-text 404, which only routers built without
+  templates serve, now ends in a newline, because it goes through `http.Error`.
+  It also no longer logs its write error. That is accepted: `parseTemplates`
+  fails startup when 404.html or 500.html is missing, so production can't
+  build a router that serves it.
+
+## Open from the eleventh pass
+
+The silent-failure review of this branch found these. All of them predate the
+fix; the reviewer's probe gave identical output before and after it.
+
+- **A handler that writes and then panics sends a corrupted success.** The
+  recovery middleware renders the 500 into a response whose status may
+  already be on the wire.
+  - A CSV export that panics midway reaches the client as `200 text/csv`, with
+    its attachment filename and the error page appended to the file.
+  - Headers set before the panic, such as `Content-Disposition`, leak into the
+    500 as well.
+  - The fix needs a response wrapper that knows whether the header was sent.
+    Target: its own `fix/` branch.
+- **A template that fails to execute sends the right status with an empty or
+  truncated body.** `render` writes the header first, which is why the status
+  survives. A readable body means rendering into a buffer and falling back to
+  `http.Error`, and that must keep the status, which the new test pins. It
+  changes behavior, so it isn't done here.
+- **`panic recovered: %v` logs no method, path or stack**, so a panic in
+  production can't be traced to a route.
+- **A client disconnect is logged as `404.html template error: … broken pipe`**.
+  That blames the template instead of the connection, which breaks the §4 rule
+  that messages must not point away from the truth. The code logged it the
+  same way before it moved.
