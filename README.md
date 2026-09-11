@@ -48,7 +48,9 @@ It is deliberately small: **one Go binary, one file, no runtime dependencies.**
 - **CLI** for user management and snapshots from inside the container.
 - **~20MB image**, health check included.
 
-![The submission reader](docs/screenshots/reader.png)
+![The quarantine queue, showing why a submission was held](docs/screenshots/quarantine.png)
+
+<div align="center"><sub>Held spam, with the score and every signal behind it. One click puts a false positive back in the inbox.</sub></div>
 
 ## Quick start
 
