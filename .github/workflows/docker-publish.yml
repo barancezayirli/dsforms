@@ -45,3 +45,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Without this the image reports "dev" in the admin sidebar, which is
+          # what every published release did — the Dockerfile had no VERSION to
+          # stamp, so a tagged build was indistinguishable from a local one.
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}

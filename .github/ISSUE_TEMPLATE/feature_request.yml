@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose something dsforms should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        dsforms is deliberately narrow: one binary, one SQLite file, no runtime
+        dependencies. Proposals that keep it that way have a much better chance,
+        and it is kinder to say so here than after you have written the code.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting
+      description: >
+        The situation, not the solution. "I cannot tell which form a submission
+        came from in the notification email" is more useful than "add a template
+        variable", because there may be a simpler answer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What are you doing instead today
+      description: If there is a workaround, knowing it helps judge the urgency.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This does not add a runtime dependency or a second datastore
+        - label: I have checked the README and docs in case it already exists

@@ -4,7 +4,13 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o dsforms .
+
+# Stamped into main.version and shown in the admin sidebar. main.go has
+# documented this since the badge was added, but nothing passed it — so every
+# published release rendered the "dev" fallback, including tagged ones. The
+# default keeps a plain `docker build` honest about being an untagged build.
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o dsforms .
 
 # Runtime stage
 FROM alpine:3.19
