@@ -558,3 +558,34 @@ looked like a code problem was a measurement problem.
   catches a rule targeting a class nothing carries — the silent half — but
   nothing catches a rule that applies and is simply wrong. Every defect here
   was found by measuring a running browser, which remains the only way.
+
+## Tenth pass — the screenshot test came out
+
+`TestLandingPageShowsEveryScreenshot` turned main red on b26e4bf, a
+docs-only commit. It was removed on `test/remove-screenshot-test` rather than
+fixed. That was the owner's call: docs images should not gate the Go suite.
+
+Neither failure was a broken page. The test assumed `docs/index.html` was the
+only page using `docs/screenshots/`, so it called `quarantine.png` unused
+while `README.md` embeds it. It also required `loading=` on the overview
+image, which b26e4bf dropped when it moved the image into the first section.
+
+What is no longer checked: that a screenshot the landing page shows is
+committed and has width, height and alt. The README's embeds were never
+checked. `TestLandingPageIsSelfContained` still reads `docs/index.html`, but
+only for icons, external requests and anchors.
+
+## Open from the tenth pass
+
+- **A data race on `serverErrorPage`, already on main.** The review round on
+  this branch found it, and it reproduces independently: one run in twenty of
+  `TestEveryAdminRouteRequiresAuth` plus
+  `TestPublicRoutesAreReachableWithoutASession` reported `DATA RACE`.
+  - Cause: `errorPages()` assigns the package-level hook (`main.go:349`)
+    every time `routes()` builds a router, and those two parallel tests each
+    build one. CI has been passing only because the race is intermittent.
+  - Fix: carry the 500 renderer on the router or in `serverDeps` instead of
+    in a package variable. The test at `main_test.go:503` that swaps the hook
+    has to move with it.
+  - Not fixed here, to keep one concern per branch. Target: its own `fix/`
+    branch, next.
