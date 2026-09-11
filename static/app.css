@@ -481,9 +481,42 @@ select.input { appearance: none; padding-right: 26px; }
   z-index: 20;
   background-color: var(--color-bg);
 }
+.crumb-block { min-width: 0; }
 .crumb { font-size: 11px; color: var(--n-600); letter-spacing: .04em; }
 .crumb-title { font-size: 15px; font-weight: 500; letter-spacing: -.01em; }
-.header-actions { margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+/* The cluster takes the row's remaining space and aligns its contents to the
+   right edge, rather than being sized by its contents and pushed over by
+   `margin-left: auto`. Both of this header's layout bugs came from that auto
+   margin and from the intrinsic width it implied:
+
+   - A shrinkable flex item contributes its min-content size, not its basis, to
+     its container's intrinsic width. So `.search`'s `flex: 0 1 230px` sized this
+     cluster to less than `230px + gap + button`, and the page's primary action
+     wrapped underneath the search box at every desktop width.
+   - An auto margin is a spacer, not an alignment. On one line it pushes right;
+     once the cluster wraps to a line of its own it absorbs the leftover width as
+     a left indent, which is how the search box ended up floating 27px off the
+     content edge on a phone — an indent that vanished at 320px, where the
+     cluster happened to fill the row exactly, which is why this looked fine to
+     whoever last checked it.
+
+   nowrap is what makes the search box absorb a shortfall instead of ejecting a
+   button. A wrapping flex container assigns items to lines using their base
+   sizes and only shrinks within a line, so it wraps *before* it shrinks: three
+   pixels short at 680px was enough to drop the button onto a second row while
+   the 230px search box kept every pixel it had. With nowrap the search shrinks
+   towards its 150px min-width instead, and if even that is not enough the
+   header — which does wrap — carries the whole cluster to its own row. The
+   mobile rules restore wrapping, because two buttons and a search box do not
+   fit on one phone-width line at any size. */
+.header-actions {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 9px;
+}
 
 .search {
   display: flex; align-items: center; gap: 7px;
@@ -770,7 +803,14 @@ body.rail .sidebar .user-row { justify-content: center; }
   .header  { padding: 12px 14px; }
   .content { padding: 16px 14px 48px; }
   .banner, .flash { margin: 12px 14px 0; }
-  .header-actions .search { flex: 1 1 100%; order: 3; }
+
+  /* The header stacks into three rows: brand, title, actions. Each wrapped row
+     needs its own full-width basis and an explicit order — without them the
+     title shares the brand's row, squeezed to a third of its width, and the
+     actions land wherever wrapping leaves them. */
+  .crumb-block    { flex: 1 0 100%; order: 2; }
+  .header-actions { flex: 1 0 100%; order: 3; flex-wrap: wrap; }
+  .header-actions .search { flex: 1 1 150px; }
 }
 
 @media (min-width: 641px) {

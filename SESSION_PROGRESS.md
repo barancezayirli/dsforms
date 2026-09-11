@@ -506,3 +506,55 @@ the review found the branch did not assert its own central claim:
 ## Open questions
 
 _None currently — D1–D10 in the spec settle the handoff's open items._
+
+## Ninth pass — the header laid itself out by accident
+
+Reported from production on a phone: the search box and the "New form"
+button were indented from the content edge, and the page title sat beside
+the wordmark instead of on its own line.
+
+Three defects, all in `.header-actions`, all from treating a wrapping flex
+container as if it laid out in reading order.
+
+1. **`margin-left: auto` is a spacer, not an alignment.** On one line it
+   pushes the cluster right; once the cluster wraps to a line of its own it
+   absorbs the leftover width as a *left* indent. Measured 27px at 390px —
+   and 0px at 320px, where the cluster happened to fill the row exactly.
+   That width-dependence is why it survived every earlier pass: whoever
+   last checked it checked at a width where the bug is invisible.
+
+2. **A shrinkable flex item contributes its min-content size, not its
+   flex-basis, to its container's intrinsic width.** `.search`'s
+   `flex: 0 1 230px` sized the cluster to 335px, under `230 + gap + button`,
+   so the primary action wrapped under the search box and the header stood
+   105px tall. This was live in v1.0.0 on every desktop width and nobody
+   had reported it.
+
+3. **A wrapping flex container wraps before it shrinks.** Fixing (2) left
+   the wrap reachable just above the breakpoint: at 680px the cluster
+   resolved to 453px against contents needing 456, and three pixels ejected
+   a button while the search box kept all 230. `nowrap` makes the search
+   absorb the shortfall; the header still wraps, so the escape valve is
+   intact. Found by the review round, then confirmed by measurement.
+
+The title block was a bare `<div style="min-width:0">` with no class, so no
+rule could address it — the fix was unreachable before it was written.
+
+**Method note, worth carrying.** The first three measurements this pass were
+wrong: a leftover `/tmp/dsf-p1` process from the previous session held port
+8096 and shadowed the container's published port, so `docker run` succeeded,
+`curl` answered, and every number came from a stale binary. The fix appeared
+to do nothing. Check *what is actually listening* before concluding a change
+had no effect — `lsof -nP -iTCP:<port> -sTCP:LISTEN` settled it in one call.
+This is the same lesson as the two earlier ones in this file: the thing that
+looked like a code problem was a measurement problem.
+
+## Open questions from the ninth pass
+
+- The header is 162px tall at 390px and 205px on a two-button page at 320px.
+  Correct, and no worse than before, but chunky. Hiding the `.crumb` eyebrow
+  at mobile would reclaim ~18px. Not done: it is a design change, not a fix.
+- No automated check covers layout. `TestResponsiveRulesTargetClassesThatExist`
+  catches a rule targeting a class nothing carries — the silent half — but
+  nothing catches a rule that applies and is simply wrong. Every defect here
+  was found by measuring a running browser, which remains the only way.

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -888,5 +889,356 @@ func TestUnknownSubcommandDoesNotStartTheServer(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no switch over os.Args found; the scan is not reading the dispatch")
+	}
+}
+
+// TestResponsiveRulesTargetClassesThatExist guards a failure mode with no
+// symptom.
+//
+// The mobile header bug this was written for had two halves: an auto margin
+// that was never reset, and a title block that CSS could not address at all
+// because its <div> carried no class. The second half is the dangerous one — a
+// rule written against a class nothing carries does not warn, does not disturb
+// the desktop layout, and simply does nothing, so the fix ships and the bug
+// stays. Width-gating makes it worse: the only place the dead rule would have
+// been visible is the narrow viewport nobody rechecks.
+//
+// Scoped to @media blocks for that reason. Membership is checked against the
+// exact class tokens templates and app.js apply, not against the file text: a
+// substring test passes on prose, on href path segments and on hyphenated
+// siblings, so `.nav` would be satisfied by class="nav-backdrop" and `.export`
+// by href="/admin/backups/export".
+func TestResponsiveRulesTargetClassesThatExist(t *testing.T) {
+	t.Parallel()
+
+	css, err := staticFS.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatalf("read stylesheet: %v", err)
+	}
+	carried, err := carriedClasses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(carried) == 0 {
+		t.Fatal("no class attributes found in any template — the extractor stopped " +
+			"matching and this guard is checking nothing")
+	}
+
+	blocks := mediaBlocks(string(css))
+	if len(blocks) == 0 {
+		t.Fatal("app.css declares no @media blocks — either the stylesheet stopped " +
+			"being responsive or the extractor stopped matching")
+	}
+	checked := 0
+	for _, block := range blocks {
+		for _, class := range cssClassSelectors(block.body) {
+			checked++
+			if !carries(carried, class) {
+				t.Errorf("app.css %s styles .%s, but no template or app.js ever applies "+
+					"that class — the rule is dead and whatever it was meant to fix is "+
+					"still broken at that width", block.cond, class)
+			}
+		}
+	}
+	if checked < 10 {
+		t.Fatalf("only %d class selectors found across %d @media blocks — the "+
+			"selector extractor has stopped matching", checked, len(blocks))
+	}
+}
+
+// carriedClasses returns every class token the templates and app.js apply.
+//
+// A template class attribute can be partly computed —
+// class="flash-{{.Flash.Type}}" — so a token containing an action is kept as
+// the literal prefix before it and matched as a prefix. That is deliberately
+// permissive: this guard exists to catch a class nothing carries, not to police
+// how one is spelled.
+func carriedClasses() (map[string]bool, error) {
+	out := map[string]bool{}
+
+	entries, err := templateFS.ReadDir("templates")
+	if err != nil {
+		return nil, fmt.Errorf("read templates dir: %w", err)
+	}
+	attr := regexp.MustCompile(`class="([^"]*)"`)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		body, err := templateFS.ReadFile("templates/" + e.Name())
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", e.Name(), err)
+		}
+		for _, m := range attr.FindAllStringSubmatch(string(body), -1) {
+			for _, tok := range strings.Fields(m[1]) {
+				out[tok] = true
+			}
+		}
+	}
+
+	// app.js applies classes the templates never spell — body.nav-open and
+	// body.rail among them — and it applies them only through classList. Reading
+	// every quoted identifier instead would harvest tag names, event names and
+	// selectors: querySelector('form') would make a dead `.form` rule look live.
+	js, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		return nil, fmt.Errorf("read app.js: %w", err)
+	}
+	applied := regexp.MustCompile(`classList\.(?:add|remove|toggle|replace)\(\s*['"]([A-Za-z_][\w-]*)['"]`)
+	for _, m := range applied.FindAllStringSubmatch(string(js), -1) {
+		out[m[1]] = true
+	}
+	return out, nil
+}
+
+// carries reports whether class is applied somewhere, allowing a token that was
+// truncated at a template action to match as a prefix.
+//
+// A token that is *entirely* an action — class="{{.Kind}}" — has no literal
+// prefix, and treating an empty prefix as a wildcard would accept every class
+// name ever written. Those tokens are skipped: a class only ever produced by a
+// computed value cannot be verified from the template text either way, and a
+// guard that accepts everything is the failure this whole test exists to catch.
+func carries(carried map[string]bool, class string) bool {
+	if carried[class] {
+		return true
+	}
+	for tok := range carried {
+		prefix := literalPrefix(tok)
+		if prefix != tok && prefix != "" && strings.HasPrefix(class, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func literalPrefix(token string) string {
+	if i := strings.Index(token, "{{"); i >= 0 {
+		return token[:i]
+	}
+	return token
+}
+
+type mediaBlock struct {
+	cond string // the @media condition, for the failure message
+	body string
+}
+
+// mediaBlocks returns each @media block's body. The at-rule is matched
+// case-insensitively because CSS treats it that way, so a stylesheet written
+// @MEDIA would otherwise be skipped in full without the count floor noticing —
+// three of this file's four blocks would still clear it.
+//
+// It counts braces rather than matching a regexp because the blocks nest rules
+// inside them, and it strips comments and quoted strings first: a brace inside url("a}b.png") or inside a
+// prose comment would otherwise end the block early and silently drop every
+// rule after it from the scan.
+func mediaBlocks(css string) []mediaBlock {
+	css = blankNonCode(css)
+	var out []mediaBlock
+	for _, at := range regexp.MustCompile(`(?i)@media[^{]*\{`).FindAllStringIndex(css, -1) {
+		depth, end := 1, -1
+		for i := at[1]; i < len(css) && depth > 0; i++ {
+			switch css[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				end = i
+			}
+		}
+		if end < 0 {
+			continue
+		}
+		out = append(out, mediaBlock{
+			cond: strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(css[at[0]:at[1]]), "{")),
+			body: css[at[1]:end],
+		})
+	}
+	return out
+}
+
+// blankNonCode replaces the contents of comments and quoted strings with
+// spaces, preserving every byte offset so the result can be scanned as if it
+// were the original. Braces and dots inside them stop counting: a comment
+// mentioning "e.g." would otherwise be read as a selector naming .g.
+func blankNonCode(css string) string {
+	b := []byte(css)
+	for i := 0; i < len(b); {
+		switch {
+		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
+			j := i + 2
+			for ; j+1 < len(b) && !(b[j] == '*' && b[j+1] == '/'); j++ {
+				b[j] = ' '
+			}
+			i = j + 2
+		case b[i] == '"' || b[i] == '\'':
+			quote := b[i]
+			j := i + 1
+			for ; j < len(b) && b[j] != quote; j++ {
+				if b[j] == '\\' && j+1 < len(b) {
+					b[j] = ' '
+					j++
+				}
+				b[j] = ' '
+			}
+			i = j + 1
+		default:
+			i++
+		}
+	}
+	return string(b)
+}
+
+// cssClassSelectors returns the class names named in a block's selectors. It
+// reads only the text before each rule's opening brace, so declarations — where
+// a value like `1 1 100%` carries no dot anyway — are ignored.
+func cssClassSelectors(block string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, rule := range strings.Split(block, "}") {
+		selector, _, ok := strings.Cut(rule, "{")
+		if !ok {
+			continue
+		}
+		for _, m := range regexp.MustCompile(`\.([A-Za-z_][\w-]*)`).FindAllStringSubmatch(selector, -1) {
+			if !seen[m[1]] {
+				seen[m[1]] = true
+				out = append(out, m[1])
+			}
+		}
+	}
+	return out
+}
+
+// TestMediaBlockExtractorsHandleTheCasesThatWouldSilenceThem exercises the two
+// extractors against input that must trip them and input that must not.
+//
+// Both failures they guard against are silent by construction: a brace inside a
+// url() truncates a block and every rule after it goes unscanned, while a dot
+// inside a comment invents a class and fails the build with a nonsense message.
+// Neither shows up as a failing assertion in the guard itself — the guard just
+// quietly checks less, or checks the wrong thing.
+func TestMediaBlockExtractorsHandleTheCasesThatWouldSilenceThem(t *testing.T) {
+	t.Parallel()
+
+	t.Run("blocks", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name string
+			css  string
+			want []string // classes found across every block
+		}{
+			{
+				name: "plain block",
+				css:  `@media (max-width: 640px) { .a { z: 1 } .b { z: 2 } }`,
+				want: []string{"a", "b"},
+			},
+			{
+				name: "brace inside url() must not end the block",
+				css:  `@media print { .a { background: url("a}b.png") } .after { z: 1 } }`,
+				want: []string{"a", "after"},
+			},
+			{
+				name: "brace inside a content string must not end the block",
+				css:  `@media print { .a::after { content: "}" } .after { z: 1 } }`,
+				want: []string{"a", "after"},
+			},
+			{
+				name: "nested media keeps the inner rules",
+				css:  `@media print { @media (min-width: 10px) { .inner { z: 1 } } .outer { z: 2 } }`,
+				want: []string{"inner", "outer"},
+			},
+			{
+				name: "rules outside any media block are not scanned",
+				css:  `.desktop { z: 1 } @media print { .mobile { z: 2 } }`,
+				want: []string{"mobile"},
+			},
+			{
+				// CSS at-rules are case-insensitive. A case-sensitive extractor
+				// skips the block silently, and a count floor does not catch it
+				// while the file's other blocks still clear the floor.
+				name: "at-rule casing does not hide a block",
+				css:  `@MEDIA print { .shouty { z: 1 } }`,
+				want: []string{"shouty"},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				var got []string
+				seen := map[string]bool{}
+				for _, b := range mediaBlocks(tc.css) {
+					for _, c := range cssClassSelectors(b.body) {
+						if !seen[c] {
+							seen[c] = true
+							got = append(got, c)
+						}
+					}
+				}
+				sort.Strings(got)
+				want := append([]string(nil), tc.want...)
+				sort.Strings(want)
+				if !slices.Equal(got, want) {
+					t.Errorf("classes = %v, want %v", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("comments invent no classes", func(t *testing.T) {
+		t.Parallel()
+		css := `@media print { /* see fig.4, e.g. app.css and .not-a-rule */ .real { z: 1 } }`
+		var got []string
+		for _, b := range mediaBlocks(css) {
+			got = append(got, cssClassSelectors(b.body)...)
+		}
+		if !slices.Equal(got, []string{"real"}) {
+			t.Errorf("classes = %v, want [real] — prose in a comment was read as a selector", got)
+		}
+	})
+
+	t.Run("condition is reported", func(t *testing.T) {
+		t.Parallel()
+		blocks := mediaBlocks(`@media (max-width: 640px) { .a { z: 1 } }`)
+		if len(blocks) != 1 {
+			t.Fatalf("found %d blocks, want 1", len(blocks))
+		}
+		if blocks[0].cond != "@media (max-width: 640px)" {
+			t.Errorf("cond = %q — the failure message would not say which breakpoint", blocks[0].cond)
+		}
+	})
+}
+
+// TestCarriedClassesDistinguishesAppliedFromMentioned pins the predicate that
+// decides whether a class exists.
+//
+// The version this replaces matched each class name as a word against the
+// concatenated text of every template, which passes on any prose, href segment
+// or hyphenated sibling that happens to contain it: `.nav` was satisfied by
+// class="nav-backdrop", `.export` by href="/admin/backups/export", `.title` by
+// a <title> element. Those are the rows that must now fail.
+func TestCarriedClassesDistinguishesAppliedFromMentioned(t *testing.T) {
+	t.Parallel()
+
+	carried, err := carriedClasses()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Applied by a real template or by app.js.
+	for _, class := range []string{"crumb-block", "header-actions", "search", "nav-backdrop", "nav-open", "rail"} {
+		if !carries(carried, class) {
+			t.Errorf(".%s is applied in this tree but the guard says it is not — "+
+				"live rules would be reported as dead", class)
+		}
+	}
+
+	// Present in the text, never applied as a class. Each was a false pass
+	// under the substring predicate.
+	for _, class := range []string{"nav", "export", "rules", "admin", "new", "title", "form", "user", "waitlist"} {
+		if carries(carried, class) {
+			t.Errorf(".%s is never applied as a class, but the guard accepts it — "+
+				"a dead rule named .%s would pass unnoticed", class, class)
+		}
 	}
 }
