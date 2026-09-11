@@ -10,7 +10,7 @@
 [![Go](https://img.shields.io/github/go-mod/go-version/barancezayirli/dsforms)](go.mod)
 [![Image](https://img.shields.io/badge/ghcr.io-dsforms-7c6cf0)](https://github.com/barancezayirli/dsforms/pkgs/container/dsforms)
 
-[Quick start](#quick-start) · [Documentation](docs/) · [Live demo of the UI](https://barancezayirli.github.io/dsforms/)
+[Quick start](#quick-start) · [Documentation](docs/) · [Website](https://barancezayirli.github.io/dsforms/)
 
 </div>
 
@@ -26,8 +26,6 @@ out about the pricing change with everyone else.
 dsforms is the boring alternative you run yourself. Point your form at it and
 every submission lands in a SQLite file on a $5 VPS that you can copy, query or
 delete. No per-submission fee, no vendor, no Redis, no Postgres.
-
-It is deliberately small: **one Go binary, one file, no runtime dependencies.**
 
 ## Features
 
@@ -49,9 +47,6 @@ It is deliberately small: **one Go binary, one file, no runtime dependencies.**
 - **~20MB image**, health check included.
 
 ![The quarantine queue, showing why a submission was held](docs/screenshots/quarantine.png)
-
-<div align="center"><sub>Held spam, with the score and every signal behind it. One click puts a false positive back in the inbox.</sub></div>
-
 ## Quick start
 
 ```bash
@@ -81,8 +76,7 @@ Create a form in the admin, then paste the snippet it gives you:
 </form>
 ```
 
-That is the whole integration. Submissions appear in the admin and trigger
-whatever notifications you configured.
+That is the whole integration.
 
 ## HTML form options
 
@@ -97,17 +91,14 @@ Add these hidden fields to change what happens:
 <input type="text" name="_honeypot" style="display:none" tabindex="-1" autocomplete="off">
 ```
 
-**Redirect rules.** `_redirect` comes from the browser, so it is not trusted on
-its own. It is accepted when it is a path on this instance, a URL on the same
-origin as the form's configured **Redirect after submit**, or a URL on the same
-origin as `BASE_URL`. Anything else is ignored and the visitor goes to the
-form's configured redirect, or the built-in success page — the submission is
-still stored and handled normally, because a redirect the server will not follow
-is no reason to lose someone's message.
+**Redirect rules.** `_redirect` comes from the browser, so it is only accepted
+if it is a path on this instance, or a URL on the same origin as `BASE_URL` or
+the form's configured **Redirect after submit**. Anything else falls back to that
+configured redirect — the submission is still stored either way.
 
-In practice: set **Redirect after submit** to a URL on your own site, and
-`_redirect` then works for any page on it. Without that rule anyone could use
-your endpoint to bounce visitors from your domain to theirs.
+So: point **Redirect after submit** at your own site and `_redirect` works for
+any page on it. Without the rule, anyone could use your endpoint to bounce
+visitors from your domain to theirs.
 
 **JSON instead of a redirect** — send `Accept: application/json`:
 
@@ -143,9 +134,10 @@ Found something? Please report it privately — see **[SECURITY.md](SECURITY.md)
 
 ## Contributing
 
-Issues and pull requests are welcome. **[CONTRIBUTING.md](CONTRIBUTING.md)** is
-short; [`AGENT.md`](AGENT.md) is the real working agreement and worth a read
-before a first patch, particularly the testing section.
+Issues and pull requests are welcome — start with
+**[CONTRIBUTING.md](CONTRIBUTING.md)**. [`AGENT.md`](AGENT.md) is the working
+agreement this project actually runs on, and its testing section is worth
+reading before a first patch.
 
 ## Licence
 
@@ -163,5 +155,3 @@ applies from the next release onward.
 Built by [Baran Cezayirli](https://barancezayirli.com). If dsforms saves you a
 subscription, a [coffee](https://buymeacoffee.com/barancezayirli) is very
 welcome — and a ⭐ helps other people find it.
-
-<a href="https://buymeacoffee.com/barancezayirli"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd00?logo=buymeacoffee&logoColor=000" alt="Buy me a coffee"></a>
