@@ -38,6 +38,43 @@ func testRouter(t *testing.T) (*chi.Mux, *store.Store) {
 	}), s
 }
 
+// TestRoutesServeTheStyledErrorPages pins the production wiring of the error
+// pages, not just newRouter's ability to render them.
+//
+// The styled-page tests in main_test.go build their own router, so nothing
+// checked that routes() hands its templates over. Passing nil there served
+// plain-text 404s and 500s from the real route table with the whole suite green.
+func TestRoutesServeTheStyledErrorPages(t *testing.T) {
+	t.Parallel()
+	r, _ := testRouter(t)
+	r.Get("/boom", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+		want       string
+	}{
+		{"404", "/definitely-not-a-route", http.StatusNotFound, "Nothing here"},
+		{"500", "/boom", http.StatusInternalServerError, "Something went wrong"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest("GET", tt.path, nil))
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("GET %s status = %d, want %d", tt.path, w.Code, tt.wantStatus)
+			}
+			if !strings.Contains(w.Body.String(), tt.want) {
+				t.Errorf("GET %s did not serve the styled page (no %q); got %.160q",
+					tt.path, tt.want, w.Body.String())
+			}
+		})
+	}
+}
+
 // TestEveryAdminRouteRequiresAuth is the one this extraction exists for.
 //
 // Every route registration lived inline in main(), which no test could call — so

@@ -230,8 +230,30 @@ func staticHandler() http.Handler {
 // makes /healthz fail.
 type healthCheck func(context.Context) error
 
-func newRouter(healthy healthCheck) *chi.Mux {
+// newRouter builds the middleware stack, /healthz and the error pages.
+//
+// The error pages render from templates and fall back to plain text for any
+// template the map lacks, so a router built with nil answers in plain text.
+// The recovery middleware has to be registered before any route (chi's Use
+// panics after one), so newRouter decides what it renders. It used to read a
+// package-level variable assigned later instead, which every router in the
+// process shared. Production builds one router, so only tests saw another
+// router's page, and they raced on the variable.
+func newRouter(healthy healthCheck, templates map[string]*template.Template) *chi.Mux {
 	r := chi.NewRouter()
+
+	render := func(w http.ResponseWriter, name string, status int, fallback string) {
+		tmpl, ok := templates[name]
+		if !ok {
+			http.Error(w, fallback, status)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		if err := tmpl.ExecuteTemplate(w, name, nil); err != nil {
+			log.Printf("%s template error: %v", name, err)
+		}
+	}
 
 	// Recovery middleware — must be first so it wraps all other middleware
 	r.Use(func(next http.Handler) http.Handler {
@@ -244,16 +266,16 @@ func newRouter(healthy healthCheck) *chi.Mux {
 				log.Printf("panic recovered: %v", rec)
 
 				// Render the styled page, but never let the recovery path panic
-				// a second time — a panic in here is unrecoverable and takes the
-				// process down, and the original panic may well have come from a
-				// template. The nested recover buys the plain-text fallback.
+				// a second time: net/http would recover that one itself and
+				// drop the connection with no response at all. The nested
+				// recover buys a plain-text 500 instead.
 				defer func() {
 					if again := recover(); again != nil {
 						log.Printf("panic while rendering the error page: %v", again)
 						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 					}
 				}()
-				serverErrorPage(w)
+				render(w, "500.html", http.StatusInternalServerError, "Internal Server Error")
 			}()
 			next.ServeHTTP(w, r)
 		})
@@ -309,53 +331,11 @@ func newRouter(healthy healthCheck) *chi.Mux {
 		}
 	})
 
-	// Plain-text fallback so a router built without templates still answers
-	// correctly; errorPages upgrades this to the styled page in main().
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		if _, err := w.Write([]byte("Page not found")); err != nil {
-			log.Printf("404 write error: %v", err)
-		}
-	})
-
-	return r
-}
-
-// errorPages wires the styled 404 template into the router and installs the
-// styled 500 renderer. Both templates existed in templates/ since before this
-// redesign but were never parsed or routed.
-func errorPages(r *chi.Mux, templates map[string]*template.Template) {
-	render := func(w http.ResponseWriter, name string, status int, fallback string) {
-		tmpl, ok := templates[name]
-		if !ok {
-			http.Error(w, fallback, status)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(status)
-		if err := tmpl.ExecuteTemplate(w, name, nil); err != nil {
-			log.Printf("%s template error: %v", name, err)
-		}
-	}
-
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		render(w, "404.html", http.StatusNotFound, "Page not found")
 	})
 
-	// Swap the plain-text fallback for the styled page now that templates are
-	// parsed. The recovery middleware in newRouter is the only caller, and it
-	// guards this call with its own recover(): rendering a 500 can itself panic
-	// if the template is the thing that broke.
-	serverErrorPage = func(w http.ResponseWriter) {
-		render(w, "500.html", http.StatusInternalServerError, "Internal Server Error")
-	}
-}
-
-// serverErrorPage renders the styled 500. It is a package-level hook because
-// the templates are not parsed until main() runs; before then, and in tests
-// that build a router directly, it falls back to plain text.
-var serverErrorPage = func(w http.ResponseWriter) {
-	http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	return r
 }
 
 func rateLimitMiddleware(l *ratelimit.Limiter) func(http.Handler) http.Handler {
@@ -788,8 +768,7 @@ func routes(d serverDeps) *chi.Mux {
 		// failed restore.
 		var ok int
 		return d.store.DB().QueryRowContext(ctx, "SELECT 1").Scan(&ok)
-	})
-	errorPages(r, d.templates)
+	}, d.templates)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
 

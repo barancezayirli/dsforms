@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"html/template"
 	"io"
 	"maps"
 	"net/http"
@@ -45,7 +46,7 @@ func TestHealthzReportsAnUnusableDatabase(t *testing.T) {
 
 	r := newRouter(func(context.Context) error {
 		return errors.New("sql: database is closed")
-	})
+	}, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -65,7 +66,7 @@ func TestHealthzReportsAnUnusableDatabase(t *testing.T) {
 func TestHealthz(t *testing.T) {
 	t.Parallel()
 
-	r := newRouter(alwaysHealthy)
+	r := newRouter(alwaysHealthy, nil)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -81,7 +82,7 @@ func TestHealthz(t *testing.T) {
 
 func TestSecurityHeaders(t *testing.T) {
 	t.Parallel()
-	r := newRouter(alwaysHealthy)
+	r := newRouter(alwaysHealthy, nil)
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -109,7 +110,7 @@ func TestSecurityHeaders(t *testing.T) {
 
 func TestMaxBytesReader(t *testing.T) {
 	t.Parallel()
-	r := newRouter(alwaysHealthy)
+	r := newRouter(alwaysHealthy, nil)
 	// Add a test route that reads the body
 	r.Post("/test-body", func(w http.ResponseWriter, r *http.Request) {
 		_, err := io.ReadAll(r.Body)
@@ -161,7 +162,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 
 func TestNotFoundHandler(t *testing.T) {
 	t.Parallel()
-	r := newRouter(alwaysHealthy)
+	r := newRouter(alwaysHealthy, nil)
 	req := httptest.NewRequest("GET", "/nonexistent-route", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -175,7 +176,7 @@ func TestNotFoundHandler(t *testing.T) {
 
 func TestRecoveryMiddleware(t *testing.T) {
 	t.Parallel()
-	r := newRouter(alwaysHealthy)
+	r := newRouter(alwaysHealthy, nil)
 	r.Get("/panic-test", func(w http.ResponseWriter, r *http.Request) {
 		panic("test panic")
 	})
@@ -404,9 +405,10 @@ func TestStandalonePagesExecute(t *testing.T) {
 	}
 }
 
-// TestErrorPagesRenderStyled404 covers the upgrade errorPages performs over the
-// plain-text fallback in newRouter. templates/404.html and 500.html existed in
-// the repo before this redesign but were never parsed or routed.
+// TestErrorPagesRenderStyled404 covers the styled 404 that newRouter renders
+// when it is given templates, over its plain-text fallback. Before the Nocturne
+// redesign, templates/404.html and 500.html sat in the repo unparsed, and both
+// errors went out as plain strings.
 func TestErrorPagesRenderStyled404(t *testing.T) {
 	t.Parallel()
 
@@ -414,8 +416,7 @@ func TestErrorPagesRenderStyled404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTemplates: %v", err)
 	}
-	r := newRouter(alwaysHealthy)
-	errorPages(r, templates)
+	r := newRouter(alwaysHealthy, templates)
 
 	req := httptest.NewRequest("GET", "/nonexistent-route", nil)
 	w := httptest.NewRecorder()
@@ -488,24 +489,17 @@ func TestLandingPageIsSelfContained(t *testing.T) {
 	}
 }
 
-// TestRecoveryRendersStyled500 covers the other half of errorPages. 500.html has
-// been in templates/ since before the redesign and was parsed but never
-// rendered — the recovery middleware wrote a plain string, so the styled page
-// was dead weight.
+// TestRecoveryRendersStyled500 covers the 500 half of newRouter's error pages.
+// Before the Nocturne redesign, templates/500.html sat in the repo unparsed
+// and the recovery middleware wrote a plain string.
 func TestRecoveryRendersStyled500(t *testing.T) {
+	t.Parallel()
+
 	templates, err := parseTemplates()
 	if err != nil {
 		t.Fatalf("parseTemplates: %v", err)
 	}
-	r := newRouter(alwaysHealthy)
-	errorPages(r, templates)
-	t.Cleanup(func() {
-		// serverErrorPage is package-level, so restore the plain-text default
-		// rather than leaking a template-backed renderer into other tests.
-		serverErrorPage = func(w http.ResponseWriter) {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
-	})
+	r := newRouter(alwaysHealthy, templates)
 
 	r.Get("/boom", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
 
@@ -518,6 +512,134 @@ func TestRecoveryRendersStyled500(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "Something went wrong") {
 		t.Errorf("styled 500 not rendered; got %.160q", w.Body.String())
+	}
+}
+
+// TestRoutersDoNotShareErrorPages pins that each router renders its own error
+// pages.
+//
+// The styled 500 used to live in a package-level variable, assigned whenever a
+// separate errorPages step ran on a router, so one router's templates decided
+// how every other router in the process rendered a panic. Under -race it was a
+// data race between the parallel tests that built a styled router: those in
+// routes_test.go, through testRouter, and TestErrorPagesRenderStyled404. It
+// failed CI intermittently. Without the race detector it was a router rendering
+// a page it was never given, which is what this test checks, deterministically.
+func TestRoutersDoNotShareErrorPages(t *testing.T) {
+	t.Parallel()
+
+	templates, err := parseTemplates()
+	if err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	// Build order doesn't matter: with a shared page, whichever router did not
+	// set it last fails its row. The 404 was always per router; its rows are
+	// there to keep it that way.
+	plain := newRouter(alwaysHealthy, nil)
+	styled := newRouter(alwaysHealthy, templates)
+
+	for _, r := range []*chi.Mux{plain, styled} {
+		r.Get("/boom", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
+	}
+
+	tests := []struct {
+		name       string
+		router     *chi.Mux
+		path       string
+		wantStatus int
+		want       string // must appear in the body
+		notWant    string // must not appear; empty skips the check
+	}{
+		{"plain 500", plain, "/boom", http.StatusInternalServerError, "Internal Server Error", "Something went wrong"},
+		{"styled 500", styled, "/boom", http.StatusInternalServerError, "Something went wrong", ""},
+		{"plain 404", plain, "/nowhere", http.StatusNotFound, "Page not found", "Nothing here"},
+		{"styled 404", styled, "/nowhere", http.StatusNotFound, "Nothing here", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			w := httptest.NewRecorder()
+			tt.router.ServeHTTP(w, httptest.NewRequest("GET", tt.path, nil))
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
+			}
+			body := w.Body.String()
+			if !strings.Contains(body, tt.want) {
+				t.Errorf("body lacks %q; got %.160q", tt.want, body)
+			}
+			if tt.notWant != "" && strings.Contains(body, tt.notWant) {
+				t.Errorf("body contains %q, a page this router was never given; got %.160q",
+					tt.notWant, body)
+			}
+		})
+	}
+}
+
+// TestErrorPagesFallBackPerTemplate pins what newRouter does with a templates
+// map that is neither complete nor nil. Production can't build one, because
+// parseTemplates fails startup without 404.html or 500.html. But every test
+// that passes nil relies on the fallback being per template, and nothing
+// checked it: an all-or-nothing `templates == nil` passed the suite.
+//
+// The status is the part that must survive a broken template. render writes
+// the header before executing, so a template that fails still sends the right
+// code with an empty or truncated body. Rendering into a buffer first, the
+// obvious fix for the body, would send 200 instead unless it keeps this.
+func TestErrorPagesFallBackPerTemplate(t *testing.T) {
+	t.Parallel()
+
+	full, err := parseTemplates()
+	if err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	with := func(name string, tmpl *template.Template) map[string]*template.Template {
+		m := maps.Clone(full)
+		m[name] = tmpl
+		return m
+	}
+	without := func(name string) map[string]*template.Template {
+		m := maps.Clone(full)
+		delete(m, name)
+		return m
+	}
+	// Parses, then fails when executed: the sub-template does not exist.
+	broken := func(name string) *template.Template {
+		return template.Must(template.New(name).Parse(`{{template "missing"}}`))
+	}
+
+	tests := []struct {
+		name       string
+		templates  map[string]*template.Template
+		path       string
+		wantStatus int
+		want       string // must appear in the body; empty skips the check
+	}{
+		{"no 404.html: plain 404", without("404.html"), "/nowhere", http.StatusNotFound, "Page not found"},
+		{"no 404.html: styled 500 unaffected", without("404.html"), "/boom", http.StatusInternalServerError, "Something went wrong"},
+		{"no 500.html: plain 500", without("500.html"), "/boom", http.StatusInternalServerError, "Internal Server Error"},
+		{"no 500.html: styled 404 unaffected", without("500.html"), "/nowhere", http.StatusNotFound, "Nothing here"},
+		{"404.html fails to execute: status survives", with("404.html", broken("404.html")), "/nowhere", http.StatusNotFound, ""},
+		{"500.html fails to execute: status survives", with("500.html", broken("500.html")), "/boom", http.StatusInternalServerError, ""},
+		// The one input that reaches the nested recover: without it this
+		// panic escapes ServeHTTP and takes the test binary down.
+		{"500.html panics: nested recover answers", with("500.html", nil), "/boom", http.StatusInternalServerError, "Internal Server Error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := newRouter(alwaysHealthy, tt.templates)
+			r.Get("/boom", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest("GET", tt.path, nil))
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("GET %s status = %d, want %d", tt.path, w.Code, tt.wantStatus)
+			}
+			if tt.want != "" && !strings.Contains(w.Body.String(), tt.want) {
+				t.Errorf("GET %s body lacks %q; got %.160q", tt.path, tt.want, w.Body.String())
+			}
+		})
 	}
 }
 
