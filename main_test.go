@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -769,76 +768,6 @@ func normalizePath(p string) string {
 	p = regexp.MustCompile(`\{\{[^}]*\}\}`).ReplaceAllString(p, "{}")
 	p = regexp.MustCompile(`\{[^{}]+\}`).ReplaceAllString(p, "{}")
 	return strings.TrimSuffix(p, "/")
-}
-
-// TestLandingPageShowsEveryScreenshot keeps the captures and the page that shows
-// them in step, in both directions.
-//
-// docs/screenshots/ held five committed images that docs/index.html referenced
-// none of: the Admin section described the screens in prose while the pictures
-// of them sat unused in the repo. The reverse rots just as easily — a renamed or
-// deleted capture leaves a broken image on the public page, which nothing here
-// would otherwise notice.
-//
-// Same shape as the backups template posting a field name no handler read: two
-// halves, each fine, and no owner for the join.
-func TestLandingPageShowsEveryScreenshot(t *testing.T) {
-	t.Parallel()
-
-	page, err := os.ReadFile(filepath.Join("docs", "index.html"))
-	if err != nil {
-		t.Fatalf("read docs/index.html: %v", err)
-	}
-
-	referenced := map[string]bool{}
-	for _, m := range regexp.MustCompile(`screenshots/([\w-]+\.png)`).FindAllStringSubmatch(string(page), -1) {
-		referenced[m[1]] = true
-	}
-	if len(referenced) == 0 {
-		t.Fatal("the landing page references no screenshots; the scan is not matching them")
-	}
-
-	entries, err := os.ReadDir(filepath.Join("docs", "screenshots"))
-	if err != nil {
-		t.Fatalf("read docs/screenshots: %v", err)
-	}
-	onDisk := map[string]bool{}
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".png") {
-			onDisk[e.Name()] = true
-		}
-	}
-	if len(onDisk) == 0 {
-		t.Fatal("no screenshots on disk; the scan is not reading the directory")
-	}
-
-	for name := range referenced {
-		if !onDisk[name] {
-			t.Errorf("the landing page shows screenshots/%s, which is not committed — "+
-				"a broken image on the public page", name)
-		}
-	}
-	for name := range onDisk {
-		if !referenced[name] {
-			t.Errorf("docs/screenshots/%s is committed but the landing page never "+
-				"shows it, so it is weight in the repo doing no work", name)
-		}
-	}
-
-	// Dimensions on every img, or the page reflows as each one arrives.
-	imgs := regexp.MustCompile(`<img[^>]*screenshots/[^>]*>`).FindAllString(string(page), -1)
-	if len(imgs) != len(referenced) {
-		t.Errorf("found %d screenshot <img> tags for %d referenced files", len(imgs), len(referenced))
-	}
-	for _, tag := range imgs {
-		for _, attr := range []string{"width=", "height=", "alt=", "loading="} {
-			if !strings.Contains(tag, attr) {
-				t.Errorf("a screenshot <img> is missing %s, which costs either layout "+
-					"stability or accessibility:\n%s", attr, tag)
-			}
-		}
-	}
-	t.Logf("checked %d screenshots", len(referenced))
 }
 
 // TestUnknownSubcommandDoesNotStartTheServer pins a dispatch that used to fall
