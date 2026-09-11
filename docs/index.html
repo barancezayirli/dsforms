@@ -70,7 +70,12 @@ section h2{font-size:clamp(27px,3.2vw,34px)}
 /* Code cards: a header strip with a filename and a Copy button, separated from
    the body by the fading-rule idiom, then a scrollable <pre>. Sample lines are
    kept under ~60 characters so they never clip inside a narrow column. */
-.codecard{border-radius:10px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow-md);flex:1 1 360px;max-width:520px;min-width:0}
+.codecard{border-radius:10px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow-md);min-width:0}
+/* flex-basis follows the container's axis, so `1 1 360px` means "at least 360px
+   wide" in a .row and "at least 360px TALL" in a column — which is what left the
+   self-host cards standing 360px high around one line of shell. Sized only where
+   the axis is horizontal. */
+.row > .codecard{flex:1 1 360px;max-width:520px}
 .codecard header{display:flex;align-items:center;gap:9px;padding:10px 13px;
   background-image:linear-gradient(to right,transparent,var(--divider) 48px,var(--divider) calc(100% - 48px),transparent);
   background-repeat:no-repeat;background-position:bottom;background-size:100% 1px}
@@ -623,7 +628,7 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
       </div>
 
       <div style="flex:1 1 360px;min-width:0;display:flex;flex-direction:column;gap:14px">
-        <div class="codecard" style="max-width:none">
+        <div class="codecard">
           <header>
             <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-terminal-window"/></svg>
             <span class="name">clone and configure</span>
@@ -636,7 +641,7 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
 <span class="cm"># set SECRET_KEY and your SMTP details</span></pre>
         </div>
 
-        <div class="codecard" style="max-width:none">
+        <div class="codecard">
           <header>
             <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-terminal-window"/></svg>
             <span class="name">start it</span>
@@ -647,7 +652,7 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
 <pre><span class="pr">$</span> docker compose up -d</pre>
         </div>
 
-        <div class="codecard" style="max-width:none">
+        <div class="codecard">
           <header>
             <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-terminal-window"/></svg>
             <span class="name">log in</span>
