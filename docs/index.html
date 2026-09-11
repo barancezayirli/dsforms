@@ -271,7 +271,14 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
       </div>
     </div>
   </div>
-</section>
+
+    <figure style="margin:28px 0 0">
+      <img src="screenshots/form-edit.png" width="1280" height="800" loading="lazy" decoding="async"
+           alt="Form settings in the admin, including the paste-ready HTML snippet for the endpoint."
+           style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+      <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Step one, in full: name it, pick where notifications go, copy the snippet.</figcaption>
+    </figure>
+  </section>
 
 <!-- Spam filter -->
 <section id="spam">
@@ -283,7 +290,7 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
        the expensive failure is not spam getting through, it is a real customer
        disappearing.</p>
 
-    <div class="row" style="margin-top:32px;align-items:flex-start">
+    <div class="row" style="margin-top:32px;align-items:center">
       <div style="flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:14px">
         <div style="display:flex;gap:10px">
           <svg class="i" style="font-size:16px;color:var(--accent);margin-top:3px"><use href="#ph-check"/></svg>
@@ -308,52 +315,16 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         </div>
       </div>
 
-      <!-- The reviewer's actual panel, not a feature bullet about it. -->
-      <div class="card" style="flex:1 1 340px;max-width:460px;min-width:0">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-right:auto">why it was held</span>
-          <span class="tag" style="border:1px solid var(--accent);color:var(--accent);background:transparent">score 11 / 6</span>
-        </div>
-        <div style="font-size:15px;font-weight:500;margin-top:6px">Marketing Bot</div>
-        <div class="dim mono" style="font-size:12px;margin-top:2px">45.155.204.7 · Contact · 2d</div>
-
-        <div style="margin-top:16px">
-          <div class="meter"><i style="width:92%"></i></div>
-          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--n-600);margin-top:4px">
-            <span>0</span><span>threshold 6</span><span>12</span>
-          </div>
-        </div>
-
-        <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px">
-          <div class="rulebox">
-            <div style="display:flex;align-items:center;gap:8px">
-              <svg class="i" style="font-size:14px;color:var(--accent)"><use href="#ph-link"/></svg>
-              <span style="font-size:12px;font-weight:500">Link markup</span>
-              <span class="tag" style="margin-left:auto;border:1px solid var(--accent);color:var(--accent);background:transparent;font-size:10px">+6</span>
-            </div>
-            <div style="font-size:11px;color:var(--n-600);margin-top:5px">field <code class="mono">message</code> · matched</div>
-            <div class="chip" style="margin-top:5px">[url=</div>
-          </div>
-          <div class="rulebox">
-            <div style="display:flex;align-items:center;gap:8px">
-              <svg class="i" style="font-size:14px;color:var(--accent)"><use href="#ph-text-aa"/></svg>
-              <span style="font-size:12px;font-weight:500">Keyword hit</span>
-              <span class="tag" style="margin-left:auto;border:1px solid var(--accent);color:var(--accent);background:transparent;font-size:10px">+5</span>
-            </div>
-            <div style="font-size:11px;color:var(--n-600);margin-top:5px">field <code class="mono">message</code> · matched</div>
-            <div class="chip" style="margin-top:5px">backlinks</div>
-          </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
-          <span class="btn btn-primary" style="width:100%">
-            <svg class="i" style="font-size:15px"><use href="#ph-arrow-u-up-left"/></svg>Not spam
-          </span>
-          <span class="btn btn-secondary" style="width:100%">
-            <svg class="i" style="font-size:15px"><use href="#ph-prohibit"/></svg>Block this IP
-          </span>
-        </div>
-      </div>
+      <!-- The real panel, not a drawing of one. This was hand-built markup with
+           invented numbers until there was a screenshot of the actual screen —
+           which is a strange thing for a page arguing that the breakdown is the
+           feature. -->
+      <figure style="flex:0 1 415px;max-width:415px;min-width:0;margin:0">
+        <img src="screenshots/quarantine-panel.png" width="415" height="632" loading="lazy" decoding="async"
+             alt="The panel behind a held submission: score 14 against a threshold of 6, with two keyword hits and a multiple-raw-URLs signal, each naming the field and the text that matched."
+             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Held mail keeps its reasons. Not spam puts it back, unread, and sends the notification that was withheld.</figcaption>
+      </figure>
     </div>
   </div>
 </section>
@@ -450,7 +421,14 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
       </div>
     </div>
   </div>
-</section>
+
+    <figure style="margin:28px 0 0">
+      <img src="screenshots/waitlist.png" width="1280" height="800" loading="lazy" decoding="async"
+           alt="A waitlist in the admin: every signup in order, each with its position."
+           style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+      <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Signups in order, deduplicated by email, each with the position you can put in a confirmation.</figcaption>
+    </figure>
+  </section>
 
 <!-- Admin -->
 <section id="admin">
@@ -503,11 +481,11 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
              style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
         <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Overview — what arrived, what was held, and how often.</figcaption>
       </figure>
-      <figure style="margin:0;grid-column:1/-1">
+      <figure style="margin:0">
         <img src="screenshots/quarantine.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="The quarantine queue with a held submission open, showing the score, the threshold and each signal that contributed."
+             alt="The quarantine queue: everything the filter held, with scores and signal chips."
              style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Quarantine — the score, the threshold, and every signal behind it. One click puts a false positive back.</figcaption>
+        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Quarantine — everything held, oldest first, with one click to put it back.</figcaption>
       </figure>
       <figure style="margin:0">
         <img src="screenshots/reader.png" width="1280" height="800" loading="lazy" decoding="async"
@@ -516,34 +494,10 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Reader — opens over the list, arrows step through.</figcaption>
       </figure>
       <figure style="margin:0">
-        <img src="screenshots/submission.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="A single submission with its fields and spam score breakdown."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Submission — every field, and why it scored what it did.</figcaption>
-      </figure>
-      <figure style="margin:0">
-        <img src="screenshots/form-edit.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="Form settings, including the copy-paste HTML snippet for the endpoint."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Form settings — with the snippet to paste into your site.</figcaption>
-      </figure>
-      <figure style="margin:0">
         <img src="screenshots/filter-rules.png" width="1280" height="800" loading="lazy" decoding="async"
              alt="Filter rules: a blocklist by email, domain, IP or CIDR, custom keywords, and an allowlist."
              style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
         <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Filter rules — block a domain or a CIDR, allowlist the customer the filter keeps catching.</figcaption>
-      </figure>
-      <figure style="margin:0">
-        <img src="screenshots/waitlist.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="A waitlist with its signups in order, each with a position."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Waitlists — unique signups by email, in order, with a broadcast when you launch.</figcaption>
-      </figure>
-      <figure style="margin:0">
-        <img src="screenshots/login.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="The dsforms login screen."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Sign in — sessions in the database, not JWTs in a cookie.</figcaption>
       </figure>
     </div>
   </div>
