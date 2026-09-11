@@ -232,6 +232,12 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
 <span class="t">&lt;/form&gt;</span></pre>
     </div>
   </div>
+  <figure class="wrap" style="position:relative;margin:46px auto 0;padding-inline:28px">
+    <img src="screenshots/dashboard.png" width="1280" height="800" decoding="async"
+         alt="The dsforms overview: submissions over time, spam held, per-form breakdown and rate-limit activity."
+         style="width:100%;height:auto;display:block;border-radius:12px;border:1px solid rgba(255,255,255,.08);box-shadow:var(--shadow-lg)">
+  </figure>
+
 </section>
 
 <!-- How it works -->
@@ -275,13 +281,6 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         </p>
       </div>
     </div>
-  
-    <figure style="margin:28px 0 0">
-      <img src="screenshots/form-edit.png" width="1280" height="800" loading="lazy" decoding="async"
-           alt="Form settings in the admin, including the paste-ready HTML snippet for the endpoint."
-           style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-    </figure>
-  
   </div>
 </section>
 
@@ -289,14 +288,14 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
 <section id="spam">
   <div class="wrap">
     <div class="kick"><span></span><span>Spam filter</span></div>
-    <div class="row" style="margin-top:24px;align-items:center">
-      <div style="flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:14px">
-        <h2 style="margin:0">It holds spam. It does not silently eat mail.</h2>
-        <p class="lede" style="margin:0">A weighted filter with no configuration to get wrong.
-           Anything it holds stays reviewable for thirty days, with the exact reason
-           attached — because the expensive failure is not spam getting through, it is a
-           real customer disappearing.</p>
+    <h2>It holds spam. It does not silently eat mail.</h2>
+    <p class="lede">A weighted filter with no configuration to get wrong. Anything it
+       holds stays reviewable for thirty days, with the exact reason attached — because
+       the expensive failure is not spam getting through, it is a real customer
+       disappearing.</p>
 
+    <div class="row" style="margin-top:32px;align-items:flex-start">
+      <div style="flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:14px">
         <div style="display:flex;gap:10px">
           <svg class="i" style="font-size:16px;color:var(--accent);margin-top:3px"><use href="#ph-check"/></svg>
           <p style="font-size:14.5px">Link markup, injection probes, keyword pile-ups,
@@ -320,15 +319,52 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         </div>
       </div>
 
-      <!-- The real panel, not a drawing of one. This was hand-built markup with
-           invented numbers until there was a screenshot of the actual screen —
-           which is a strange thing for a page arguing that the breakdown is the
-           feature. -->
-      <figure style="flex:1 1 300px;max-width:340px;min-width:0;margin:0">
-        <img src="screenshots/quarantine-panel.png" width="415" height="632" loading="lazy" decoding="async"
-             alt="The panel behind a held submission: score 14 against a threshold of 6, with two keyword hits and a multiple-raw-URLs signal, each naming the field and the text that matched."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-      </figure>
+      <!-- The reviewer's actual panel, not a feature bullet about it. -->
+      <div class="card" style="flex:1 1 340px;max-width:460px;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-right:auto">why it was held</span>
+          <span class="tag" style="border:1px solid var(--accent);color:var(--accent);background:transparent">score 11 / 6</span>
+        </div>
+        <div style="font-size:15px;font-weight:500;margin-top:6px">Marketing Bot</div>
+        <div class="dim mono" style="font-size:12px;margin-top:2px">45.155.204.7 · Contact · 2d</div>
+
+        <div style="margin-top:16px">
+          <div class="meter"><i style="width:92%"></i></div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--n-600);margin-top:4px">
+            <span>0</span><span>threshold 6</span><span>12</span>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px">
+          <div class="rulebox">
+            <div style="display:flex;align-items:center;gap:8px">
+              <svg class="i" style="font-size:14px;color:var(--accent)"><use href="#ph-link"/></svg>
+              <span style="font-size:12px;font-weight:500">Link markup</span>
+              <span class="tag" style="margin-left:auto;border:1px solid var(--accent);color:var(--accent);background:transparent;font-size:10px">+6</span>
+            </div>
+            <div style="font-size:11px;color:var(--n-600);margin-top:5px">field <code class="mono">message</code> · matched</div>
+            <div class="chip" style="margin-top:5px">[url=</div>
+          </div>
+          <div class="rulebox">
+            <div style="display:flex;align-items:center;gap:8px">
+              <svg class="i" style="font-size:14px;color:var(--accent)"><use href="#ph-text-aa"/></svg>
+              <span style="font-size:12px;font-weight:500">Keyword hit</span>
+              <span class="tag" style="margin-left:auto;border:1px solid var(--accent);color:var(--accent);background:transparent;font-size:10px">+5</span>
+            </div>
+            <div style="font-size:11px;color:var(--n-600);margin-top:5px">field <code class="mono">message</code> · matched</div>
+            <div class="chip" style="margin-top:5px">backlinks</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+          <span class="btn btn-primary" style="width:100%">
+            <svg class="i" style="font-size:15px"><use href="#ph-arrow-u-up-left"/></svg>Not spam
+          </span>
+          <span class="btn btn-secondary" style="width:100%">
+            <svg class="i" style="font-size:15px"><use href="#ph-prohibit"/></svg>Block this IP
+          </span>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -424,13 +460,6 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         </div>
       </div>
     </div>
-  
-    <figure style="margin:28px 0 0">
-      <img src="screenshots/waitlist.png" width="1280" height="800" loading="lazy" decoding="async"
-           alt="A waitlist in the admin: every signup in order, each with its position."
-           style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-    </figure>
-  
   </div>
 </section>
 
@@ -471,38 +500,6 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
           Block or allow addresses, domains, IPs and CIDR ranges. Add your own keywords.
         </p>
       </div>
-    </div>
-
-    <!-- The screens themselves. The cards above describe them; a product page
-         that only describes its interface is asking to be taken on trust.
-         width/height are the real pixel dimensions so the browser reserves the
-         space and the page does not jump as they arrive; loading="lazy" keeps
-         them off the critical path, since they all sit well below the fold. -->
-    <div class="shots" style="margin-top:32px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(460px,1fr))">
-      <figure style="margin:0;grid-column:1/-1">
-        <img src="screenshots/dashboard.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="The dsforms overview: submissions over time, spam rate, per-form breakdown and rate-limit activity."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Overview — what arrived, what was held, and how often.</figcaption>
-      </figure>
-      <figure style="margin:0;grid-column:1/-1">
-        <img src="screenshots/quarantine.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="The quarantine queue: everything the filter held, with scores and signal chips."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Quarantine — everything the filter held, and why.</figcaption>
-      </figure>
-      <figure style="margin:0">
-        <img src="screenshots/reader.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="A submission open in the reader, over the list it came from."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Reader — opens over the list, arrows step through.</figcaption>
-      </figure>
-      <figure style="margin:0">
-        <img src="screenshots/filter-rules.png" width="1280" height="800" loading="lazy" decoding="async"
-             alt="Filter rules: a blocklist by email, domain, IP or CIDR, custom keywords, and an allowlist."
-             style="width:100%;height:auto;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.08)">
-        <figcaption class="muted" style="font-size:12.5px;margin-top:8px">Filter rules — blocklist, keywords, allowlist.</figcaption>
-      </figure>
     </div>
   </div>
 </section>
@@ -683,9 +680,6 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         <div style="display:flex;gap:10px;margin-top:24px;flex-wrap:wrap">
           <a class="btn btn-lg" style="border-color:var(--text)" href="https://github.com/barancezayirli/dsforms">
             <svg class="i" style="font-size:16px"><use href="#ph-github-logo"/></svg>Star on GitHub
-          </a>
-          <a class="btn btn-lg" style="border-color:var(--section-ghost);color:var(--a-300)" href="#self-host">
-            Deploy it now
           </a>
         </div>
       </div>
