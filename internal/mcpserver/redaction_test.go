@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -600,9 +601,9 @@ func TestAWithheldIPIsWithheldEverywhere(t *testing.T) {
 	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
 		t.Fatalf("CreateForm: %v", err)
 	}
-	raw, err := json.Marshal(map[string]string{"name": "Ada", "message": "Please quote 200 units."})
-	if err != nil {
-		t.Fatalf("marshalling: %v", err)
+	raw, merr := json.Marshal(map[string]string{"name": "Ada", "message": "Please quote 200 units."})
+	if merr != nil {
+		t.Fatalf("marshalling: %v", merr)
 	}
 	if err := h.store.CreateSubmission(store.Submission{
 		ID: "dirty", FormID: "contact", RawData: string(raw), IP: ip, CreatedAt: time.Now().UTC(),
@@ -615,8 +616,10 @@ func TestAWithheldIPIsWithheldEverywhere(t *testing.T) {
 		id     string
 		signal store.SpamSignal
 	}{
+		// screen leaves Field empty for a blocked-rule signal, so this matches
+		// what is really stored rather than what is convenient to assert on.
 		{"dirtyheld", store.SpamSignal{Check: "repeat_ip", Match: ip, Weight: 6}},
-		{"ruleheld", store.SpamSignal{Check: "rule", Field: "ip", Match: ip, Weight: 9}},
+		{"ruleheld", store.SpamSignal{Check: "rule", Match: ip, Weight: 9}},
 	}
 	for _, hs := range held {
 		if err := h.store.CreateHeldSubmission(
@@ -627,8 +630,15 @@ func TestAWithheldIPIsWithheldEverywhere(t *testing.T) {
 		}
 	}
 
+	// The rule list is the fourth route out: an ip rule's value is the same
+	// address, and it is what an ip rule is written from.
+	rule, err := h.store.AddFilterRule(screen.KindBlock, screen.TypeIP, ip, "noisy")
+	if err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+
 	session := h.connect(t)
-	want := []string{"dirty", "dirtyheld", "ruleheld"}
+	want := []string{"dirty", "dirtyheld", "ruleheld", rule.ID}
 	seen := map[string]bool{}
 	for _, name := range toolNames(t, session) {
 		args, ok := toolArgs[name]
@@ -687,5 +697,80 @@ func TestTheIPSignalIsShownWhenTheOperatorAsks(t *testing.T) {
 	}
 	if out.Signals[0].MatchWithheld {
 		t.Error("the match is marked withheld on an instance that shares IPs")
+	}
+}
+
+// TestAnUnparseableStoredAddressIsStillWithheld. ExtractIP stores whatever the
+// proxy header said without validating it, so a stored "203.0.113.9:41234" is
+// an address netip cannot parse. Shape alone was the second fix and regressed
+// this; the check name alone was the first and regressed the block rule. It
+// takes both tests.
+func TestAnUnparseableStoredAddressIsStillWithheld(t *testing.T) {
+	t.Parallel()
+
+	const withPort = "203.0.113.9:41234"
+	h := newHarness(t, "read")
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := h.store.CreateHeldSubmission(
+		store.Submission{ID: "held", FormID: "contact", RawData: `{"message":"hi"}`, IP: withPort, CreatedAt: time.Now().UTC()},
+		9, 6, []store.SpamSignal{{Check: "repeat_ip", Match: withPort, Weight: 6}},
+	); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	session := h.connect(t)
+	if body := wireText(t, call(t, session, "list_quarantine", nil).StructuredContent); strings.Contains(body, withPort) {
+		t.Errorf("an address netip cannot parse was returned anyway:\n%s", body)
+	}
+}
+
+// TestFilterRuleValuesAreShownWhenTheOperatorAsks. The other direction, so
+// withholding stays the option rather than becoming the behaviour: an operator
+// who has opted in still needs to read their own block list.
+func TestFilterRuleValuesAreShownWhenTheOperatorAsks(t *testing.T) {
+	t.Parallel()
+
+	h := newHarnessWithIPs(t, "read")
+	rule, err := h.store.AddFilterRule(screen.KindBlock, screen.TypeIP, "203.0.113.9", "noisy")
+	if err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+	session := h.connect(t)
+	out := decode[listRulesOut](t, call(t, session, "list_filter_rules", nil))
+
+	i := slices.IndexFunc(out.Rules, func(r ruleOut) bool { return r.ID == rule.ID })
+	if i < 0 {
+		t.Fatalf("no rule %q in %d results", rule.ID, len(out.Rules))
+	}
+	if out.Rules[i].Value != "203.0.113.9" {
+		t.Errorf("value = %q, want the address the operator opted in to see", out.Rules[i].Value)
+	}
+	if out.Rules[i].ValueWithheld {
+		t.Error("the value is marked withheld on an instance that shares addresses")
+	}
+}
+
+// TestANonAddressRuleIsAlwaysShown. Withholding is about addresses, not about
+// the rule list: an email or keyword rule is the operator's own words and
+// hiding it would make the tool useless for the case it is mostly used for.
+func TestANonAddressRuleIsAlwaysShown(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, "read")
+	rule, err := h.store.AddFilterRule(screen.KindBlock, screen.TypeEmail, "spammer@example.invalid", "")
+	if err != nil {
+		t.Fatalf("AddFilterRule: %v", err)
+	}
+	session := h.connect(t)
+	out := decode[listRulesOut](t, call(t, session, "list_filter_rules", nil))
+
+	i := slices.IndexFunc(out.Rules, func(r ruleOut) bool { return r.ID == rule.ID })
+	if i < 0 {
+		t.Fatalf("no rule %q in %d results", rule.ID, len(out.Rules))
+	}
+	if out.Rules[i].Value != "spammer@example.invalid" || out.Rules[i].ValueWithheld {
+		t.Errorf("an email rule was withheld: %+v", out.Rules[i])
 	}
 }

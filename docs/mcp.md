@@ -124,10 +124,15 @@ with a context window and usually a vendor behind it, so sending every
 submitter's address there should be a decision rather than a default. Set
 `MCP_INCLUDE_IPS=true` to include them. The admin UI shows them either way.
 
-That covers the spam breakdown too: the `repeat_ip` check records the address as
-what it matched, so on a quarantined submission that signal's `match` is
-withheld with `match_withheld` set, rather than handing back beside a blanked
-`ip` the address the setting is there to withhold.
+It covers every route an address can take out, not just the `ip` field. The
+`repeat_ip` check records the address as what it matched, and a matched block
+rule records the rule's value — which for an `ip` rule is the submitter's own
+address and for a `cidr` rule is the network containing it — so those come back
+with `match_withheld` set instead. `list_filter_rules` does the same for `ip`
+and `cidr` rules, with `value_withheld`: an `ip` rule is written *from* a
+submitter's address, so handing the rule list over would return through the back
+door exactly what the setting closes the front one to. Email, domain and keyword
+rules are your own words and are always shown.
 
 **Reading.** `list_submissions` defaults to unread and never includes
 quarantined submissions — `list_quarantine` is for those, and it carries the

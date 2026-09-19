@@ -182,9 +182,9 @@ type signalOut struct {
 	FieldWithheld bool   `json:"field_withheld,omitempty" jsonschema:"the field name carried a marker and is not being named"`
 	Match         string `json:"match,omitempty"`
 
-	// MatchWithheld says the same about the match, which for the repeat_ip
-	// check is the submitter's address.
-	MatchWithheld bool `json:"match_withheld,omitempty" jsonschema:"what matched is not being shown; for repeat_ip it is the submitter's IP address, which this instance withholds"`
+	// MatchWithheld says the same about the match: it was an address, or the
+	// check records one, and this instance does not share them.
+	MatchWithheld bool `json:"match_withheld,omitempty" jsonschema:"what matched was an IP address or network and this instance does not share them; the check still tells you why the submission was held"`
 	Weight        int  `json:"weight"`
 }
 
@@ -263,16 +263,18 @@ func (s *Server) toSignals(sigs []store.SpamSignal) []signalOut {
 			field, withheld = "", true
 		}
 
-		// The test is the shape of the value, not a list of check names.
+		// Two tests, and it takes both.
 		//
-		// A list was the first fix, naming repeat_ip, and it missed the block
-		// rule: screen stamps a matched rule's value as the match, so an ip
-		// rule's match is the submitter's address and a cidr rule's is the
-		// network containing it. Any check that records an address is covered
-		// by asking whether the thing being handed back is one, and a check
-		// added later is covered without anyone remembering this.
+		// The check name alone was the first fix and missed the block rule:
+		// screen stamps a matched rule's value as the match, so an ip rule's
+		// match is the submitter's address and a cidr rule's is the network
+		// containing it. The value's shape alone was the second and missed the
+		// case the first had covered: ExtractIP stores whatever the proxy
+		// header said, unvalidated, so a stored "203.0.113.9:41234" is an
+		// address that netip cannot parse. Either test alone is a regression
+		// against the other.
 		match, matchWithheld := clean["match"], false
-		if !s.opts.IncludeIPs && looksLikeAddress(match) {
+		if !s.opts.IncludeIPs && (sig.Check == screen.CheckRepeatIP || looksLikeAddress(match)) {
 			match, matchWithheld = "", true
 		}
 
@@ -390,13 +392,20 @@ type listRulesOut struct {
 }
 
 type ruleOut struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind" jsonschema:"block or allow"`
-	Type      string `json:"type" jsonschema:"email, domain, ip, cidr or keyword"`
-	Value     string `json:"value"`
-	Note      string `json:"note,omitempty"`
-	Hits      int    `json:"hits"`
-	CreatedAt string `json:"created_at"`
+	ID    string `json:"id"`
+	Kind  string `json:"kind" jsonschema:"block or allow"`
+	Type  string `json:"type" jsonschema:"email, domain, ip, cidr or keyword"`
+	Value string `json:"value,omitempty"`
+
+	// ValueWithheld marks an ip or cidr rule on an instance that does not share
+	// addresses. The rule's value for those types is an address — usually a
+	// submitter's, since that is what an ip rule is written from — so leaving it
+	// here would hand back through the rule list exactly what is withheld from
+	// the submission and from the spam breakdown.
+	ValueWithheld bool   `json:"value_withheld,omitempty" jsonschema:"this rule matches on an IP address or network and this instance does not share them"`
+	Note          string `json:"note,omitempty"`
+	Hits          int    `json:"hits"`
+	CreatedAt     string `json:"created_at"`
 }
 
 type statsIn struct {
@@ -644,8 +653,12 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		}
 		out := listRulesOut{Rules: make([]ruleOut, 0, len(rules))}
 		for _, r := range rules {
+			value, withheld := r.Value, false
+			if !s.opts.IncludeIPs && (r.Type == screen.TypeIP || r.Type == screen.TypeCIDR) {
+				value, withheld = "", true
+			}
 			out.Rules = append(out.Rules, ruleOut{
-				ID: r.ID, Kind: r.Kind, Type: r.Type, Value: r.Value,
+				ID: r.ID, Kind: r.Kind, Type: r.Type, Value: value, ValueWithheld: withheld,
 				Note: r.Note, Hits: r.Hits, CreatedAt: rfc3339(r.CreatedAt),
 			})
 		}
