@@ -19,7 +19,7 @@ import (
 // unscoped variant to reach for: a token is a personal credential, and its name
 // and scopes describe what someone else's automation is allowed to do.
 type TokensStore interface {
-	CreateAPIToken(userID, name string, scopes []string, expiry time.Duration) (string, store.APIToken, error)
+	CreateAPIToken(userID, name string, scopes, formIDs []string, expiry time.Duration) (string, store.APIToken, error)
 	DeleteAPIToken(userID, id string) (bool, error)
 	ListAPITokens(userID string) ([]store.APIToken, error)
 }
@@ -271,7 +271,7 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 		expiry = time.Duration(h.TTLDays) * 24 * time.Hour
 	}
 
-	raw, tok, err := h.Store.CreateAPIToken(user.ID, name, scopes.Strings(), expiry)
+	raw, tok, err := h.Store.CreateAPIToken(user.ID, name, scopes.Strings(), nil, expiry)
 	if err != nil {
 		log.Printf("tokens: create for %s: %v", user.ID, err)
 		fail("That token could not be created.")

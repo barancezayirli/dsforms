@@ -43,7 +43,7 @@ func TestCreateAPITokenStoresOnlyTheHash(t *testing.T) {
 	s := mustNew(t)
 	u := admin(t, s)
 
-	raw, tok, err := s.CreateAPIToken(u.ID, "laptop", []string{"read"}, 0)
+	raw, tok, err := s.CreateAPIToken(u.ID, "laptop", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
@@ -78,7 +78,7 @@ func TestGetAPITokenAcceptsANeverExpiringToken(t *testing.T) {
 	s := mustNew(t)
 	u := admin(t, s)
 
-	raw, created, err := s.CreateAPIToken(u.ID, "forever", []string{"read"}, 0)
+	raw, created, err := s.CreateAPIToken(u.ID, "forever", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
@@ -106,7 +106,7 @@ func TestGetAPITokenRejectsAnExpiredToken(t *testing.T) {
 	u := admin(t, s)
 
 	// A negative expiry rather than a sleep — the row is born expired.
-	raw, _, err := s.CreateAPIToken(u.ID, "stale", []string{"read"}, -time.Hour)
+	raw, _, err := s.CreateAPIToken(u.ID, "stale", []string{"read"}, nil, -time.Hour)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
@@ -122,7 +122,7 @@ func TestGetAPITokenRejectsAnUnknownToken(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	u := admin(t, s)
-	if _, _, err := s.CreateAPIToken(u.ID, "real", []string{"read"}, 0); err != nil {
+	if _, _, err := s.CreateAPIToken(u.ID, "real", []string{"read"}, nil, 0); err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestAPITokenScopesRoundTrip(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			raw, _, err := s.CreateAPIToken(u.ID, tt.name, tt.in, 0)
+			raw, _, err := s.CreateAPIToken(u.ID, tt.name, tt.in, nil, 0)
 			if err != nil {
 				t.Fatalf("CreateAPIToken error = %v", err)
 			}
@@ -176,10 +176,10 @@ func TestListAPITokensIsScopedToItsUser(t *testing.T) {
 	mine := admin(t, s)
 	theirs := newUser(t, s, "someone-else")
 
-	if _, _, err := s.CreateAPIToken(mine.ID, "mine", []string{"read"}, 0); err != nil {
+	if _, _, err := s.CreateAPIToken(mine.ID, "mine", []string{"read"}, nil, 0); err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
-	if _, _, err := s.CreateAPIToken(theirs.ID, "theirs", []string{"read"}, 0); err != nil {
+	if _, _, err := s.CreateAPIToken(theirs.ID, "theirs", []string{"read"}, nil, 0); err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
 
@@ -207,7 +207,7 @@ func TestDeleteAPITokenCannotRevokeAnotherUsersToken(t *testing.T) {
 	mine := admin(t, s)
 	theirs := newUser(t, s, "victim")
 
-	raw, victim, err := s.CreateAPIToken(theirs.ID, "theirs", []string{"read"}, 0)
+	raw, victim, err := s.CreateAPIToken(theirs.ID, "theirs", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
@@ -233,7 +233,7 @@ func TestDeleteAPITokenRevokesImmediately(t *testing.T) {
 	s := mustNew(t)
 	u := admin(t, s)
 
-	raw, tok, err := s.CreateAPIToken(u.ID, "revoke-me", []string{"read"}, 0)
+	raw, tok, err := s.CreateAPIToken(u.ID, "revoke-me", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
@@ -267,7 +267,7 @@ func TestDeletingAUserRevokesTheirTokens(t *testing.T) {
 	s := mustNew(t)
 	u := newUser(t, s, "departing")
 
-	raw, _, err := s.CreateAPIToken(u.ID, "laptop", []string{"read", "write"}, 0)
+	raw, _, err := s.CreateAPIToken(u.ID, "laptop", []string{"read", "write"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
@@ -290,7 +290,7 @@ func TestTouchAPITokenRecordsLastUse(t *testing.T) {
 	s := mustNew(t)
 	u := admin(t, s)
 
-	raw, tok, err := s.CreateAPIToken(u.ID, "laptop", []string{"read"}, 0)
+	raw, tok, err := s.CreateAPIToken(u.ID, "laptop", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
@@ -324,11 +324,11 @@ func TestTheDriverReturnsTimeOrStringFromADatetimeColumn(t *testing.T) {
 	s := mustNew(t)
 	u := admin(t, s)
 
-	_, set, err := s.CreateAPIToken(u.ID, "expiring", []string{"read"}, time.Hour)
+	_, set, err := s.CreateAPIToken(u.ID, "expiring", []string{"read"}, nil, time.Hour)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
-	_, unset, err := s.CreateAPIToken(u.ID, "forever", []string{"read"}, 0)
+	_, unset, err := s.CreateAPIToken(u.ID, "forever", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken error = %v", err)
 	}
@@ -355,7 +355,7 @@ func TestTheDriverReturnsTimeOrStringFromADatetimeColumn(t *testing.T) {
 func TestCreateAPITokenRejectsAnEmptyUser(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	if _, _, err := s.CreateAPIToken("", "orphan", []string{"read"}, 0); err == nil {
+	if _, _, err := s.CreateAPIToken("", "orphan", []string{"read"}, nil, 0); err == nil {
 		t.Fatal("CreateAPIToken(\"\", …) succeeded; an ownerless token cannot be revoked")
 	}
 }
@@ -369,7 +369,7 @@ func TestCreateAPITokensAreUnique(t *testing.T) {
 
 	seen := map[string]bool{}
 	for i := range 32 {
-		raw, _, err := s.CreateAPIToken(u.ID, "t", []string{"read"}, 0)
+		raw, _, err := s.CreateAPIToken(u.ID, "t", []string{"read"}, nil, 0)
 		if err != nil {
 			t.Fatalf("CreateAPIToken #%d error = %v", i, err)
 		}

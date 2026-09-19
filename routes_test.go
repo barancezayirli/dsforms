@@ -188,7 +188,7 @@ func mcpRouter(t *testing.T, scopes ...string) (*chi.Mux, *store.Store, string) 
 	if err != nil {
 		t.Fatalf("GetUserByUsername(admin): %v", err)
 	}
-	raw, _, err := s.CreateAPIToken(admin.ID, "test", scopes, 0)
+	raw, _, err := s.CreateAPIToken(admin.ID, "test", scopes, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -236,14 +236,14 @@ func TestMCPRefusesEveryUnauthenticatedShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
-	revoked, revokedTok, err := s.CreateAPIToken(admin.ID, "revoked", []string{"read"}, 0)
+	revoked, revokedTok, err := s.CreateAPIToken(admin.ID, "revoked", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 	if _, err := s.DeleteAPIToken(admin.ID, revokedTok.ID); err != nil {
 		t.Fatalf("DeleteAPIToken: %v", err)
 	}
-	expired, _, err := s.CreateAPIToken(admin.ID, "expired", []string{"read"}, -time.Hour)
+	expired, _, err := s.CreateAPIToken(admin.ID, "expired", []string{"read"}, nil, -time.Hour)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}

@@ -229,7 +229,7 @@ func TestTokenPageOnlyListsYourOwnTokens(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	colleague, _ := s.GetUserByUsername("colleague")
-	if _, _, err := s.CreateAPIToken(colleague.ID, "their-laptop", []string{"read"}, 0); err != nil {
+	if _, _, err := s.CreateAPIToken(colleague.ID, "their-laptop", []string{"read"}, nil, 0); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 	doTokenRequest(t, s, r, "POST", "/admin/tokens", url.Values{"name": {"my-laptop"}, "scopes": {"read"}}.Encode())
@@ -252,7 +252,7 @@ func TestDeleteTokenRevokesYourOwn(t *testing.T) {
 	s, r := setupTokens(t)
 
 	admin, _ := s.GetUserByUsername("admin")
-	raw, tok, err := s.CreateAPIToken(admin.ID, "mine", []string{"read"}, 0)
+	raw, tok, err := s.CreateAPIToken(admin.ID, "mine", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestDeleteTokenCannotRevokeAnothersToken(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	victim, _ := s.GetUserByUsername("victim")
-	raw, tok, err := s.CreateAPIToken(victim.ID, "theirs", []string{"read"}, 0)
+	raw, tok, err := s.CreateAPIToken(victim.ID, "theirs", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -337,11 +337,11 @@ func TestTokenListReportsUseAndScopes(t *testing.T) {
 	s, r := setupTokens(t)
 
 	admin, _ := s.GetUserByUsername("admin")
-	_, unused, err := s.CreateAPIToken(admin.ID, "unused", []string{"read"}, 0)
+	_, unused, err := s.CreateAPIToken(admin.ID, "unused", []string{"read"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	_, used, err := s.CreateAPIToken(admin.ID, "used", []string{"read", "delete"}, 0)
+	_, used, err := s.CreateAPIToken(admin.ID, "used", []string{"read", "delete"}, nil, 0)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}

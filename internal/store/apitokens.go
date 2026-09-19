@@ -36,6 +36,13 @@ type APIToken struct {
 	// does not understand must grant nothing, never everything.
 	Scopes []string
 
+	// FormIDs bounds the token to these forms. Empty means every form, and it
+	// has to: that is what the column holds for every token minted before
+	// scoping existed, and an upgrade that silently revoked live credentials
+	// would be worse than the feature is good. Read it through Scope() rather
+	// than testing the slice, so that reading lives in one place.
+	FormIDs []string
+
 	CreatedAt time.Time
 
 	// LastUsedAt is the zero time until the token is first presented. It is what
@@ -56,8 +63,18 @@ func (t APIToken) Expired(now time.Time) bool {
 	return !t.ExpiresAt.IsZero() && !now.Before(t.ExpiresAt)
 }
 
+// Scope is the set of forms this token may reach.
+//
+// A method for the same reason Expired is one: "empty means every form" is a
+// convention, and a convention re-derived at each call site is one that will be
+// got backwards somewhere. ParseFormScope owns it; this is how callers get to
+// it without touching the column format.
+func (t APIToken) Scope() FormScope {
+	return ParseFormScope(strings.Join(t.FormIDs, ","))
+}
+
 // apiTokenColumns is the shared select list, in the order scanAPIToken reads it.
-const apiTokenColumns = `id, user_id, name, scopes, created_at, last_used_at, expires_at`
+const apiTokenColumns = `id, user_id, name, scopes, form_ids, created_at, last_used_at, expires_at`
 
 // scanAPIToken reads one row of apiTokenColumns.
 //
@@ -79,12 +96,13 @@ const apiTokenColumns = `id, user_id, name, scopes, created_at, last_used_at, ex
 // changes under a dependency bump without any of our own code moving.
 func scanAPIToken(sc rowScanner) (APIToken, error) {
 	var t APIToken
-	var scopes string
+	var scopes, formIDs string
 	var lastUsed, expires any
-	if err := sc.Scan(&t.ID, &t.UserID, &t.Name, &scopes, &t.CreatedAt, &lastUsed, &expires); err != nil {
+	if err := sc.Scan(&t.ID, &t.UserID, &t.Name, &scopes, &formIDs, &t.CreatedAt, &lastUsed, &expires); err != nil {
 		return APIToken{}, err
 	}
 	t.Scopes = splitScopes(scopes)
+	t.FormIDs = splitScopes(formIDs)
 	t.LastUsedAt = sqliteTimeValue(lastUsed)
 	t.ExpiresAt = sqliteTimeValue(expires)
 	return t, nil
@@ -146,7 +164,9 @@ func joinScopes(scopes []string) string {
 // expiry of zero (or less than zero at the caller's risk) means the token never
 // expires; a negative duration produces an already-expired token, which is what
 // the tests use instead of sleeping.
-func (s *Store) CreateAPIToken(userID, name string, scopes []string, expiry time.Duration) (string, APIToken, error) {
+// formIDs bounds the token to those forms; nil or empty means every form, and
+// the admin form sends nil when the operator leaves it at "All forms".
+func (s *Store) CreateAPIToken(userID, name string, scopes, formIDs []string, expiry time.Duration) (string, APIToken, error) {
 	if userID == "" {
 		// The foreign key would not catch this: '' is a value, not a missing
 		// one, and no users row has it — but neither does anything else, so the
@@ -165,6 +185,7 @@ func (s *Store) CreateAPIToken(userID, name string, scopes []string, expiry time
 		UserID:    userID,
 		Name:      name,
 		Scopes:    splitScopes(joinScopes(scopes)),
+		FormIDs:   splitScopes(joinScopes(formIDs)),
 		CreatedAt: time.Now().UTC().Truncate(time.Second),
 	}
 	// Written explicitly rather than left to the column default, so the returned
@@ -176,9 +197,9 @@ func (s *Store) CreateAPIToken(userID, name string, scopes []string, expiry time
 	}
 
 	_, err := s.conn().Exec(
-		"INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, created_at, expires_at) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?)",
-		tok.ID, tok.UserID, tok.Name, hashToken(raw), joinScopes(scopes),
+		"INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, form_ids, created_at, expires_at) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		tok.ID, tok.UserID, tok.Name, hashToken(raw), joinScopes(scopes), joinScopes(formIDs),
 		sqliteTimestamp(tok.CreatedAt), expiresAt,
 	)
 	if err != nil {

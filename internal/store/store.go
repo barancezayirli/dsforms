@@ -309,6 +309,11 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     name         TEXT NOT NULL DEFAULT '',
     token_hash   TEXT NOT NULL UNIQUE,
     scopes       TEXT NOT NULL DEFAULT '',
+    -- form_ids bounds the token to a set of forms, comma-separated. Empty means
+    -- every form: that is what the column holds for tokens minted before this
+    -- existed, and an upgrade must not silently revoke live credentials. Read
+    -- it through APIToken.Scope, which is the one place that reading is made.
+    form_ids     TEXT NOT NULL DEFAULT '',
     created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
     last_used_at DATETIME NOT NULL DEFAULT '',
     expires_at   DATETIME NOT NULL DEFAULT ''
@@ -387,6 +392,8 @@ func runAlterMigrations(db *sql.DB) error {
 		"ALTER TABLE submissions ADD COLUMN held_threshold INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE submissions ADD COLUMN held_at DATETIME NOT NULL DEFAULT ''",
 		"ALTER TABLE submissions ADD COLUMN notified INTEGER NOT NULL DEFAULT 1",
+		// Empty is every form, so existing tokens keep the access they have.
+		"ALTER TABLE api_tokens ADD COLUMN form_ids TEXT NOT NULL DEFAULT ''",
 	}
 	for _, q := range alters {
 		_, err := db.Exec(q)

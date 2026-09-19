@@ -762,7 +762,7 @@ func runTokenCLI(args []string) {
 			os.Exit(1)
 		}
 
-		raw, tok, err := s.CreateAPIToken(u.ID, args[2], scopes.Strings(), expiry)
+		raw, tok, err := s.CreateAPIToken(u.ID, args[2], scopes.Strings(), nil, expiry)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
