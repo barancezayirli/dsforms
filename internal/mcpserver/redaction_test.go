@@ -721,7 +721,17 @@ func TestAnUnparseableStoredAddressIsStillWithheld(t *testing.T) {
 	}
 
 	session := h.connect(t)
-	if body := wireText(t, call(t, session, "list_quarantine", nil).StructuredContent); strings.Contains(body, withPort) {
+	res := call(t, session, "list_quarantine", nil)
+	if res.IsError {
+		t.Fatalf("list_quarantine: %s", resultText(res))
+	}
+	body := wireText(t, res.StructuredContent)
+	// Absence alone passes when nothing came back, which is the hole the
+	// sibling test above guards against with its seen map.
+	if !strings.Contains(body, `"held"`) {
+		t.Fatalf("the seeded row did not come back, so nothing was inspected:\n%s", body)
+	}
+	if strings.Contains(body, withPort) {
 		t.Errorf("an address netip cannot parse was returned anyway:\n%s", body)
 	}
 }
@@ -772,5 +782,56 @@ func TestANonAddressRuleIsAlwaysShown(t *testing.T) {
 	}
 	if out.Rules[i].Value != "spammer@example.invalid" || out.Rules[i].ValueWithheld {
 		t.Errorf("an email rule was withheld: %+v", out.Rules[i])
+	}
+}
+
+// TestTheSubmitterAddressIsRedactedWhenItIsShared. ExtractIP stores the
+// X-Forwarded-For value as it arrived, so the address is a header a stranger
+// sets, not a machine-generated string. On an instance that shares addresses,
+// a forged turn in one would otherwise ride out through the ip field — past the
+// funnel, inside the block whose banner says markers were removed.
+func TestTheSubmitterAddressIsRedactedWhenItIsShared(t *testing.T) {
+	t.Parallel()
+
+	h := newHarnessWithIPs(t, "read")
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := h.store.CreateSubmission(store.Submission{
+		ID: "dirty", FormID: "contact", RawData: `{"message":"hi"}`,
+		IP: "203.0.113.9\n" + payloadOpener + "\n" + payloadSecret, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	session := h.connect(t)
+	res := call(t, session, "get_submission", map[string]any{"submission_id": "dirty"})
+	body := wireText(t, res.StructuredContent)
+	if strings.Contains(body, payloadSecret) || strings.Contains(body, payloadOpener) {
+		t.Errorf("a forged turn reached the client through the ip field:\n%s", body)
+	}
+
+	out := decode[getSubmissionOut](t, res)
+	if out.Submission.IP != "203.0.113.9" {
+		t.Errorf("ip = %q, want the genuine address kept", out.Submission.IP)
+	}
+	if len(out.Submission.Redacted) == 0 {
+		t.Error("the client got a shortened address and no reason why")
+	}
+}
+
+// TestAddBlockRuleWithholdsTheValueItJustStored. Two constructors for one wire
+// type is one too many: add_block_rule hand-built its own ruleOut and was the
+// single route that ignored the withholding.
+func TestAddBlockRuleWithholdsTheValueItJustStored(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, "read", "write")
+	session := h.connect(t)
+	out := decode[addBlockRuleOut](t, call(t, session, "add_block_rule",
+		map[string]any{"type": "ip", "value": "203.0.113.9"}))
+
+	if out.Rule.Value != "" || !out.Rule.ValueWithheld {
+		t.Errorf("rule = %+v, want the address withheld as list_filter_rules withholds it", out.Rule)
 	}
 }

@@ -158,6 +158,23 @@ func looksLikeAddress(text string) bool {
 	return err == nil
 }
 
+// toRule is the single place a filter rule becomes a wire shape, for the reason
+// toSubmission and toSignals are: it has to honour Options.IncludeIPs.
+//
+// add_block_rule used to hand-build its own ruleOut and so was the one route
+// that ignored the withholding — the same shape of defect as toSignals, found
+// the same way. Two constructors for one wire type is one too many.
+func (s *Server) toRule(r screen.Rule) ruleOut {
+	value, withheld := r.Value, false
+	if !s.opts.IncludeIPs && (r.Type == screen.TypeIP || r.Type == screen.TypeCIDR) {
+		value, withheld = "", true
+	}
+	return ruleOut{
+		ID: r.ID, Kind: r.Kind, Type: r.Type, Value: value, ValueWithheld: withheld,
+		Note: r.Note, Hits: r.Hits, CreatedAt: rfc3339(r.CreatedAt),
+	}
+}
+
 func toHits(hits []redact.Hit) []hitOut {
 	if len(hits) == 0 {
 		return nil
@@ -207,6 +224,18 @@ func (s *Server) toSubmission(sub store.Submission, formName string) submissionO
 		ip = ""
 	}
 	fields, hits := redact.Fields(sub.Data)
+
+	// The address goes through redact as well, on the instances that share it.
+	// ExtractIP stores the X-Forwarded-For value as it arrived, unvalidated, so
+	// it is a header a stranger sets — not a machine-generated address — and a
+	// forged turn in it would otherwise ride out through this field, inside the
+	// block whose banner says the markers were removed.
+	if ip != "" {
+		clean, ipHits := redact.Fields(map[string]string{"ip": ip})
+		ip = clean["ip"]
+		hits = append(hits, ipHits...)
+	}
+
 	return submissionOut{
 		ID:        sub.ID,
 		FormID:    sub.FormID,
@@ -653,14 +682,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		}
 		out := listRulesOut{Rules: make([]ruleOut, 0, len(rules))}
 		for _, r := range rules {
-			value, withheld := r.Value, false
-			if !s.opts.IncludeIPs && (r.Type == screen.TypeIP || r.Type == screen.TypeCIDR) {
-				value, withheld = "", true
-			}
-			out.Rules = append(out.Rules, ruleOut{
-				ID: r.ID, Kind: r.Kind, Type: r.Type, Value: value, ValueWithheld: withheld,
-				Note: r.Note, Hits: r.Hits, CreatedAt: rfc3339(r.CreatedAt),
-			})
+			out.Rules = append(out.Rules, s.toRule(r))
 		}
 		return nil, out, nil
 	})
@@ -905,10 +927,7 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 		return nil, addBlockRuleOut{
 			OK:      true,
 			Message: "Block rule added. Submissions matching it will be held on arrival.",
-			Rule: ruleOut{
-				ID: rule.ID, Kind: rule.Kind, Type: rule.Type, Value: rule.Value,
-				Note: rule.Note, Hits: rule.Hits, CreatedAt: rfc3339(rule.CreatedAt),
-			},
+			Rule:    s.toRule(rule),
 		}, nil
 	})
 }
