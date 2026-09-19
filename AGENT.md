@@ -98,7 +98,7 @@ Nothing else crosses that edge, and `mcpserver` imports no handler.
 
 Verified with `go list -f '{{join .Imports "\n"}}'`, not from memory:
 
-- `handler` → auth, backup, flash, mcpserver, ratelimit, safe, screen, store, urlsafe
+- `handler` → auth, backup, flash, mcpserver, ratelimit, redact, safe, screen, store, urlsafe
 - `store` → screen · `config` → screen · `broadcaster` → safe, store
 - `mcpserver` → redact, screen, store
 - `auth`, `mail`, `webhook` → store · `ratelimit` → safe

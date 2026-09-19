@@ -66,6 +66,27 @@ const (
 // same.
 var AllReasons = []Reason{ReasonControlToken, ReasonInvisible, ReasonMalformed}
 
+// Describe is the one-line explanation shown to an operator beside the lines
+// that were withheld. It lives here rather than in a template so the wording
+// cannot fall behind the constant it describes, which is the arrangement
+// mcpserver.Scope already uses.
+//
+// An unrecognised reason describes itself as nothing rather than as something
+// generic: a label invented for a value this build does not understand is a
+// claim about it.
+func (r Reason) Describe() string {
+	switch r {
+	case ReasonControlToken:
+		return "A forged chat turn — markers that try to end the submitted text and start a new instruction to whatever reads it."
+	case ReasonInvisible:
+		return "Text that renders as nothing, so it is in the message but not on the screen."
+	case ReasonMalformed:
+		return "Bytes that are not valid text."
+	default:
+		return ""
+	}
+}
+
 // Hit is one thing removed, and where it was.
 //
 // Line and Through are 1-based line numbers *in the original value*, inclusive,

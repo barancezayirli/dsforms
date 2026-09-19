@@ -382,3 +382,18 @@ func FuzzFields(f *testing.F) {
 		}
 	})
 }
+
+func TestEveryReasonIsDescribed(t *testing.T) {
+	t.Parallel()
+	// The admin prints Describe beside the lines it withheld. A reason added
+	// with no wording would render a blank label next to a block of text and
+	// tell the operator nothing about why it is there.
+	for _, r := range AllReasons {
+		if strings.TrimSpace(r.Describe()) == "" {
+			t.Errorf("%s has no description", r)
+		}
+	}
+	if got := Reason("something-else").Describe(); got != "" {
+		t.Errorf("an unknown reason described itself as %q", got)
+	}
+}

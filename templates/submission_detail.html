@@ -96,6 +96,39 @@
   {{end}}
 </div>
 
+<!-- What an MCP client was not shown. Rendered only when there is something
+     to render, and it prints the lines rather than summarising them: the
+     operator is the one audience this redaction is not protecting, and
+     deciding whether a message was an attack, a test or a false positive
+     takes the characters. Nothing above this panel was altered. -->
+{{if .Hidden}}
+<div class="panel-box" style="margin:12px 22px 0">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <svg class="i i-accent" style="font-size:15px"><use href="#ph-selection-slash"/></svg>
+    <span style="font-size:13px">Hidden instructions in this message</span>
+    <span class="tag tag-outline tag-sm" style="margin-left:auto">withheld from MCP</span>
+  </div>
+  <div class="dim" style="font-size:12px;margin-top:5px">
+    Removed before any MCP client was shown this submission. The message above
+    is unchanged — it is exactly what was sent.
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+    {{range .Hidden}}
+    <div class="rule-box">
+      <div class="rule-head">
+        <svg class="i"><use href="#ph-prohibit"/></svg>
+        <span class="rule-name">{{.Reason}}</span>
+        <span class="tag tag-outline tag-sm nowrap">{{if eq .Line .Through}}line {{.Line}}{{else}}lines {{.Line}}&ndash;{{.Through}}{{end}}</span>
+      </div>
+      <div class="rule-field">field <code>{{.Field}}</code> &middot; matched <code>{{.Matched}}</code></div>
+      <div class="code" style="margin-top:5px;white-space:pre-wrap">{{range .Lines}}{{.}}
+{{end}}</div>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 <!-- Spam check. A submission that reached the inbox passed; one restored from
      quarantine keeps the breakdown that held it, because that is the evidence
      of a false positive. -->

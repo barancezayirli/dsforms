@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/redact"
 	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/barancezayirli/dsforms/internal/urlsafe"
@@ -467,6 +468,53 @@ type Field struct {
 	Value string
 }
 
+// HiddenBlock is one region of a submission that MCP clients are not shown,
+// with the original lines quoted in full.
+//
+// The admin is the audience the redaction is not protecting: an operator
+// deciding whether this was an attack, a test, or a false positive needs the
+// characters, not a summary of them. So the reader marks what was withheld and
+// then prints it.
+type HiddenBlock struct {
+	Field   string
+	Line    int
+	Through int
+	Reason  string
+	Matched string
+	Lines   []string
+}
+
+// hiddenBlocks reports what the MCP path would remove from these fields.
+//
+// It calls the same function the MCP path calls rather than reading a stored
+// flag. Nothing is written when a submission arrives, so there is no column to
+// migrate, no backfill for the submissions already in the database, and — the
+// reason that matters — no way for the mark to drift from what clients are
+// actually served, because it is the same code answering both questions.
+func hiddenBlocks(data map[string]string) []HiddenBlock {
+	_, hits := redact.Fields(data)
+	if len(hits) == 0 {
+		return nil
+	}
+	out := make([]HiddenBlock, 0, len(hits))
+	for _, h := range hits {
+		lines := strings.Split(data[h.Field], "\n")
+		from, to := h.Line-1, h.Through
+		if from < 0 || to > len(lines) || from >= to {
+			// A report that does not line up with the value it came from is a
+			// bug in redact, not something to render around. Skipped rather
+			// than clamped: a quietly wrong quotation is worse than none.
+			continue
+		}
+		out = append(out, HiddenBlock{
+			Field: h.Field, Line: h.Line, Through: h.Through,
+			Reason: h.Reason.Describe(), Matched: h.Matched,
+			Lines: lines[from:to],
+		})
+	}
+	return out
+}
+
 type submissionDetailData struct {
 	PageData
 	Form       store.Form
@@ -480,6 +528,10 @@ type submissionDetailData struct {
 	Message string
 
 	Signals []store.SpamSignal
+
+	// Hidden is what an MCP client would not have been shown. Empty for almost
+	// every submission, and the template renders nothing at all when it is.
+	Hidden []HiddenBlock
 
 	NewerID  string
 	OlderID  string
@@ -617,6 +669,7 @@ func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) 
 		Submission: sub,
 		Fields:     fields,
 		Message:    message,
+		Hidden:     hiddenBlocks(sub.Data),
 		Signals:    signals,
 		NewerID:    newer,
 		OlderID:    older,

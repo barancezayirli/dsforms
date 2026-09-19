@@ -3,6 +3,7 @@ package handler
 import (
 	"html/template"
 
+	"github.com/barancezayirli/dsforms/internal/redact"
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
@@ -34,6 +35,9 @@ func TemplateFuncs() template.FuncMap {
 		"ruleIcon":         RuleIcon,
 		"ruleLabel":        RuleLabel,
 		"initial":          Initial,
-		"minPassword":      func() int { return store.MinPasswordLength },
+		// A listing row asks only whether to show a badge, so it gets the
+		// cheap answer from the same package that gives the detailed one.
+		"hasHidden":   redact.Any,
+		"minPassword": func() int { return store.MinPasswordLength },
 	}
 }
