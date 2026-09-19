@@ -59,13 +59,15 @@ type scopeOption struct {
 	Description string
 }
 
+// tokensData is the list page. It deliberately carries no form state: the
+// create form moved to its own URL, and fields left here "in case" would be
+// populated by the handler, rendered by nothing, and asserted by a stub
+// template — which is how TestTokenPageOffersEveryScope went on passing while
+// no longer touching the page that renders the checkboxes.
 type tokensData struct {
 	PageData
 	Tokens  []tokenRow
-	Scopes  []scopeOption
-	Error   string
 	Enabled bool
-	TTLDays int
 
 	// BaseURL is the instance's public address, for the endpoint line shown
 	// beside a freshly created token. It comes from Base rather than from
@@ -164,9 +166,7 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 
 	data := tokensData{
 		PageData: h.Shell(w, r, "API tokens", "tokens"),
-		Scopes:   scopeOptions(),
 		Enabled:  h.MCPEnabled,
-		TTLDays:  h.TTLDays,
 		BaseURL:  h.Base.BaseURL,
 		NewToken: newToken,
 	}

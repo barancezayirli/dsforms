@@ -695,8 +695,9 @@ and ask what is in the database. Six commits, one concern each.
 - **`MarkSpam`** — the one genuinely new behaviour. Nothing moved a submission
   from an inbox into quarantine before; the hold decision was made once, on
   arrival, and an operator who spotted spam afterwards could only delete it.
-- **`internal/mcpserver`** — fourteen tools across three scopes, the Streamable
-  HTTP handler, and the `Scope` value set.
+- **`internal/mcpserver`** — the tool set across three scopes, the Streamable
+  HTTP handler, and the `Scope` value set. (`docs/mcp.md` has the table; it is
+  not restated here, because every hand-count in this repo has been wrong.)
 - **`/mcp`**, mounted only when `MCP_ENABLED` is set, behind the SDK's bearer
   middleware with its own rate limiter and login guard.
 - **`/admin/tokens` and `dsforms token list|create|revoke`** — two ways to mint
@@ -774,6 +775,40 @@ offered 7 tools and gets "unknown tool" for `mark_spam` and `delete_submission`;
 a revoked token goes 200 → 401; `delete_quarantined` pointed at two inbox ids
 deletes 0 and says so; an empty id list is refused; and a token created through
 the page appears exactly once there and zero times on the next load.
+
+## The code review pass
+
+Run late, after the branch was already pushed — which is its own lesson: the
+security review came back clean and that was taken as enough for a while. The
+correctness pass found six things, three of them bugs.
+
+- **`list_submissions status:"read"` filtered after paging.** The store's filter
+  was unread-or-everything, so "read" was applied to the page LIMIT and OFFSET
+  had already chosen. An inbox with one old read submission behind thirty newer
+  unread ones answered `count: 0` — "you have no read messages" — while a later
+  offset returned it. The filter is now a `store.ReadFilter` applied in SQL,
+  with the default branch refusing rather than widening to "all". The fixture
+  that catches it needs more than one page of rows, which is why the original
+  three-row test passed.
+- **Cancel did nothing on the plain form page.** `data-drawer-close` lives in the
+  shared form body, so it is present in both presentations, and app.js called
+  `preventDefault()` unconditionally while `closeDrawer` returned early with no
+  drawer open. The handler now falls through to the href when there is nothing
+  to close — which also fixes the reader's Close button, same shape.
+- **A database outage locked out legitimate clients.** `verifyMCPToken` recorded
+  a guard failure for every `GetAPIToken` error, so ten requests during an
+  outage locked an IP for fifteen minutes *after* the database recovered. Only
+  `ErrNotFound` counts now; the 401 is identical either way.
+- **A hollow test.** `TestTokenPageOffersEveryScope` asserted against the stub
+  template in its own test file, so it kept passing after the form moved to
+  another page, and kept passing with the real template edited to offer one
+  scope of three. It renders the shipped `token_new.html` now — both
+  presentations — and was watched to fail under both of those breakages.
+- Dead fields on `tokensData` left over from the two-column layout, and an
+  unused `GetHeldSubmission` in the `mcpserver.Store` interface that claimed to
+  name what the package needs "and nothing else".
+- A hand-counted "fourteen tools" that was thirteen. AGENT.md §4 forbids these
+  for exactly this reason; the count now lives only in `docs/mcp.md`'s table.
 
 ## Open
 

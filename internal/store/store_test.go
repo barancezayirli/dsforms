@@ -1538,39 +1538,33 @@ func TestListSubmissionsFiltered(t *testing.T) {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
 
-	ids := func(subs []Submission) []string {
-		out := make([]string, 0, len(subs))
-		for _, s := range subs {
-			out = append(out, s.ID)
-		}
-		return out
-	}
-
 	tests := []struct {
 		name          string
 		formID        string
-		unreadOnly    bool
+		read          ReadFilter
 		limit, offset int
 		want          []string
 	}{
-		{"every form, newest first", "", false, 10, 0, []string{"b", "c", "a"}},
-		{"unread across every form", "", true, 10, 0, []string{"c", "a"}},
-		{"one form", "f1", false, 10, 0, []string{"b", "a"}},
-		{"one form, unread only", "f1", true, 10, 0, []string{"a"}},
-		{"paged", "", false, 2, 0, []string{"b", "c"}},
-		{"paged, second page", "", false, 2, 2, []string{"a"}},
-		{"past the end", "", false, 10, 99, nil},
-		{"unknown form", "nope", false, 10, 0, nil},
+		{"every form, newest first", "", ReadAny, 10, 0, []string{"b", "c", "a"}},
+		{"unread across every form", "", ReadUnread, 10, 0, []string{"c", "a"}},
+		{"read across every form", "", ReadRead, 10, 0, []string{"b"}},
+		{"one form", "f1", ReadAny, 10, 0, []string{"b", "a"}},
+		{"one form, unread only", "f1", ReadUnread, 10, 0, []string{"a"}},
+		{"one form, read only", "f1", ReadRead, 10, 0, []string{"b"}},
+		{"paged", "", ReadAny, 2, 0, []string{"b", "c"}},
+		{"paged, second page", "", ReadAny, 2, 2, []string{"a"}},
+		{"past the end", "", ReadAny, 10, 99, nil},
+		{"unknown form", "nope", ReadAny, 10, 0, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := s.ListSubmissionsFiltered(tt.formID, tt.unreadOnly, tt.limit, tt.offset)
+			got, err := s.ListSubmissionsFiltered(tt.formID, tt.read, tt.limit, tt.offset)
 			if err != nil {
 				t.Fatalf("ListSubmissionsFiltered: %v", err)
 			}
-			if !slices.Equal(ids(got), tt.want) {
-				t.Errorf("ids = %v, want %v", ids(got), tt.want)
+			if !slices.Equal(subIDs(got), tt.want) {
+				t.Errorf("ids = %v, want %v", subIDs(got), tt.want)
 			}
 			for _, sub := range got {
 				if sub.IsHeld {
@@ -1599,7 +1593,7 @@ func TestListSubmissionsFilteredPopulatesTheWholeStruct(t *testing.T) {
 		t.Fatalf("CreateSubmission: %v", err)
 	}
 
-	got, err := s.ListSubmissionsFiltered("f1", false, 10, 0)
+	got, err := s.ListSubmissionsFiltered("f1", ReadAny, 10, 0)
 	if err != nil {
 		t.Fatalf("ListSubmissionsFiltered: %v", err)
 	}
@@ -1620,4 +1614,96 @@ func TestListSubmissionsFilteredPopulatesTheWholeStruct(t *testing.T) {
 	case got[0].CreatedAt.IsZero():
 		t.Error("CreatedAt is zero")
 	}
+}
+
+// TestListSubmissionsFilteredAppliesReadInSQL is the regression test for a bug
+// the review found: the read filter used to be applied by the caller, to the
+// page LIMIT and OFFSET had already chosen.
+//
+// The shape that breaks is an inbox where every read submission sorts behind a
+// full page of unread ones. Filtering afterwards then thins that page to
+// nothing and reports "you have no read messages" — while a later offset
+// returns them. Only pushing the filter into the query gets this right, and a
+// single-page fixture would pass either way.
+func TestListSubmissionsFilteredAppliesReadInSQL(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+
+	base := time.Now().UTC().Truncate(time.Second)
+	// One old read submission, then thirty newer unread ones on top of it.
+	if err := s.CreateSubmission(subFixture("old-read", "f1", base.Add(-100*time.Hour))); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if err := s.MarkRead("old-read"); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+	for i := range 30 {
+		id := fmt.Sprintf("unread-%02d", i)
+		if err := s.CreateSubmission(subFixture(id, "f1", base.Add(-time.Duration(i)*time.Minute))); err != nil {
+			t.Fatalf("CreateSubmission(%s): %v", id, err)
+		}
+	}
+
+	// The default page size, which is what a client actually asks for.
+	got, err := s.ListSubmissionsFiltered("f1", ReadRead, 25, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsFiltered: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "old-read" {
+		t.Fatalf("read listing returned %d rows %v, want exactly old-read.\n"+
+			"The read filter is being applied to a page that LIMIT already chose, "+
+			"so a read submission behind a screenful of unread ones is invisible.",
+			len(got), subIDs(got))
+	}
+
+	// And the complement still holds: the unread listing is unaffected by it.
+	unread, err := s.ListSubmissionsFiltered("f1", ReadUnread, 25, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsFiltered: %v", err)
+	}
+	if len(unread) != 25 {
+		t.Errorf("unread listing returned %d rows, want a full page of 25", len(unread))
+	}
+	for _, sub := range unread {
+		if sub.Read {
+			t.Errorf("submission %s is read but appeared in the unread listing", sub.ID)
+		}
+	}
+}
+
+// TestListSubmissionsFilteredRefusesAnUnknownFilter. The default branch must
+// deny rather than widen: silently returning the whole inbox to a caller that
+// asked for a subset is the failure this type exists to prevent.
+func TestListSubmissionsFilteredRefusesAnUnknownFilter(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := s.CreateSubmission(subFixture("s1", "f1", time.Now())); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	for _, bad := range []ReadFilter{"", "READ", "unread ", "anything"} {
+		got, err := s.ListSubmissionsFiltered("f1", bad, 10, 0)
+		if err == nil {
+			t.Errorf("ReadFilter(%q) was accepted and returned %d rows", bad, len(got))
+		}
+		if got != nil {
+			t.Errorf("ReadFilter(%q) returned rows alongside an error", bad)
+		}
+	}
+}
+
+// subIDs is a helper shared by the listing tests. Named apart from search_test's
+// ids, which does the same job for SearchResult.
+func subIDs(subs []Submission) []string {
+	out := make([]string, 0, len(subs))
+	for _, s := range subs {
+		out = append(out, s.ID)
+	}
+	return out
 }

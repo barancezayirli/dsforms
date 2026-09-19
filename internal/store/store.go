@@ -897,8 +897,46 @@ func (s *Store) MarkUnread(submissionID string) error {
 	return nil
 }
 
+// ReadFilter selects which of an inbox's submissions a listing returns.
+//
+// A defined type rather than a bool, because the question has three answers and
+// a bool can only carry two. It arrived as `unreadOnly bool`, and the third case
+// was then handled by filtering the returned page in the caller — which thins a
+// page that LIMIT and OFFSET have already chosen, so a form whose read
+// submissions all sit behind a screenful of unread ones reports having none.
+type ReadFilter string
+
+const (
+	// ReadAny returns read and unread alike.
+	ReadAny ReadFilter = "all"
+	// ReadUnread returns only what nobody has opened.
+	ReadUnread ReadFilter = "unread"
+	// ReadRead returns only what somebody has.
+	ReadRead ReadFilter = "read"
+)
+
+// clause returns the SQL this filter adds, and whether it is a filter this build
+// understands.
+//
+// Every case is named and the default refuses rather than widening to "all":
+// a value we cannot interpret must not quietly return more rows than the caller
+// asked for, which for an unrecognised status would mean handing back the whole
+// inbox to someone who asked for a subset of it.
+func (f ReadFilter) clause() (string, bool) {
+	switch f {
+	case ReadAny:
+		return "", true
+	case ReadUnread:
+		return " AND read = 0", true
+	case ReadRead:
+		return " AND read = 1", true
+	default:
+		return "", false
+	}
+}
+
 // ListSubmissionsFiltered returns a page of accepted submissions, optionally
-// narrowed to one form and to the unread ones.
+// narrowed to one form and to a read state.
 //
 // It exists because neither existing listing answers "what have I not read?"
 // across forms: ListSubmissions and ListSubmissionsPaged are both scoped to a
@@ -908,19 +946,27 @@ func (s *Store) MarkUnread(submissionID string) error {
 // reviewed on its own screen, and a message awaiting a spam decision is not
 // something anyone has failed to read.
 //
+// The read state is applied here rather than by the caller, and that is the
+// whole point of the type: filtering a returned page is filtering rows that
+// LIMIT and OFFSET already chose, so the answer depends on how many rows of the
+// other kind happened to sort ahead of them.
+//
 // The query is built by appending fixed clause strings and binding every value,
-// never by interpolating one: the two inputs that vary are a bound formID and a
-// constant `AND read = 0`.
-func (s *Store) ListSubmissionsFiltered(formID string, unreadOnly bool, limit, offset int) ([]Submission, error) {
+// never by interpolating one: the only input that reaches the SQL text is a
+// constant chosen by the switch above.
+func (s *Store) ListSubmissionsFiltered(formID string, read ReadFilter, limit, offset int) ([]Submission, error) {
+	readClause, ok := read.clause()
+	if !ok {
+		return nil, fmt.Errorf("list submissions filtered: unknown read filter %q", read)
+	}
+
 	query := "SELECT " + heldColumns + " FROM submissions WHERE is_held = 0"
 	var args []any
 	if formID != "" {
 		query += " AND form_id = ?"
 		args = append(args, formID)
 	}
-	if unreadOnly {
-		query += " AND read = 0"
-	}
+	query += readClause
 	// Tie-broken by id: created_at alone is not stable, and submissions arriving
 	// in the same second would let a LIMIT/OFFSET page repeat or skip a row.
 	query += " ORDER BY created_at DESC, id LIMIT ? OFFSET ?"

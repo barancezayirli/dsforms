@@ -157,9 +157,8 @@ func populatedPageData() map[string]any {
 		// endpoint-disabled notice and a listed token each live behind an {{if}},
 		// and a zero fixture renders none of them.
 		"tokens.html": tokensData{PageData: shell,
-			NewToken: "dsf_shown_once", Enabled: false, TTLDays: 90,
+			NewToken: "dsf_shown_once", Enabled: false,
 			BaseURL: "https://x.example",
-			Scopes:  scopeOptions(),
 			Tokens: []tokenRow{{
 				APIToken:  store.APIToken{ID: "t1", Name: "laptop", Scopes: []string{"read", "write"}},
 				ScopeList: "read, write", LastUsed: "Never", Expires: "Never"}}},

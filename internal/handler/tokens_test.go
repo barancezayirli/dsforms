@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -25,14 +26,12 @@ func setupTokens(t *testing.T) (*store.Store, *chi.Mux) {
 	baseTmpl := template.Must(template.New("base").Funcs(TemplateFuncs()).
 		Parse(`{{define "base"}}{{template "content" .}}{{end}}`))
 	tok, _ := baseTmpl.Clone()
-	// Populated enough to take every branch: a zero-valued fixture skips each
-	// {{if}} and {{range}} body, which is how a template test passes while most
-	// of the template never runs.
+	// The list stub renders only what the list page renders. It deliberately
+	// does not range .Scopes: a stub that shows more than the real template can
+	// satisfy an assertion the shipped page would fail.
 	template.Must(tok.New("content").Parse(
-		`{{if .Error}}<p class="error">{{.Error}}</p>{{end}}` +
-			`{{if .NewToken}}<code id="new-token">{{.NewToken}}</code>{{end}}` +
-			`{{range .Tokens}}<span class="token" data-id="{{.ID}}">{{.Name}}:{{.ScopeList}}:{{.LastUsed}}</span>{{end}}` +
-			`{{range .Scopes}}<label class="scope">{{.Value}} {{.Description}}</label>{{end}}`))
+		`{{if .NewToken}}<code id="new-token">{{.NewToken}}</code>{{end}}` +
+			`{{range .Tokens}}<span class="token" data-id="{{.ID}}">{{.Name}}:{{.ScopeList}}:{{.LastUsed}}</span>{{end}}`))
 	nw, _ := baseTmpl.Clone()
 	template.Must(nw.New("content").Parse(
 		`{{if .Error}}<p class="error">{{.Error}}</p>{{end}}` +
@@ -258,20 +257,44 @@ func TestDeleteTokenCannotRevokeAnothersToken(t *testing.T) {
 	}
 }
 
-// TestTokenPageOffersEveryScope. The checkboxes are built from
-// mcpserver.AllScopes rather than written into the template, so a scope added to
-// that package cannot go unofferable.
-func TestTokenPageOffersEveryScope(t *testing.T) {
+// TestTokenFormOffersEveryScope renders the *shipped* token_new.html, not the
+// stub the rest of this file uses.
+//
+// That distinction is the whole test. The original version asked the handler
+// for the page and asserted on what came back — which is a stub written here,
+// so it was really asserting that this file ranges .Scopes. It passed after the
+// form moved to another page entirely, and it still passed when the real
+// template was edited to offer one scope out of three. A guard nobody has
+// watched fail is not a guard: this one now fails under both.
+func TestTokenFormOffersEveryScope(t *testing.T) {
 	t.Parallel()
-	s, r := setupTokens(t)
-	body := doTokenRequest(t, s, r, "GET", "/admin/tokens", "").Body.String()
 
-	for _, scope := range mcpserver.AllScopes {
-		if !strings.Contains(body, string(scope)) {
-			t.Errorf("scope %q is not offered on the page", scope)
+	tmpl, ok := realTemplates(t)["token_new.html"]
+	if !ok {
+		t.Fatal("token_new.html is not in basePageNames")
+	}
+
+	data := tokenFormData{
+		PageData: PageData{Title: "New API token", Active: "tokens"},
+		Scopes:   scopeOptions(),
+		Ticked:   map[string]bool{},
+	}
+
+	// Both presentations, because they are separate defines and only one of them
+	// is what an operator with JavaScript actually sees.
+	for _, block := range []string{"base", "drawer"} {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, block, data); err != nil {
+			t.Fatalf("executing %s: %v", block, err)
 		}
-		if !strings.Contains(body, scope.Describe()) {
-			t.Errorf("scope %q is offered with no description beside it", scope)
+		body := buf.String()
+		for _, scope := range mcpserver.AllScopes {
+			if !strings.Contains(body, `value="`+string(scope)+`"`) {
+				t.Errorf("%s: scope %q has no checkbox", block, scope)
+			}
+			if !strings.Contains(body, scope.Describe()) {
+				t.Errorf("%s: scope %q is offered with no description beside it", block, scope)
+			}
 		}
 	}
 }

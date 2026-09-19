@@ -431,10 +431,17 @@ func verifyMCPToken(st *store.Store, guard *ratelimit.LoginGuard) mcpauth.TokenV
 
 		tok, err := st.GetAPIToken(token)
 		if err != nil {
-			guard.RecordFailure(ip)
-			if !errors.Is(err, store.ErrNotFound) {
-				// A database failure is not a bad token, and saying so lets an
-				// operator tell "someone is guessing" from "the disk is gone".
+			// Only a credential that does not match counts against the lockout.
+			// A database failure is not a bad token, and counting it made ten
+			// requests during an outage lock a legitimate client out for fifteen
+			// minutes *after* the database came back — turning a transient
+			// problem into a longer one, for the client least deserving of it.
+			//
+			// The refusal is identical either way: the caller still gets 401 and
+			// cannot tell the two apart, which is the point.
+			if errors.Is(err, store.ErrNotFound) {
+				guard.RecordFailure(ip)
+			} else {
 				log.Printf("mcp: verifying a token: %v", err)
 			}
 			return nil, mcpauth.ErrInvalidToken

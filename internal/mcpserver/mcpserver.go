@@ -42,14 +42,13 @@ import (
 type Store interface {
 	// Reads.
 	CountAllSubmissions() (int, error)
-	GetHeldSubmission(id string) (store.Submission, error)
 	GetSubmission(id string) (store.Submission, error)
 	GetUserByID(id string) (store.User, error)
 	HeldSince(days int) (held, total int, err error)
 	HeldSubmissions(limit, offset int) ([]store.Submission, error)
 	ListFilterRules() ([]screen.Rule, error)
 	ListForms() ([]store.FormSummary, error)
-	ListSubmissionsFiltered(formID string, unreadOnly bool, limit, offset int) ([]store.Submission, error)
+	ListSubmissionsFiltered(formID string, read store.ReadFilter, limit, offset int) ([]store.Submission, error)
 	NavCounts() (store.NavCounts, error)
 	PerFormStats() ([]store.FormStats, error)
 	SearchSubmissions(query string, limit int) ([]store.SearchResult, error)

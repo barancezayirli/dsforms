@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -844,5 +845,54 @@ func TestDeleteQuarantinedCannotReachTheInbox(t *testing.T) {
 	}
 	if !strings.Contains(out.Message, "not in quarantine") {
 		t.Errorf("Message = %q; it must say the rest were not deleted rather than imply they were", out.Message)
+	}
+}
+
+// TestListSubmissionsReadIsFilteredBeforePaging is the protocol-level
+// regression test for the bug the code review found.
+//
+// The read filter used to be applied to the page the store had already chosen
+// with LIMIT and OFFSET, so an inbox where every read submission sorts behind a
+// full page of unread ones answered "you have no read messages". The seeded
+// fixture in this file has only three submissions, so it passed either way —
+// which is the point: this one is shaped to break the old code.
+func TestListSubmissionsReadIsFilteredBeforePaging(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, "read")
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+
+	base := time.Now().UTC().Truncate(time.Second)
+	if err := h.store.CreateSubmission(store.Submission{
+		ID: "old-read", FormID: "contact", RawData: `{"message":"answered last week"}`,
+		CreatedAt: base.Add(-100 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if err := h.store.MarkRead("old-read"); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+	// A full default page of newer, unread submissions on top of it.
+	for i := range 30 {
+		id := fmt.Sprintf("unread-%02d", i)
+		if err := h.store.CreateSubmission(store.Submission{
+			ID: id, FormID: "contact", RawData: `{"message":"new"}`,
+			CreatedAt: base.Add(-time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("CreateSubmission(%s): %v", id, err)
+		}
+	}
+
+	out := decode[listSubmissionsOut](t, call(t, h.connect(t), "list_submissions",
+		map[string]any{"form_id": "contact", "status": "read"}))
+
+	if out.Count != 1 || len(out.Submissions) != 1 || out.Submissions[0].ID != "old-read" {
+		t.Fatalf("status=read returned count=%d %v, want exactly old-read.\n"+
+			"A read submission behind a screenful of unread ones is invisible, "+
+			"which reads to a client as an empty inbox.", out.Count, out.Submissions)
+	}
+	if !out.Submissions[0].Read {
+		t.Error("the returned submission is not marked read")
 	}
 }

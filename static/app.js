@@ -296,6 +296,13 @@
     }
 
     if (closest(e.target, '[data-drawer-close]') || closest(e.target, '#drawer-root .backdrop')) {
+      // Only swallow the click when there is actually a drawer to close.
+      // These controls live in templates that render both as an overlay and as
+      // an ordinary page, so the same Close or Cancel link is on screen with no
+      // drawer open — and preventDefault there left a link that did nothing at
+      // all. Falling through to the href makes it navigate, which is what it
+      // says it does.
+      if (!$('#drawer-root .drawer')) return;
       e.preventDefault(); closeDrawer(false); return;
     }
 

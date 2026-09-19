@@ -298,21 +298,27 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		// Every case named, and an unrecognised status is refused rather than
 		// quietly widened to "all" — a client that meant "unread" and typoed it
 		// must not be handed the whole inbox.
-		var unreadOnly bool
+		//
+		// The filter goes to the store rather than being applied to what comes
+		// back. Thinning the returned page would thin rows that LIMIT and OFFSET
+		// had already chosen, so a form whose read submissions all sit behind a
+		// screenful of unread ones would report having none — which is what this
+		// did until the review caught it.
+		var filter store.ReadFilter
 		status := strings.ToLower(strings.TrimSpace(in.Status))
 		switch status {
 		case "", "unread":
-			status, unreadOnly = "unread", true
+			status, filter = "unread", store.ReadUnread
 		case "all":
-			unreadOnly = false
+			filter = store.ReadAny
 		case "read":
-			unreadOnly = false
+			filter = store.ReadRead
 		default:
 			return nil, listSubmissionsOut{}, fmt.Errorf("unknown status %q: use \"unread\", \"read\" or \"all\"", in.Status)
 		}
 
 		limit, offset := clampLimit(in.Limit), clampOffset(in.Offset)
-		subs, err := s.store.ListSubmissionsFiltered(in.FormID, unreadOnly, limit, offset)
+		subs, err := s.store.ListSubmissionsFiltered(in.FormID, filter, limit, offset)
 		if err != nil {
 			return nil, listSubmissionsOut{}, fmt.Errorf("listing submissions: %w", err)
 		}
@@ -323,12 +329,6 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 
 		out := listSubmissionsOut{Status: status, Submissions: make([]submissionOut, 0, len(subs))}
 		for _, sub := range subs {
-			// "read" is filtered here rather than in SQL because the store's
-			// filter is unread-or-everything; adding a third state to it for one
-			// caller would put a display concern in the query layer.
-			if status == "read" && !sub.Read {
-				continue
-			}
 			out.Submissions = append(out.Submissions, toSubmission(sub, names[sub.FormID]))
 		}
 		out.Count = len(out.Submissions)
