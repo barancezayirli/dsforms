@@ -895,3 +895,80 @@ func TestAddBlockRuleEchoesTheValueTheCallerSupplied(t *testing.T) {
 		t.Errorf("the listing did not withhold it: %+v", listed.Rules[i])
 	}
 }
+
+// TestTheWithheldFlagsAgreeOnDefaultConfig.
+//
+// The ip field and the repeat_ip match carry the same recorded header, so a
+// response that says one is withheld and leaves the other silently absent is
+// telling an operator two different things about one value. The table above
+// only runs the opted-in harness, which is where this divergence hides.
+func TestTheWithheldFlagsAgreeOnDefaultConfig(t *testing.T) {
+	t.Parallel()
+
+	const ip = "203.0.113.9"
+	h := newHarness(t, "read") // the shipped default: addresses not shared
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := h.store.CreateHeldSubmission(
+		store.Submission{ID: "s", FormID: "contact", RawData: `{"message":"hi"}`,
+			IP: ip, CreatedAt: time.Now().UTC()},
+		9, 6, []store.SpamSignal{{Check: "repeat_ip", Match: ip, Weight: 6}},
+	); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	session := h.connect(t)
+	out := decode[getSubmissionOut](t, call(t, session, "get_submission", map[string]any{"submission_id": "s"}))
+
+	if out.Submission.IP != "" || !out.Submission.IPWithheld {
+		t.Errorf("submission: ip=%q ip_withheld=%v, want empty and flagged",
+			out.Submission.IP, out.Submission.IPWithheld)
+	}
+	if len(out.Signals) != 1 {
+		t.Fatalf("signals = %+v, want 1", out.Signals)
+	}
+	if out.Signals[0].Match != "" || !out.Signals[0].MatchWithheld {
+		t.Errorf("signal: match=%q match_withheld=%v, want empty and flagged",
+			out.Signals[0].Match, out.Signals[0].MatchWithheld)
+	}
+}
+
+// TestNothingRecordedIsNotWithheld. The flags say "something is here and you
+// are not getting it". A submission from before the ip column was populated has
+// nothing to withhold, and flagging it would invent data to be coy about.
+func TestNothingRecordedIsNotWithheld(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		harness func(*testing.T, ...string) *harness
+	}{
+		{"addresses withheld", newHarness},
+		{"addresses shared", newHarnessWithIPs},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := tc.harness(t, "read")
+			if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+				t.Fatalf("CreateForm: %v", err)
+			}
+			if err := h.store.CreateHeldSubmission(
+				store.Submission{ID: "s", FormID: "contact", RawData: `{"message":"hi"}`,
+					IP: "", CreatedAt: time.Now().UTC()},
+				9, 6, []store.SpamSignal{{Check: "repeat_ip", Match: "", Weight: 6}},
+			); err != nil {
+				t.Fatalf("CreateHeldSubmission: %v", err)
+			}
+
+			session := h.connect(t)
+			out := decode[getSubmissionOut](t, call(t, session, "get_submission", map[string]any{"submission_id": "s"}))
+			if out.Submission.IPWithheld {
+				t.Error("a submission with no recorded address was reported as having one withheld")
+			}
+			if len(out.Signals) == 1 && out.Signals[0].MatchWithheld {
+				t.Error("a signal with no recorded match was reported as having one withheld")
+			}
+		})
+	}
+}

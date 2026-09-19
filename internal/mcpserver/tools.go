@@ -121,10 +121,12 @@ type submissionOut struct {
 	Threshold int               `json:"spam_threshold" jsonschema:"the score at or above which this submission would have been held"`
 	IP        string            `json:"ip,omitempty" jsonschema:"the submitter's IP address; omitted unless this instance is configured to share it, and see ip_withheld"`
 
-	// IPWithheld separates "this instance does not share addresses" from "what
-	// was recorded is not an address". omitempty alone said the first, which on
-	// a forged header was the opposite of the truth.
-	IPWithheld bool   `json:"ip_withheld,omitempty" jsonschema:"what was recorded for this submission is not an IP address, so it is not being passed on"`
+	// IPWithheld says an address was recorded and is not being passed on,
+	// either because this instance does not share them or because what was
+	// recorded is not one. Same statement as signalOut.MatchWithheld and
+	// ruleOut.ValueWithheld: something is here and you are not getting it, as
+	// distinct from nothing being here.
+	IPWithheld bool   `json:"ip_withheld,omitempty" jsonschema:"something was recorded here and is not being passed on: either this instance does not share addresses, or what was recorded is not one"`
 	CreatedAt  string `json:"created_at" jsonschema:"RFC 3339"`
 
 	// Redacted is absent when nothing was removed, which is almost every
@@ -229,9 +231,9 @@ type signalOut struct {
 	FieldWithheld bool   `json:"field_withheld,omitempty" jsonschema:"the field name carried a marker and is not being named"`
 	Match         string `json:"match,omitempty"`
 
-	// MatchWithheld says the same about the match: it was an address, or the
-	// check records one, and this instance does not share them.
-	MatchWithheld bool `json:"match_withheld,omitempty" jsonschema:"what matched was an IP address or network and this instance does not share them; the check still tells you why the submission was held"`
+	// MatchWithheld says the same about the match. Same statement and the same
+	// two reasons as submissionOut.IPWithheld.
+	MatchWithheld bool `json:"match_withheld,omitempty" jsonschema:"something matched and is not being passed on: either it was an address this instance does not share, or what was recorded is not one; the check still tells you why the submission was held"`
 	Weight        int  `json:"weight"`
 }
 
@@ -249,10 +251,6 @@ type signalOut struct {
 // diverge, and it diverges in one direction: a client is never shown more than
 // the operator, only less.
 func (s *Server) toSubmission(sub store.Submission, formName string) submissionOut {
-	ip := sub.IP
-	if !s.opts.IncludeIPs {
-		ip = ""
-	}
 	fields, hits := redact.Fields(sub.Data)
 
 	// The address is validated, not redacted. Redacting it was the first fix and
@@ -263,8 +261,16 @@ func (s *Server) toSubmission(sub store.Submission, formName string) submissionO
 	// redaction untouched — and it also invented a hit against a field name
 	// "ip" that collides with a form's own keys and that the admin has no way
 	// to show. Either it is an address or it is not passed on.
+	// Both reasons set the flag, so an absent ip is never ambiguous. Nothing
+	// recorded is not "withheld" — that is a submission from before the field
+	// existed, and saying otherwise invents data to be coy about.
+	var ip string
 	var ipWithheld bool
-	ip, ipWithheld = sanitiseIP(ip)
+	if s.opts.IncludeIPs {
+		ip, ipWithheld = sanitiseIP(sub.IP)
+	} else {
+		ipWithheld = sub.IP != ""
+	}
 
 	return submissionOut{
 		ID:         sub.ID,
@@ -332,9 +338,12 @@ func (s *Server) toSignals(sigs []store.SpamSignal) []signalOut {
 			// ip_withheld while handing the identical prose back two keys
 			// later, which is the frame this was supposed to have fixed.
 			addr, notAnAddress := sanitiseIP(sig.Match)
-			if notAnAddress || !s.opts.IncludeIPs {
+			switch {
+			case sig.Match == "":
+				// Nothing recorded is not withheld.
+			case notAnAddress || !s.opts.IncludeIPs:
 				match, matchWithheld = "", true
-			} else {
+			default:
 				match = addr
 			}
 
@@ -469,7 +478,7 @@ type ruleOut struct {
 	// submitter's, since that is what an ip rule is written from — so leaving it
 	// here would hand back through the rule list exactly what is withheld from
 	// the submission and from the spam breakdown.
-	ValueWithheld bool   `json:"value_withheld,omitempty" jsonschema:"this rule matches on an IP address or network and this instance does not share them"`
+	ValueWithheld bool   `json:"value_withheld,omitempty" jsonschema:"this rule matches on an IP address or network and is not being passed on, because this instance does not share them"`
 	Note          string `json:"note,omitempty"`
 	Hits          int    `json:"hits"`
 	CreatedAt     string `json:"created_at"`

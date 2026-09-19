@@ -126,9 +126,14 @@ submitter's address there should be a decision rather than a default. Set
 
 The `ip` field is also *validated*, not just withheld. dsforms records the
 `X-Forwarded-For` header as it arrived, so what is in it is whatever a stranger
-typed; if it is not an address, it is not passed on, and `ip_withheld` says so —
-which is what separates "this instance does not share addresses" from "what was
-recorded is not one". A trailing port is accepted and dropped.
+typed; if it is not an address, it is not passed on. A trailing port is accepted
+and dropped.
+
+`ip_withheld`, `match_withheld` and `value_withheld` all say the same thing —
+**something is recorded here and you are not getting it** — as distinct from
+nothing being recorded, which sets no flag. The reason is either that this
+instance does not share addresses or that what was recorded is not one; a client
+cannot act differently on the two, so they are not distinguished.
 
 Withholding covers every route an address can take out, not just the `ip` field. The
 `repeat_ip` check records the address as what it matched, and a matched block
