@@ -288,6 +288,33 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 
+-- api_tokens are the credentials an MCP client presents. One row is one
+-- long-lived bearer token belonging to one user.
+--
+-- Only the hash is stored, exactly as for sessions: the raw token is returned
+-- once at creation and is unrecoverable afterwards, so a database read is not a
+-- set of live credentials.
+--
+-- The ON DELETE CASCADE is the point of binding a token to a user rather than to
+-- the instance. Removing someone's account removes their access in the same
+-- statement; an instance-wide token would outlive its owner with nobody to
+-- answer for what it did.
+--
+-- expires_at is '' for a token that never expires, matching held_at above rather
+-- than introducing the schema's first nullable column. Read the warning on
+-- GetAPIToken before writing any comparison against it.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL DEFAULT '',
+    token_hash   TEXT NOT NULL UNIQUE,
+    scopes       TEXT NOT NULL DEFAULT '',
+    created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+    last_used_at DATETIME NOT NULL DEFAULT '',
+    expires_at   DATETIME NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
+
 CREATE TABLE IF NOT EXISTS waitlists (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
