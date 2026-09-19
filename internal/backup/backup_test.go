@@ -74,7 +74,7 @@ func TestExportDoesNotAffectLiveDB(t *testing.T) {
 	}
 	defer os.Remove(path)
 	// Live DB should still work
-	forms, err := s.ListForms()
+	forms, err := s.ListForms(store.AllForms())
 	if err != nil {
 		t.Fatalf("ListForms after export: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestImportValidFile(t *testing.T) {
 	}
 
 	// Store A should now have the restored data
-	forms, err := s.ListForms()
+	forms, err := s.ListForms(store.AllForms())
 	if err != nil {
 		t.Fatalf("ListForms after import: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestImportInvalidFile(t *testing.T) {
 		t.Fatal("expected error importing invalid file")
 	}
 	// Store should still work after failed import
-	_, err := s.ListForms()
+	_, err := s.ListForms(store.AllForms())
 	if err != nil {
 		t.Fatalf("store broken after failed import: %v", err)
 	}

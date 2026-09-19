@@ -14,11 +14,11 @@ import (
 // Read-only by construction: every method is a query, so the dashboard cannot
 // mutate anything even by mistake.
 type OverviewStore interface {
-	HeldSince(days int) (held, total int, err error)
-	PerFormStats() ([]store.FormStats, error)
+	HeldSince(days int, forms store.FormScope) (held, total int, err error)
+	PerFormStats(forms store.FormScope) ([]store.FormStats, error)
 	RecentSubmissions(n int) ([]store.RecentSubmission, error)
-	SubmissionsPerDay(days int) ([]store.DayCounts, error)
-	TopSpamSignals(days int) ([]store.SignalTally, error)
+	SubmissionsPerDay(days int, forms store.FormScope) ([]store.DayCounts, error)
+	TopSpamSignals(days int, forms store.FormScope) ([]store.SignalTally, error)
 }
 
 // OverviewHandler renders the admin home: what arrived, what is waiting, and
@@ -119,7 +119,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 	}
 	data.Greeting = greeting(time.Now()) + ", " + data.CurrentUser.Username
 
-	series, err := h.Store.SubmissionsPerDay(days)
+	series, err := h.Store.SubmissionsPerDay(days, store.AllForms())
 	if err != nil {
 		log.Printf("overview: submissions per day: %v", err)
 		data.Degraded = true
@@ -146,7 +146,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 
 	// The previous window of the same length, so the delta is a comparison
 	// rather than a number floating on its own.
-	prev, err := h.Store.SubmissionsPerDay(days * 2)
+	prev, err := h.Store.SubmissionsPerDay(days*2, store.AllForms())
 	if err != nil {
 		log.Printf("overview: previous window: %v", err)
 		data.Degraded = true
@@ -158,7 +158,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	heldRecent, trafficRecent, err := h.Store.HeldSince(days)
+	heldRecent, trafficRecent, err := h.Store.HeldSince(days, store.AllForms())
 	if err != nil {
 		log.Printf("overview: held since: %v", err)
 		data.Degraded = true
@@ -193,7 +193,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	if tallies, err := h.Store.TopSpamSignals(days); err != nil {
+	if tallies, err := h.Store.TopSpamSignals(days, store.AllForms()); err != nil {
 		log.Printf("overview: top signals: %v", err)
 		data.Degraded = true
 	} else {
@@ -212,7 +212,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if stats, err := h.Store.PerFormStats(); err != nil {
+	if stats, err := h.Store.PerFormStats(store.AllForms()); err != nil {
 		log.Printf("overview: per-form stats: %v", err)
 		data.Degraded = true
 	} else {

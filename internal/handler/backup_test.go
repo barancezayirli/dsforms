@@ -131,7 +131,7 @@ func TestBackupImportValid(t *testing.T) {
 	}
 
 	// Verify imported data is accessible
-	forms, _ := s.ListForms()
+	forms, _ := s.ListForms(store.AllForms())
 	found := false
 	for _, f := range forms {
 		if f.Name == "Imported" {
@@ -159,7 +159,7 @@ func TestBackupImportInvalid(t *testing.T) {
 		t.Errorf("status = %d, want 302 (redirect with error flash)", w.Code)
 	}
 	// Store should still work
-	_, err := s.ListForms()
+	_, err := s.ListForms(store.AllForms())
 	if err != nil {
 		t.Fatalf("store broken after failed import: %v", err)
 	}

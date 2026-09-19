@@ -29,6 +29,13 @@ type NavCounts struct {
 	Unread   int
 	Held     int
 	Waitlist int
+
+	// WaitlistKnown is false when the counts were taken under a form scope.
+	// Waitlist entries do not belong to a form, so a scoped call cannot answer
+	// that question — and a zero it did not measure is the manufactured number
+	// this codebase keeps having to take back out, the same reason
+	// PositionKnown exists on the reader.
+	WaitlistKnown bool
 }
 
 // ErrSubmissionGone means there is no such submission at all — deleted, purged
@@ -215,10 +222,13 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 }
 
 // HeldSubmissions returns a page of the quarantine queue, newest first.
-func (s *Store) HeldSubmissions(limit, offset int) ([]Submission, error) {
+func (s *Store) HeldSubmissions(forms FormScope, limit, offset int) ([]Submission, error) {
+	scopeClause, scopeArgs := forms.clause("form_id")
+	args := append(scopeArgs, limit, offset)
 	return s.querySubmissions("held submissions",
-		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
-		limit, offset)
+		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1"+scopeClause+
+			" ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+		args...)
 }
 
 // GetHeldSubmission returns one held submission by id.
@@ -415,7 +425,10 @@ func (s *Store) MarkNotified(id string) error {
 // len(ids) a different number: ids the retention sweep already purged, or that
 // another admin acted on, match nothing. Reporting the length of the request
 // tells the operator "20 deleted" when 12 went.
-func (s *Store) DeleteHeld(ids []string) (int, error) {
+// forms bounds the delete: an id outside the scope matches nothing, and the
+// returned count is what actually went rather than what was asked for, which
+// the caller already relies on.
+func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 	// Batched because SQLite caps bound parameters at 32766 (SQLITE_MAX_VARIABLE_NUMBER).
 	// One IN (?,?,…) over an unbounded list fails outright with "too many SQL
 	// variables" — which is how "Empty quarantine" used to break on exactly the
@@ -439,7 +452,10 @@ func (s *Store) DeleteHeld(ids []string) (int, error) {
 			placeholders[i] = "?"
 			args = append(args, id)
 		}
-		query := "DELETE FROM submissions WHERE is_held = 1 AND id IN (" + strings.Join(placeholders, ",") + ")"
+		scopeClause, scopeArgs := forms.clause("form_id")
+		args = append(args, scopeArgs...)
+		query := "DELETE FROM submissions WHERE is_held = 1 AND id IN (" +
+			strings.Join(placeholders, ",") + ")" + scopeClause
 		// The running total is returned *with* the error, not discarded. Each
 		// batch autocommits on its own, so a failure in batch three leaves the
 		// first two permanently deleted — and returning 0 there tells the
@@ -495,15 +511,23 @@ func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
 // NavCounts returns the three sidebar badge numbers in one round trip. It runs
 // on every admin page render, so it is deliberately three indexed COUNTs and
 // nothing more.
-func (s *Store) NavCounts() (NavCounts, error) {
-	var n NavCounts
-	if err := s.conn().QueryRow(`
+func (s *Store) NavCounts(forms FormScope) (NavCounts, error) {
+	scopeClause, scopeArgs := forms.clause("form_id")
+	args := append(append([]any{}, scopeArgs...), scopeArgs...)
+
+	n := NavCounts{WaitlistKnown: forms.All()}
+	query := `
 		SELECT
-			(SELECT COUNT(*) FROM submissions WHERE read = 0 AND is_held = 0),
-			(SELECT COUNT(*) FROM submissions WHERE is_held = 1),
-			(SELECT COUNT(*) FROM waitlist_entries)
-	`).Scan(&n.Unread, &n.Held, &n.Waitlist); err != nil {
+			(SELECT COUNT(*) FROM submissions WHERE read = 0 AND is_held = 0` + scopeClause + `),
+			(SELECT COUNT(*) FROM submissions WHERE is_held = 1` + scopeClause + `)`
+	if err := s.conn().QueryRow(query, args...).Scan(&n.Unread, &n.Held); err != nil {
 		return NavCounts{}, fmt.Errorf("nav counts: %w", err)
+	}
+	if !n.WaitlistKnown {
+		return n, nil
+	}
+	if err := s.conn().QueryRow("SELECT COUNT(*) FROM waitlist_entries").Scan(&n.Waitlist); err != nil {
+		return NavCounts{}, fmt.Errorf("nav counts: waitlist: %w", err)
 	}
 	return n, nil
 }

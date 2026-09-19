@@ -765,16 +765,22 @@ func (s *Store) GetForm(id string) (Form, error) {
 	return f, nil
 }
 
-// ListForms returns all forms with unread counts.
-func (s *Store) ListForms() ([]FormSummary, error) {
+// ListForms returns the forms in scope, with unread counts.
+//
+// The scope filters forms themselves, not just their submissions: a token
+// bounded to one form has no business learning that the others exist, and their
+// names are often the customer's.
+func (s *Store) ListForms(scope FormScope) ([]FormSummary, error) {
+	scopeClause, scopeArgs := scope.clause("f.id")
 	rows, err := s.conn().Query(`
 		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at, f.spam_threshold,
 		       COUNT(CASE WHEN s.read = 0 AND s.is_held = 0 THEN 1 END) as unread_count
 		FROM forms f
 		LEFT JOIN submissions s ON s.form_id = f.id
+		WHERE 1 = 1`+scopeClause+`
 		GROUP BY f.id
 		ORDER BY f.created_at DESC
-	`)
+	`, scopeArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list forms: %w", err)
 	}
@@ -961,7 +967,7 @@ func (f ReadFilter) clause() (string, bool) {
 // The query is built by appending fixed clause strings and binding every value,
 // never by interpolating one: the only input that reaches the SQL text is a
 // constant chosen by the switch above.
-func (s *Store) ListSubmissionsFiltered(formID string, read ReadFilter, limit, offset int) ([]Submission, error) {
+func (s *Store) ListSubmissionsFiltered(formID string, read ReadFilter, forms FormScope, limit, offset int) ([]Submission, error) {
 	readClause, ok := read.clause()
 	if !ok {
 		return nil, fmt.Errorf("list submissions filtered: unknown read filter %q", read)
@@ -973,6 +979,13 @@ func (s *Store) ListSubmissionsFiltered(formID string, read ReadFilter, limit, o
 		query += " AND form_id = ?"
 		args = append(args, formID)
 	}
+	// In the statement, not applied to the page it returns. Thinning rows that
+	// LIMIT and OFFSET have already chosen is the bug this method's own comment
+	// above records for the read filter, and here it would read as "the form you
+	// are scoped to is empty" — the most convincing wrong answer available.
+	scopeClause, scopeArgs := forms.clause("form_id")
+	query += scopeClause
+	args = append(args, scopeArgs...)
 	query += readClause
 	// Tie-broken by id: created_at alone is not stable, and submissions arriving
 	// in the same second would let a LIMIT/OFFSET page repeat or skip a row.
@@ -982,10 +995,12 @@ func (s *Store) ListSubmissionsFiltered(formID string, read ReadFilter, limit, o
 	return s.querySubmissions("list submissions filtered", query, args...)
 }
 
-// CountAllSubmissions returns the total count of all submissions across all forms.
-func (s *Store) CountAllSubmissions() (int, error) {
+// CountAllSubmissions returns the total count of accepted submissions in scope.
+func (s *Store) CountAllSubmissions(forms FormScope) (int, error) {
+	scopeClause, scopeArgs := forms.clause("form_id")
 	var count int
-	err := s.conn().QueryRow("SELECT COUNT(*) FROM submissions WHERE is_held = 0").Scan(&count)
+	err := s.conn().QueryRow(
+		"SELECT COUNT(*) FROM submissions WHERE is_held = 0"+scopeClause, scopeArgs...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count all submissions: %w", err)
 	}

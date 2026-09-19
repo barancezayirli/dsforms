@@ -464,7 +464,7 @@ func TestShellDegradesOnATypedNilNavCounter(t *testing.T) {
 // nilNavCounter exists only to be a typed nil.
 type nilNavCounter struct{}
 
-func (n *nilNavCounter) NavCounts() (store.NavCounts, error) {
+func (n *nilNavCounter) NavCounts(store.FormScope) (store.NavCounts, error) {
 	return store.NavCounts{}, nil
 }
 

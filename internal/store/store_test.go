@@ -255,7 +255,7 @@ func TestListFormsWithUnreadCount(t *testing.T) {
 	_ = s.CreateSubmission(Submission{ID: "sub-2", FormID: "form-1", RawData: `{"name":"Bob"}`})
 	_ = s.MarkRead("sub-1")
 
-	forms, err := s.ListForms()
+	forms, err := s.ListForms(AllForms())
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -543,7 +543,7 @@ func TestCountAllSubmissions(t *testing.T) {
 	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
 	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
 	_ = s.CreateSubmission(Submission{ID: "s2", FormID: "f1", RawData: `{}`})
-	count, err := s.CountAllSubmissions()
+	count, err := s.CountAllSubmissions(AllForms())
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -814,7 +814,7 @@ func TestReopen(t *testing.T) {
 		t.Fatalf("Reopen error: %v", err)
 	}
 
-	forms, _ := sA.ListForms()
+	forms, _ := sA.ListForms(AllForms())
 	if len(forms) != 0 {
 		t.Errorf("forms = %d after reopen to fresh DB, want 0", len(forms))
 	}
@@ -1559,7 +1559,7 @@ func TestListSubmissionsFiltered(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := s.ListSubmissionsFiltered(tt.formID, tt.read, tt.limit, tt.offset)
+			got, err := s.ListSubmissionsFiltered(tt.formID, tt.read, AllForms(), tt.limit, tt.offset)
 			if err != nil {
 				t.Fatalf("ListSubmissionsFiltered: %v", err)
 			}
@@ -1593,7 +1593,7 @@ func TestListSubmissionsFilteredPopulatesTheWholeStruct(t *testing.T) {
 		t.Fatalf("CreateSubmission: %v", err)
 	}
 
-	got, err := s.ListSubmissionsFiltered("f1", ReadAny, 10, 0)
+	got, err := s.ListSubmissionsFiltered("f1", ReadAny, AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("ListSubmissionsFiltered: %v", err)
 	}
@@ -1648,7 +1648,7 @@ func TestListSubmissionsFilteredAppliesReadInSQL(t *testing.T) {
 	}
 
 	// The default page size, which is what a client actually asks for.
-	got, err := s.ListSubmissionsFiltered("f1", ReadRead, 25, 0)
+	got, err := s.ListSubmissionsFiltered("f1", ReadRead, AllForms(), 25, 0)
 	if err != nil {
 		t.Fatalf("ListSubmissionsFiltered: %v", err)
 	}
@@ -1660,7 +1660,7 @@ func TestListSubmissionsFilteredAppliesReadInSQL(t *testing.T) {
 	}
 
 	// And the complement still holds: the unread listing is unaffected by it.
-	unread, err := s.ListSubmissionsFiltered("f1", ReadUnread, 25, 0)
+	unread, err := s.ListSubmissionsFiltered("f1", ReadUnread, AllForms(), 25, 0)
 	if err != nil {
 		t.Fatalf("ListSubmissionsFiltered: %v", err)
 	}
@@ -1688,7 +1688,7 @@ func TestListSubmissionsFilteredRefusesAnUnknownFilter(t *testing.T) {
 	}
 
 	for _, bad := range []ReadFilter{"", "READ", "unread ", "anything"} {
-		got, err := s.ListSubmissionsFiltered("f1", bad, 10, 0)
+		got, err := s.ListSubmissionsFiltered("f1", bad, AllForms(), 10, 0)
 		if err == nil {
 			t.Errorf("ReadFilter(%q) was accepted and returned %d rows", bad, len(got))
 		}

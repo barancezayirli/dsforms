@@ -54,7 +54,7 @@ func TestSearchSubmissions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.SearchSubmissions(tt.query, 25)
+			got, err := s.SearchSubmissions(tt.query, AllForms(), 25)
 			if err != nil {
 				t.Fatalf("SearchSubmissions(%q): %v", tt.query, err)
 			}
@@ -78,13 +78,13 @@ func TestSearchSurvivesHostileInput(t *testing.T) {
 		`foo AND bar`, `(unbalanced`, `col:umn`, `^caret`, `star*`,
 		`-minus`, `a"b"c`, `"""`, `{}`, `[]`, `%`, `--`, `;DROP TABLE submissions`,
 	} {
-		if _, err := s.SearchSubmissions(query, 25); err != nil {
+		if _, err := s.SearchSubmissions(query, AllForms(), 25); err != nil {
 			t.Errorf("SearchSubmissions(%q) returned an error: %v", query, err)
 		}
 	}
 
 	// And the table is still there after the injection-shaped one.
-	if got, err := s.SearchSubmissions("static", 25); err != nil || len(got) != 2 {
+	if got, err := s.SearchSubmissions("static", AllForms(), 25); err != nil || len(got) != 2 {
 		t.Errorf("after hostile input: %v results, err %v", len(got), err)
 	}
 }
@@ -110,7 +110,7 @@ func TestSearchExcludesHeld(t *testing.T) {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
 
-	got, err := s.SearchSubmissions("unicorn", 25)
+	got, err := s.SearchSubmissions("unicorn", AllForms(), 25)
 	if err != nil {
 		t.Fatalf("SearchSubmissions: %v", err)
 	}
@@ -126,13 +126,13 @@ func TestSearchIndexFollowsWrites(t *testing.T) {
 	s := mustNew(t)
 	seedForSearch(t, s)
 
-	if got, _ := s.SearchSubmissions("pricing", 25); len(got) != 1 {
+	if got, _ := s.SearchSubmissions("pricing", AllForms(), 25); len(got) != 1 {
 		t.Fatalf("baseline: got %v, want 1", ids(got))
 	}
 	if err := s.DeleteSubmissions("f1", []string{"s2"}); err != nil {
 		t.Fatalf("DeleteSubmissions: %v", err)
 	}
-	if got, _ := s.SearchSubmissions("pricing", 25); len(got) != 0 {
+	if got, _ := s.SearchSubmissions("pricing", AllForms(), 25); len(got) != 0 {
 		t.Errorf("after delete: got %v, want none — the delete trigger did not fire", ids(got))
 	}
 }
@@ -148,14 +148,14 @@ func TestSearchRebuildsIndexForExistingRows(t *testing.T) {
 	if _, err := s.db.Exec("INSERT INTO submissions_fts(submissions_fts) VALUES ('delete-all')"); err != nil {
 		t.Fatalf("clearing index: %v", err)
 	}
-	if got, _ := s.SearchSubmissions("static", 25); len(got) != 0 {
+	if got, _ := s.SearchSubmissions("static", AllForms(), 25); len(got) != 0 {
 		t.Fatalf("fixture is wrong: index should be empty, got %v", ids(got))
 	}
 
 	if err := syncSearchIndex(s.db); err != nil {
 		t.Fatalf("syncSearchIndex: %v", err)
 	}
-	if got, _ := s.SearchSubmissions("static", 25); len(got) != 2 {
+	if got, _ := s.SearchSubmissions("static", AllForms(), 25); len(got) != 2 {
 		t.Errorf("after rebuild: got %v, want 2", ids(got))
 	}
 }
@@ -164,7 +164,7 @@ func TestSearchLimit(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	seedForSearch(t, s)
-	if got, _ := s.SearchSubmissions("example.com", 1); len(got) != 1 {
+	if got, _ := s.SearchSubmissions("example.com", AllForms(), 1); len(got) != 1 {
 		t.Errorf("limit not honoured: got %d results, want 1", len(got))
 	}
 }
@@ -226,7 +226,7 @@ func TestSearchFindsPunctuatedTerms(t *testing.T) {
 	}
 
 	for _, q := range []string{"O'Brien", "re-order", "order_id"} {
-		got, err := s.SearchSubmissions(q, 25)
+		got, err := s.SearchSubmissions(q, AllForms(), 25)
 		if err != nil {
 			t.Fatalf("SearchSubmissions(%q): %v", q, err)
 		}

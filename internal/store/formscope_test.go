@@ -1,8 +1,10 @@
 package store
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The zero value denying is the property every scoped query rests on. If a read
@@ -153,5 +155,283 @@ func TestAPITokensCarryTheirForms(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the scoped token is not in the listing")
+	}
+}
+
+// seedTwoForms plants two forms with distinguishable content, plus one held
+// submission each, so a scoped read has something it must not return.
+func seedTwoForms(t *testing.T, s *Store) {
+	t.Helper()
+	for _, f := range []Form{
+		{ID: "mine", Name: "Mine", EmailTo: "me@example.com"},
+		{ID: "theirs", Name: "Theirs", EmailTo: "them@example.com"},
+	} {
+		if err := s.CreateForm(f); err != nil {
+			t.Fatalf("CreateForm(%s): %v", f.ID, err)
+		}
+	}
+	base := time.Now().UTC().Truncate(time.Second)
+	for i, spec := range []struct{ id, form, word string }{
+		{"m1", "mine", "quarklight"},
+		{"t1", "theirs", "zephyrine"},
+	} {
+		if err := s.CreateSubmission(Submission{
+			ID: spec.id, FormID: spec.form,
+			RawData:   `{"message":"about ` + spec.word + `"}`,
+			CreatedAt: base.Add(-time.Duration(i) * time.Hour),
+		}); err != nil {
+			t.Fatalf("CreateSubmission(%s): %v", spec.id, err)
+		}
+		if err := s.CreateHeldSubmission(
+			Submission{ID: spec.id + "h", FormID: spec.form,
+				RawData: `{"message":"held ` + spec.word + `"}`, CreatedAt: base},
+			9, 6, []SpamSignal{{Check: "markup", Field: "message", Match: "x", Weight: 9}},
+		); err != nil {
+			t.Fatalf("CreateHeldSubmission(%sh): %v", spec.id, err)
+		}
+	}
+}
+
+// TestEveryScopedReadHonoursTheScope walks the reads the MCP path makes and
+// asserts none of them returns the other form's rows — and that each returns
+// the in-scope ones, so a method that simply broke could not pass.
+func TestEveryScopedReadHonoursTheScope(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedTwoForms(t, s)
+	mine := OnlyForms([]string{"mine"})
+
+	t.Run("ListForms", func(t *testing.T) {
+		forms, err := s.ListForms(mine)
+		if err != nil {
+			t.Fatalf("ListForms: %v", err)
+		}
+		if len(forms) != 1 || forms[0].ID != "mine" {
+			t.Fatalf("forms = %+v, want only mine", forms)
+		}
+	})
+
+	t.Run("ListSubmissionsFiltered", func(t *testing.T) {
+		subs, err := s.ListSubmissionsFiltered("", ReadAny, mine, 50, 0)
+		if err != nil {
+			t.Fatalf("ListSubmissionsFiltered: %v", err)
+		}
+		assertOnlyMine(t, subs)
+	})
+
+	t.Run("HeldSubmissions", func(t *testing.T) {
+		subs, err := s.HeldSubmissions(mine, 50, 0)
+		if err != nil {
+			t.Fatalf("HeldSubmissions: %v", err)
+		}
+		assertOnlyMine(t, subs)
+	})
+
+	t.Run("SearchSubmissions", func(t *testing.T) {
+		hits, err := s.SearchSubmissions("zephyrine", mine, 50)
+		if err != nil {
+			t.Fatalf("SearchSubmissions: %v", err)
+		}
+		if len(hits) != 0 {
+			t.Errorf("searching for the other form's word returned %+v", hits)
+		}
+		mineHits, err := s.SearchSubmissions("quarklight", mine, 50)
+		if err != nil {
+			t.Fatalf("SearchSubmissions: %v", err)
+		}
+		if len(mineHits) != 1 {
+			t.Errorf("searching for my own word returned %d rows, want 1", len(mineHits))
+		}
+	})
+
+	t.Run("CountAllSubmissions", func(t *testing.T) {
+		n, err := s.CountAllSubmissions(mine)
+		if err != nil {
+			t.Fatalf("CountAllSubmissions: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("count = %d, want 1 (one accepted submission on my form)", n)
+		}
+	})
+
+	t.Run("NavCounts", func(t *testing.T) {
+		n, err := s.NavCounts(mine)
+		if err != nil {
+			t.Fatalf("NavCounts: %v", err)
+		}
+		if n.Unread != 1 || n.Held != 1 {
+			t.Errorf("counts = %+v, want one unread and one held", n)
+		}
+		// The waitlist has no form, so a scoped call cannot answer it. It says
+		// so rather than reporting a zero it did not measure.
+		if n.WaitlistKnown {
+			t.Error("a scoped NavCounts claimed to know the waitlist count")
+		}
+	})
+
+	t.Run("PerFormStats", func(t *testing.T) {
+		stats, err := s.PerFormStats(mine)
+		if err != nil {
+			t.Fatalf("PerFormStats: %v", err)
+		}
+		for _, st := range stats {
+			if st.FormID == "theirs" || st.Name == "Theirs" {
+				t.Errorf("the other form appeared: %+v", st)
+			}
+		}
+		if len(stats) != 1 {
+			t.Errorf("stats = %+v, want one row", stats)
+		}
+	})
+
+	t.Run("HeldSince", func(t *testing.T) {
+		held, total, err := s.HeldSince(7, mine)
+		if err != nil {
+			t.Fatalf("HeldSince: %v", err)
+		}
+		if held != 1 || total != 2 {
+			t.Errorf("held=%d total=%d, want 1 and 2 — my form's rows only", held, total)
+		}
+	})
+
+	t.Run("SubmissionsPerDay", func(t *testing.T) {
+		days, err := s.SubmissionsPerDay(7, mine)
+		if err != nil {
+			t.Fatalf("SubmissionsPerDay: %v", err)
+		}
+		sum := 0
+		for _, d := range days {
+			sum += d.Accepted + d.Held
+		}
+		if sum != 2 {
+			t.Errorf("counted %d submissions across the window, want 2", sum)
+		}
+	})
+
+	t.Run("TopSpamSignals", func(t *testing.T) {
+		tallies, err := s.TopSpamSignals(7, mine)
+		if err != nil {
+			t.Fatalf("TopSpamSignals: %v", err)
+		}
+		hits := 0
+		for _, tl := range tallies {
+			hits += tl.Hits
+		}
+		if hits != 1 {
+			t.Errorf("counted %d signals, want 1 — the other form's held row must not be tallied", hits)
+		}
+	})
+
+	t.Run("DeleteHeld", func(t *testing.T) {
+		// A mixed list: the out-of-scope id must match nothing, and the count
+		// must report what actually went rather than what was asked for.
+		n, err := s.DeleteHeld([]string{"m1h", "t1h"}, mine)
+		if err != nil {
+			t.Fatalf("DeleteHeld: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("deleted %d, want 1", n)
+		}
+		if _, err := s.GetHeldSubmission("t1h"); err != nil {
+			t.Errorf("the other form's held submission was deleted: %v", err)
+		}
+	})
+}
+
+func assertOnlyMine(t *testing.T, subs []Submission) {
+	t.Helper()
+	if len(subs) == 0 {
+		t.Fatal("no rows at all, so this asserted nothing")
+	}
+	for _, sub := range subs {
+		if sub.FormID != "mine" {
+			t.Errorf("returned a submission from %q", sub.FormID)
+		}
+	}
+}
+
+// TestAScopedListingFiltersInSQLNotAfterPaging.
+//
+// This branch has already shipped this bug once, in the read filter: thinning
+// the page that LIMIT and OFFSET already chose means rows behind a screenful of
+// out-of-scope ones report as not existing. Here it would read as "the form you
+// are scoped to is empty", which is the most convincing wrong answer available.
+func TestAScopedListingFiltersInSQLNotAfterPaging(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedTwoForms(t, s)
+
+	// A full page of the other form's submissions, all newer than mine, so a
+	// post-filtered first page would contain nothing of mine at all.
+	base := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < 30; i++ {
+		if err := s.CreateSubmission(Submission{
+			ID: "pad" + strconv.Itoa(i), FormID: "theirs",
+			RawData: `{"message":"padding"}`, CreatedAt: base.Add(time.Duration(i+1) * time.Hour),
+		}); err != nil {
+			t.Fatalf("CreateSubmission: %v", err)
+		}
+	}
+
+	subs, err := s.ListSubmissionsFiltered("", ReadAny, OnlyForms([]string{"mine"}), 25, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsFiltered: %v", err)
+	}
+	if len(subs) != 1 {
+		t.Fatalf("got %d rows, want 1 — my form's submission sits behind a page of the other form's", len(subs))
+	}
+	if subs[0].FormID != "mine" {
+		t.Errorf("returned a submission from %q", subs[0].FormID)
+	}
+}
+
+// TestAnUnscopedReadStillSeesEverything is the other direction. Every one of
+// these methods serves the admin too, and the admin is not scoped.
+func TestAnUnscopedReadStillSeesEverything(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedTwoForms(t, s)
+
+	forms, err := s.ListForms(AllForms())
+	if err != nil {
+		t.Fatalf("ListForms: %v", err)
+	}
+	if len(forms) != 2 {
+		t.Errorf("forms = %d, want both", len(forms))
+	}
+
+	n, err := s.NavCounts(AllForms())
+	if err != nil {
+		t.Fatalf("NavCounts: %v", err)
+	}
+	if n.Unread != 2 || n.Held != 2 {
+		t.Errorf("counts = %+v, want both forms' rows", n)
+	}
+	if !n.WaitlistKnown {
+		t.Error("an unscoped NavCounts must be able to answer the waitlist count")
+	}
+}
+
+// TestAScopeThatNamesNothingReadsNothing is the zero value reaching SQL rather
+// than only Allows. A forgotten scope must return an empty page.
+func TestAScopeThatNamesNothingReadsNothing(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedTwoForms(t, s)
+
+	var unset FormScope
+	subs, err := s.ListSubmissionsFiltered("", ReadAny, unset, 50, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsFiltered: %v", err)
+	}
+	if len(subs) != 0 {
+		t.Errorf("an unset scope returned %d rows", len(subs))
+	}
+	forms, err := s.ListForms(unset)
+	if err != nil {
+		t.Fatalf("ListForms: %v", err)
+	}
+	if len(forms) != 0 {
+		t.Errorf("an unset scope returned %d forms", len(forms))
 	}
 }

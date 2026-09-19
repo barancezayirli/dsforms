@@ -27,7 +27,7 @@ import (
 // only GetForm. Splitting it is a separate change; naming the surface is the
 // precondition for seeing that it wants splitting.
 type AdminStore interface {
-	CountAllSubmissions() (int, error)
+	CountAllSubmissions(forms store.FormScope) (int, error)
 	CountSubmissions(formID string) (int, error)
 	CreateForm(f store.Form) error
 	DeleteForm(id string) error
@@ -36,13 +36,13 @@ type AdminStore interface {
 	GetForm(id string) (store.Form, error)
 	GetSubmission(id string) (store.Submission, error)
 	HeldCountForForm(formID string) (int, error)
-	ListForms() ([]store.FormSummary, error)
+	ListForms(forms store.FormScope) ([]store.FormSummary, error)
 	ListSubmissions(formID string) ([]store.Submission, error)
 	ListSubmissionsPaged(formID string, limit, offset int) ([]store.Submission, error)
 	MarkAllRead(formID string) error
 	MarkRead(submissionID string) error
 	Neighbours(formID, subID string) (newerID, olderID string, position, total int, err error)
-	PerFormStats() ([]store.FormStats, error)
+	PerFormStats(forms store.FormScope) ([]store.FormStats, error)
 	SubmissionSignals(submissionID string) ([]store.SpamSignal, error)
 	SubmissionsPerFormPerDay(days int) (map[string][]int, error)
 	UnreadCount(formID string) (int, error)
@@ -107,14 +107,14 @@ type formEditData struct {
 // Dashboard renders the admin dashboard with form list and stats.
 func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 
-	forms, err := h.Store.ListForms()
+	forms, err := h.Store.ListForms(store.AllForms())
 	if err != nil {
 		log.Printf("dashboard: list forms error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	totalAll, err := h.Store.CountAllSubmissions()
+	totalAll, err := h.Store.CountAllSubmissions(store.AllForms())
 	if err != nil {
 		log.Printf("dashboard: count submissions error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -124,7 +124,7 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	// Counts and sparklines come from two grouped queries rather than a pair
 	// per form: an instance with fifty forms would otherwise issue a hundred
 	// queries to draw one page.
-	stats, err := h.Store.PerFormStats()
+	stats, err := h.Store.PerFormStats(store.AllForms())
 	degraded := err != nil
 	if err != nil {
 		log.Printf("dashboard: per-form stats: %v", err)

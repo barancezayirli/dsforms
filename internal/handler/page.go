@@ -21,7 +21,7 @@ import (
 // handler, so a *store.Store here was a second, wider route to the database from
 // handlers that had already declared the narrow one they use.
 type NavCounter interface {
-	NavCounts() (store.NavCounts, error)
+	NavCounts(forms store.FormScope) (store.NavCounts, error)
 }
 
 // Base is the state every admin handler needs, and every admin handler embeds
@@ -154,7 +154,7 @@ func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active strin
 		data.Degraded = true
 		return data
 	}
-	counts, err := b.Nav.NavCounts()
+	counts, err := b.Nav.NavCounts(store.AllForms())
 	if err != nil {
 		// A zeroed badge is indistinguishable from an empty queue, so the
 		// failure is recorded rather than only logged.

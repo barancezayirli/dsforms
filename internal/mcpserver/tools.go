@@ -368,7 +368,7 @@ func (s *Server) toSignals(sigs []store.SpamSignal) []signalOut {
 // once, and a listing that silently prints ids where it printed names reads as a
 // different database rather than as a failed lookup.
 func (s *Server) formNames() (map[string]string, error) {
-	forms, err := s.store.ListForms()
+	forms, err := s.store.ListForms(store.AllForms())
 	if err != nil {
 		return nil, fmt.Errorf("reading forms: %w", err)
 	}
@@ -532,13 +532,13 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		if err := requireScope(req, ScopeRead); err != nil {
 			return nil, listFormsOut{}, err
 		}
-		forms, err := s.store.ListForms()
+		forms, err := s.store.ListForms(store.AllForms())
 		if err != nil {
 			return nil, listFormsOut{}, fmt.Errorf("listing forms: %w", err)
 		}
 		// Per-form received/held come from the aggregate the overview already
 		// uses, rather than a second count per form in a loop.
-		stats, err := s.store.PerFormStats()
+		stats, err := s.store.PerFormStats(store.AllForms())
 		if err != nil {
 			return nil, listFormsOut{}, fmt.Errorf("reading form statistics: %w", err)
 		}
@@ -600,7 +600,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		}
 
 		limit, offset := clampLimit(in.Limit), clampOffset(in.Offset)
-		subs, err := s.store.ListSubmissionsFiltered(in.FormID, filter, limit, offset)
+		subs, err := s.store.ListSubmissionsFiltered(in.FormID, filter, store.AllForms(), limit, offset)
 		if err != nil {
 			return nil, listSubmissionsOut{}, fmt.Errorf("listing submissions: %w", err)
 		}
@@ -661,7 +661,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		if strings.TrimSpace(in.Query) == "" {
 			return nil, listSubmissionsOut{}, fmt.Errorf("query must not be empty")
 		}
-		results, err := s.store.SearchSubmissions(in.Query, clampLimit(in.Limit))
+		results, err := s.store.SearchSubmissions(in.Query, store.AllForms(), clampLimit(in.Limit))
 		if err != nil {
 			return nil, listSubmissionsOut{}, fmt.Errorf("searching: %w", err)
 		}
@@ -683,11 +683,11 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		if err := requireScope(req, ScopeRead); err != nil {
 			return nil, listQuarantineOut{}, err
 		}
-		subs, err := s.store.HeldSubmissions(clampLimit(in.Limit), clampOffset(in.Offset))
+		subs, err := s.store.HeldSubmissions(store.AllForms(), clampLimit(in.Limit), clampOffset(in.Offset))
 		if err != nil {
 			return nil, listQuarantineOut{}, fmt.Errorf("listing quarantine: %w", err)
 		}
-		counts, err := s.store.NavCounts()
+		counts, err := s.store.NavCounts(store.AllForms())
 		if err != nil {
 			return nil, listQuarantineOut{}, fmt.Errorf("counting quarantine: %w", err)
 		}
@@ -751,27 +751,27 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		// overview can log-and-continue because it renders a banner saying it
 		// did; a tool result has nowhere to put that caveat, and a statistics
 		// call that answers 0 is indistinguishable from a fresh install.
-		counts, err := s.store.NavCounts()
+		counts, err := s.store.NavCounts(store.AllForms())
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading counts: %w", err)
 		}
-		total, err := s.store.CountAllSubmissions()
+		total, err := s.store.CountAllSubmissions(store.AllForms())
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("counting submissions: %w", err)
 		}
-		held, totalInWindow, err := s.store.HeldSince(days)
+		held, totalInWindow, err := s.store.HeldSince(days, store.AllForms())
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading the quarantine rate: %w", err)
 		}
-		perForm, err := s.store.PerFormStats()
+		perForm, err := s.store.PerFormStats(store.AllForms())
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading per-form statistics: %w", err)
 		}
-		perDay, err := s.store.SubmissionsPerDay(days)
+		perDay, err := s.store.SubmissionsPerDay(days, store.AllForms())
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading per-day statistics: %w", err)
 		}
-		tallies, err := s.store.TopSpamSignals(days)
+		tallies, err := s.store.TopSpamSignals(days, store.AllForms())
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading spam signal tallies: %w", err)
 		}
@@ -1044,7 +1044,7 @@ func (s *Server) registerDeleteTools(srv *mcp.Server) {
 		if len(in.SubmissionIDs) > maxLimit {
 			return nil, deleteCountOut{}, fmt.Errorf("at most %d ids per call, got %d", maxLimit, len(in.SubmissionIDs))
 		}
-		n, err := s.store.DeleteHeld(in.SubmissionIDs)
+		n, err := s.store.DeleteHeld(in.SubmissionIDs, store.AllForms())
 		if err != nil {
 			return nil, deleteCountOut{}, fmt.Errorf("deleting quarantined submissions: %w", err)
 		}

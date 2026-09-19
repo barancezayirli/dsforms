@@ -24,19 +24,21 @@ const dayKey = "2006-01-02"
 // The zero-filling is the point: the chart's x axis is time, so a quiet day has
 // to occupy its slot. Letting SQL return only non-empty days would silently
 // compress the timeline and make a sparse week look busy.
-func (s *Store) SubmissionsPerDay(days int) ([]DayCounts, error) {
+func (s *Store) SubmissionsPerDay(days int, forms FormScope) ([]DayCounts, error) {
 	if days < 1 {
 		days = 1
 	}
 	start := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -(days - 1))
 
+	scopeClause, scopeArgs := forms.clause("form_id")
+	args := append([]any{sqliteTimestamp(start)}, scopeArgs...)
 	rows, err := s.conn().Query(`
 		SELECT date(created_at) AS day,
 		       COUNT(CASE WHEN is_held = 0 THEN 1 END),
 		       COUNT(CASE WHEN is_held = 1 THEN 1 END)
 		FROM submissions
-		WHERE created_at >= ?
-		GROUP BY day`, sqliteTimestamp(start))
+		WHERE created_at >= ?`+scopeClause+`
+		GROUP BY day`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("submissions per day: %w", err)
 	}
@@ -124,7 +126,11 @@ type FormStats struct {
 }
 
 // PerFormStats returns per-form totals for the overview table.
-func (s *Store) PerFormStats() ([]FormStats, error) {
+func (s *Store) PerFormStats(forms FormScope) ([]FormStats, error) {
+	// Scoped on the form rather than on the join, so an out-of-scope form is
+	// absent entirely rather than present with zeroes — which would disclose
+	// both that it exists and what it is called.
+	scopeClause, scopeArgs := forms.clause("f.id")
 	rows, err := s.conn().Query(`
 		SELECT f.id, f.name,
 		       COUNT(CASE WHEN s.is_held = 0 THEN 1 END),
@@ -133,8 +139,9 @@ func (s *Store) PerFormStats() ([]FormStats, error) {
 		       COUNT(CASE WHEN s.is_held = 0 AND s.read = 1 THEN 1 END)
 		FROM forms f
 		LEFT JOIN submissions s ON s.form_id = f.id
+		WHERE 1 = 1`+scopeClause+`
 		GROUP BY f.id
-		ORDER BY 3 DESC, f.created_at DESC`)
+		ORDER BY 3 DESC, f.created_at DESC`, scopeArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("per form stats: %w", err)
 	}
@@ -201,15 +208,19 @@ type SignalTally struct {
 // It reads the stored spam_signals rows rather than re-scoring anything: the
 // weights in internal/spam can be retuned and the threshold is configurable, so
 // re-scoring old submissions would report reasons that were never applied.
-func (s *Store) TopSpamSignals(days int) ([]SignalTally, error) {
+func (s *Store) TopSpamSignals(days int, forms FormScope) ([]SignalTally, error) {
 	start := time.Now().UTC().AddDate(0, 0, -days)
+	// Through the join: spam_signals has no form_id of its own, so the scope
+	// has to reach it by way of the submission it belongs to.
+	scopeClause, scopeArgs := forms.clause("s.form_id")
+	args := append([]any{sqliteTimestamp(start)}, scopeArgs...)
 	rows, err := s.conn().Query(`
 		SELECT g.rule, COUNT(*), MAX(g.weight)
 		FROM spam_signals g
 		JOIN submissions s ON s.id = g.submission_id
-		WHERE s.created_at >= ?
+		WHERE s.created_at >= ?`+scopeClause+`
 		GROUP BY g.rule
-		ORDER BY 2 DESC`, sqliteTimestamp(start))
+		ORDER BY 2 DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("top spam signals: %w", err)
 	}
@@ -231,11 +242,13 @@ func (s *Store) TopSpamSignals(days int) ([]SignalTally, error) {
 
 // HeldSince counts submissions held in the last n days, for the "15.7% of
 // traffic" style stats.
-func (s *Store) HeldSince(days int) (held, total int, err error) {
+func (s *Store) HeldSince(days int, forms FormScope) (held, total int, err error) {
 	start := time.Now().UTC().AddDate(0, 0, -days)
+	scopeClause, scopeArgs := forms.clause("form_id")
+	args := append([]any{sqliteTimestamp(start)}, scopeArgs...)
 	row := s.conn().QueryRow(`
 		SELECT COUNT(CASE WHEN is_held = 1 THEN 1 END), COUNT(*)
-		FROM submissions WHERE created_at >= ?`, sqliteTimestamp(start))
+		FROM submissions WHERE created_at >= ?`+scopeClause, args...)
 	if err := row.Scan(&held, &total); err != nil {
 		return 0, 0, fmt.Errorf("held since: %w", err)
 	}

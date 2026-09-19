@@ -44,7 +44,7 @@ func TestCreateHeldSubmissionStoresScoreAndSignals(t *testing.T) {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestRestoreSubmission(t *testing.T) {
 		t.Error("a restored submission must land unread — it has never been seen")
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestDeleteHeldCascadesSignals(t *testing.T) {
 		}
 	}
 
-	n, err := s.DeleteHeld([]string{"a", "b"})
+	n, err := s.DeleteHeld([]string{"a", "b"}, AllForms())
 	if err != nil {
 		t.Fatalf("DeleteHeld: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestDeleteHeldCascadesSignals(t *testing.T) {
 		t.Errorf("DeleteHeld reported %d rows, want 2", n)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestDeleteHeldIgnoresAcceptedSubmissions(t *testing.T) {
 	// The reported count is now the direct evidence the is_held guard held: an
 	// accepted submission's id matches nothing, so nothing is deleted and
 	// nothing is claimed.
-	n, err := s.DeleteHeld([]string{"clean"})
+	n, err := s.DeleteHeld([]string{"clean"}, AllForms())
 	if err != nil {
 		t.Fatalf("DeleteHeld: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestDeleteHeldIgnoresAcceptedSubmissions(t *testing.T) {
 func TestDeleteHeldEmptyIsNoOp(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	n, err := s.DeleteHeld(nil)
+	n, err := s.DeleteHeld(nil, AllForms())
 	if err != nil {
 		t.Errorf("DeleteHeld(nil) = %v, want nil", err)
 	}
@@ -281,7 +281,7 @@ func TestPurgeHeldOlderThan(t *testing.T) {
 		t.Errorf("purged %d, want 1", n)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestNavCounts(t *testing.T) {
 		t.Fatalf("CreateEntry: %v", err)
 	}
 
-	nav, err := s.NavCounts()
+	nav, err := s.NavCounts(AllForms())
 	if err != nil {
 		t.Fatalf("NavCounts: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestUpgradeFromPreQuarantineSchema(t *testing.T) {
 		[]SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
 		t.Fatalf("CreateHeldSubmission after upgrade: %v", err)
 	}
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions after upgrade: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestDeleteHeldExceedsSQLiteVariableLimit(t *testing.T) {
 		ids = append(ids, fmt.Sprintf("absent%06d", i))
 	}
 
-	n, err := s.DeleteHeld(ids)
+	n, err := s.DeleteHeld(ids, AllForms())
 	if err != nil {
 		t.Fatalf("DeleteHeld with %d ids: %v", len(ids), err)
 	}
@@ -684,7 +684,7 @@ func TestDeleteAllHeld(t *testing.T) {
 		t.Errorf("reported %d deleted, want 3 — the flash message shows this number", n)
 	}
 
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(AllForms(), 10, 0)
 	if len(held) != 0 {
 		t.Errorf("%d held rows survived", len(held))
 	}
@@ -841,7 +841,7 @@ func TestAcceptedReadsCarryEveryColumn(t *testing.T) {
 	})
 
 	t.Run("SearchSubmissions", func(t *testing.T) {
-		hits, err := s.SearchSubmissions("Bot", 25)
+		hits, err := s.SearchSubmissions("Bot", AllForms(), 25)
 		if err != nil {
 			t.Fatalf("SearchSubmissions: %v", err)
 		}
@@ -947,7 +947,7 @@ func TestGetHeldSubmission(t *testing.T) {
 		// Scoped to this subtest's own row. DeleteAllHeld would take h1 with it
 		// and break the sibling below — these subtests share one store, so a
 		// global mutation here is a landmine for whoever adds the next one.
-		if _, err := s.DeleteHeld([]string{"purged"}); err != nil {
+		if _, err := s.DeleteHeld([]string{"purged"}, AllForms()); err != nil {
 			t.Fatalf("DeleteHeld: %v", err)
 		}
 		if _, err := s.GetHeldSubmission("purged"); !errors.Is(err, ErrSubmissionGone) {
@@ -1041,7 +1041,7 @@ func TestMarkSpamMovesAnAcceptedSubmissionIntoQuarantine(t *testing.T) {
 	if len(inbox) != 0 {
 		t.Errorf("inbox still holds %d submissions, want 0", len(inbox))
 	}
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}

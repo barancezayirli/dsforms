@@ -232,7 +232,7 @@ func TestCreateFormValid(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
 	}
-	forms, _ := s.ListForms()
+	forms, _ := s.ListForms(store.AllForms())
 	if len(forms) != 1 {
 		t.Fatalf("forms = %d, want 1", len(forms))
 	}
@@ -676,7 +676,7 @@ func TestCreateFormWebhookFields(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
 	}
-	forms, _ := s.ListForms()
+	forms, _ := s.ListForms(store.AllForms())
 	if len(forms) != 1 {
 		t.Fatalf("forms = %d, want 1", len(forms))
 	}
@@ -723,7 +723,7 @@ func TestCreateFormEmailOptional(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302 (email should be optional now)", w.Code)
 	}
-	forms, _ := s.ListForms()
+	forms, _ := s.ListForms(store.AllForms())
 	if len(forms) != 1 {
 		t.Fatalf("forms = %d, want 1", len(forms))
 	}
@@ -790,7 +790,7 @@ func TestCreateFormWebhookFormatDefaulting(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
 	}
-	forms, _ := s.ListForms()
+	forms, _ := s.ListForms(store.AllForms())
 	if len(forms) != 1 {
 		t.Fatalf("forms = %d, want 1", len(forms))
 	}
@@ -811,7 +811,7 @@ func TestCreateFormWebhookFormatClearedWhenNoURL(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Errorf("status = %d, want 302", w.Code)
 	}
-	forms, _ := s.ListForms()
+	forms, _ := s.ListForms(store.AllForms())
 	if forms[0].WebhookFormat != "" {
 		t.Errorf("WebhookFormat = %q, want empty (URL is empty)", forms[0].WebhookFormat)
 	}
@@ -857,7 +857,7 @@ func TestCreateFormRejectsUnusableRedirect(t *testing.T) {
 			if !strings.Contains(w.Body.String(), "Redirect must be") {
 				t.Errorf("page did not explain the redirect problem; got:\n%s", w.Body.String())
 			}
-			if forms, _ := s.ListForms(); len(forms) != 0 {
+			if forms, _ := s.ListForms(store.AllForms()); len(forms) != 0 {
 				t.Errorf("stored %d forms, want 0 — nothing should be created", len(forms))
 			}
 		})

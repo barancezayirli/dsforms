@@ -69,7 +69,7 @@ func TestSubmitHoldsSpamInsteadOfDropping(t *testing.T) {
 		t.Errorf("status = %d, want a success response", rr.Code)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestSubmitCleanSubmissionStillNotifies(t *testing.T) {
 	if len(subs) != 1 {
 		t.Fatalf("got %d submissions, want 1", len(subs))
 	}
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(held) != 0 {
 		t.Errorf("a clean submission was held: %v", held)
 	}
@@ -158,7 +158,7 @@ func TestSubmitHoneypotBeatsAllowRule(t *testing.T) {
 	}, "203.0.113.7")
 
 	subs, _ := s.ListSubmissions("f1")
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(subs) != 0 || len(held) != 0 {
 		t.Errorf("honeypot-filled submission was stored (subs=%d held=%d) — the allow list "+
 			"must not be able to bypass the honeypot", len(subs), len(held))
@@ -179,7 +179,7 @@ func TestSubmitAllowRuleSkipsScoring(t *testing.T) {
 		"email": "vip@example.com", "message": "[url=http://x.example]see my site[/url]",
 	}, "203.0.113.8")
 
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(held) != 0 {
 		t.Fatalf("an allowlisted sender was held anyway: %v", held)
 	}
@@ -210,7 +210,7 @@ func TestSubmitBlockRuleHoldsImmediately(t *testing.T) {
 		"email": "someone@spam.example", "message": "a perfectly ordinary message",
 	}, "203.0.113.9")
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestSubmitRepeatIPIsHeldWithItsOwnSignal(t *testing.T) {
 		submitTo(t, h, "f1", map[string]string{"message": "hello there, a normal message"}, ip)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestSubmitAllowRuleSkipsRepeatIP(t *testing.T) {
 		}, ip)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestSubmitBlockRuleLeavesFieldEmpty(t *testing.T) {
 	}
 	submitTo(t, h, "f1", map[string]string{"message": "ordinary"}, "203.0.113.9")
 
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(held) != 1 {
 		t.Fatalf("got %d held, want 1", len(held))
 	}
@@ -363,7 +363,7 @@ func TestSubmitPerFormThresholdOverride(t *testing.T) {
 
 		submitTo(t, h, "f1", map[string]string{"message": "buy backlinks now"}, "203.0.113.11")
 
-		held, _ := s.HeldSubmissions(10, 0)
+		held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 		if len(held) != 1 {
 			t.Fatalf("got %d held at threshold 4, want 1 — a keyword scores 5", len(held))
 		}
@@ -383,7 +383,7 @@ func TestSubmitPerFormThresholdOverride(t *testing.T) {
 
 		submitTo(t, h, "f1", map[string]string{"message": "[url=http://x.example]hi[/url]"}, "203.0.113.12")
 
-		held, _ := s.HeldSubmissions(10, 0)
+		held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 		if len(held) != 0 {
 			t.Errorf("got %d held at threshold 9, want 0 — markup scores only 6", len(held))
 		}
@@ -405,7 +405,7 @@ func TestSubmitCustomKeywordPilesUpButDoesNotHoldAlone(t *testing.T) {
 	}
 
 	submitTo(t, h, "f1", map[string]string{"message": "join our telegram pump group"}, "203.0.113.13")
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(held) != 0 {
 		t.Errorf("a single custom keyword held a submission on its own: %v", held)
 	}
@@ -414,7 +414,7 @@ func TestSubmitCustomKeywordPilesUpButDoesNotHoldAlone(t *testing.T) {
 	submitTo(t, h, "f1", map[string]string{
 		"message": "join our telegram pump group [url=http://x.example]here[/url]",
 	}, "203.0.113.14")
-	held, _ = s.HeldSubmissions(10, 0)
+	held, _ = s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(held) != 1 {
 		t.Errorf("got %d held, want 1 once the keyword piles up with markup", len(held))
 	}

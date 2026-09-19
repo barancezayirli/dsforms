@@ -88,7 +88,9 @@ func syncSearchIndex(db execQuerier) error {
 }
 
 // SearchSubmissions returns accepted submissions matching a query, best first.
-func (s *Store) SearchSubmissions(query string, limit int) ([]SearchResult, error) {
+// forms bounds the search. The FTS table carries no form_id, so the scope
+// reaches it through the join back to submissions, which the query already has.
+func (s *Store) SearchSubmissions(query string, forms FormScope, limit int) ([]SearchResult, error) {
 	match := ftsQuery(query)
 	if match == "" {
 		return nil, nil
@@ -97,14 +99,17 @@ func (s *Store) SearchSubmissions(query string, limit int) ([]SearchResult, erro
 		limit = 25
 	}
 
+	scopeClause, scopeArgs := forms.clause("s.form_id")
+	args := append([]any{match}, scopeArgs...)
+	args = append(args, limit)
 	rows, err := s.conn().Query(`
 		SELECT `+heldColumnsWithFormName("s")+`
 		FROM submissions_fts x
 		JOIN submissions s ON s.rowid = x.rowid
 		JOIN forms f ON f.id = s.form_id
-		WHERE submissions_fts MATCH ? AND s.is_held = 0
+		WHERE submissions_fts MATCH ? AND s.is_held = 0`+scopeClause+`
 		ORDER BY rank
-		LIMIT ?`, match, limit)
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search submissions: %w", err)
 	}

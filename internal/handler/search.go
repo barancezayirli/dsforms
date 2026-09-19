@@ -11,7 +11,7 @@ import (
 // SearchStore is what search needs from storage: the search query, and nothing
 // else.
 type SearchStore interface {
-	SearchSubmissions(query string, limit int) ([]store.SearchResult, error)
+	SearchSubmissions(query string, forms store.FormScope, limit int) ([]store.SearchResult, error)
 }
 
 // SearchHandler serves the header search field and ⌘K.
@@ -45,7 +45,7 @@ func (h *SearchHandler) Page(w http.ResponseWriter, r *http.Request) {
 	data.Title = "Search"
 
 	if query != "" {
-		results, err := h.Store.SearchSubmissions(query, 50)
+		results, err := h.Store.SearchSubmissions(query, store.AllForms(), 50)
 		if err != nil {
 			log.Printf("search %q: %v", query, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)

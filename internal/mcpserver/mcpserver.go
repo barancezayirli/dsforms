@@ -41,21 +41,23 @@ import (
 // is not a handler and main.go's assertion block is read by a test that requires
 // every handler field to be wired.
 type Store interface {
-	// Reads.
-	CountAllSubmissions() (int, error)
+	// Reads. Every one that can span forms takes a store.FormScope, so that
+	// bounding a token to a form is a property of the statement rather than of
+	// whoever remembered to filter the rows afterwards.
+	CountAllSubmissions(forms store.FormScope) (int, error)
 	GetSubmission(id string) (store.Submission, error)
 	GetUserByID(id string) (store.User, error)
-	HeldSince(days int) (held, total int, err error)
-	HeldSubmissions(limit, offset int) ([]store.Submission, error)
+	HeldSince(days int, forms store.FormScope) (held, total int, err error)
+	HeldSubmissions(forms store.FormScope, limit, offset int) ([]store.Submission, error)
 	ListFilterRules() ([]screen.Rule, error)
-	ListForms() ([]store.FormSummary, error)
-	ListSubmissionsFiltered(formID string, read store.ReadFilter, limit, offset int) ([]store.Submission, error)
-	NavCounts() (store.NavCounts, error)
-	PerFormStats() ([]store.FormStats, error)
-	SearchSubmissions(query string, limit int) ([]store.SearchResult, error)
+	ListForms(forms store.FormScope) ([]store.FormSummary, error)
+	ListSubmissionsFiltered(formID string, read store.ReadFilter, forms store.FormScope, limit, offset int) ([]store.Submission, error)
+	NavCounts(forms store.FormScope) (store.NavCounts, error)
+	PerFormStats(forms store.FormScope) ([]store.FormStats, error)
+	SearchSubmissions(query string, forms store.FormScope, limit int) ([]store.SearchResult, error)
 	SubmissionSignals(submissionID string) ([]store.SpamSignal, error)
-	SubmissionsPerDay(days int) ([]store.DayCounts, error)
-	TopSpamSignals(days int) ([]store.SignalTally, error)
+	SubmissionsPerDay(days int, forms store.FormScope) ([]store.DayCounts, error)
+	TopSpamSignals(days int, forms store.FormScope) ([]store.SignalTally, error)
 
 	// Writes.
 	AddFilterRule(kind, ruleType, value, note string) (screen.Rule, error)
@@ -65,7 +67,7 @@ type Store interface {
 	MarkUnread(submissionID string) error
 
 	// Destructive.
-	DeleteHeld(ids []string) (int, error)
+	DeleteHeld(ids []string, forms store.FormScope) (int, error)
 	DeleteSubmission(id string) error
 }
 

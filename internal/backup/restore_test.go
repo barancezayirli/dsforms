@@ -178,7 +178,7 @@ func seedBackupFile(t *testing.T, path string, formName ...string) {
 // being served after Import returns.
 func formNames(t *testing.T, s *store.Store) []string {
 	t.Helper()
-	forms, err := s.ListForms()
+	forms, err := s.ListForms(store.AllForms())
 	if err != nil {
 		t.Fatalf("the store is not serving after Import returned: %v", err)
 	}
