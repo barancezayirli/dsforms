@@ -1,0 +1,86 @@
+{{template "base" .}}
+
+<!-- The create form has two presentations of one body.
+     "drawer"  — the overlay app.js lays over the token list.
+     "content" — the same form as an ordinary page, which is what you get with
+                 JavaScript off, when the link is opened directly, or when
+                 someone shares it. Both include "token-form", so they cannot
+                 drift into offering different scopes. -->
+
+{{define "token-form"}}
+<form method="POST" action="/admin/tokens">
+  {{if .Error}}
+  <div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
+  {{end}}
+
+  {{if not .Enabled}}
+  <div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>
+    The MCP endpoint is switched off, so this token will be refused until
+    <code>MCP_ENABLED=true</code> is set.
+  </span></div>
+  {{end}}
+
+  <label class="field">
+    <span>Name</span>
+    <input class="input" type="text" name="name" required maxlength="64" autofocus
+           value="{{.Name}}" placeholder="laptop, ci, desktop client">
+    <span class="form-hint">So you can tell it apart from your other tokens later.</span>
+  </label>
+
+  <div class="field">
+    <span>Scopes</span>
+    {{range .Scopes}}
+    <label style="display:flex;gap:9px;align-items:flex-start;margin-top:9px;font-size:13px">
+      <input type="checkbox" name="scopes" value="{{.Value}}" style="margin-top:3px"
+             {{if index $.Ticked .Value}}checked{{end}}>
+      <span>
+        <strong>{{.Value}}</strong>
+        <span class="dim" style="display:block;font-size:12px;line-height:1.45">{{.Description}}</span>
+      </span>
+    </label>
+    {{end}}
+    <span class="form-hint" style="margin-top:9px">
+      {{if .TTLDays}}Expires after {{.TTLDays}} days.{{else}}Does not expire — revoke it from the list when it is no longer needed.{{end}}
+    </span>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-top:16px">
+    <button class="btn btn-primary" type="submit">
+      <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Create token
+    </button>
+    <a class="btn btn-secondary" data-drawer-close href="/admin/tokens">Cancel</a>
+  </div>
+</form>
+{{end}}
+
+{{define "drawer"}}
+<div class="backdrop" data-drawer-close></div>
+<div class="drawer" role="dialog" aria-modal="true" aria-label="New API token" tabindex="-1">
+  <div class="drawer-scroll">
+    <div class="drawer-toolbar rule-b">
+      <a class="btn btn-secondary btn-icon" data-drawer-close href="/admin/tokens"
+         title="Close" aria-label="Close">
+        <svg class="i" style="font-size:15px"><use href="#ph-x"/></svg>
+      </a>
+      <span style="font-size:13.5px;font-weight:500">New API token</span>
+    </div>
+    <!-- Capped rather than filling the 640px drawer: a name field and three
+         checkboxes stretched to full width read as a form with something
+         missing from the right of it. -->
+    <div class="drawer-body" style="max-width:440px">
+      {{template "token-form" .}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="page-head">
+  <h4>New API token</h4>
+  <span class="muted" style="font-size:13px">A credential for one MCP client.</span>
+</div>
+
+<div class="card elev-sm" style="max-width:480px">
+  {{template "token-form" .}}
+</div>
+{{end}}

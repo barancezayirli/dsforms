@@ -82,12 +82,21 @@ type tokensData struct {
 	// in the response body of the POST that created it, it goes exactly one
 	// place.
 	NewToken string
+}
 
-	// FormName keeps the typed name on the page when creation is refused, so a
-	// rejected form does not also lose the input.
-	FormName string
-	// FormScopes are the boxes that were ticked, same reason.
-	FormScopes map[string]bool
+// tokenFormData is the create form, which now lives on its own URL so it can be
+// both an overlay and an ordinary page.
+type tokenFormData struct {
+	PageData
+	Scopes  []scopeOption
+	Error   string
+	Enabled bool
+	TTLDays int
+
+	// Name and Ticked keep the operator's input when creation is refused, so a
+	// rejected form does not also lose what they typed.
+	Name   string
+	Ticked map[string]bool
 }
 
 // scopeOptions builds the checkbox list from the package that owns the value
@@ -100,45 +109,66 @@ func scopeOptions() []scopeOption {
 	return out
 }
 
-// renderOpts is what varies between this page's three outcomes: a plain view, a
-// refused creation, and a successful one.
-//
-// A struct rather than four string parameters, because three of the four are
-// strings and a call site that swaps two of them compiles cleanly — which for
-// this page would mean rendering the error message where the token goes.
-type renderOpts struct {
-	// NewToken is the raw value, shown once and never again.
-	NewToken string
-	// Err re-renders the form with a message above it.
-	Err string
-	// Name and Ticked keep the operator's input on a refused form.
-	Name   string
-	Ticked []string
-}
-
-// Page renders the token list and the create form.
+// Page renders the token list.
 func (h *TokensHandler) Page(w http.ResponseWriter, r *http.Request) {
-	h.render(w, r, renderOpts{})
+	h.render(w, r, "")
 }
 
-// render draws the page. Every exit from this handler goes through it, so the
-// list is always rebuilt from storage and an error never renders a stale one.
-func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, opts renderOpts) {
+// NewPage serves the create form in both of its presentations.
+//
+// app.js turns the "New token" link into the drawer by re-fetching this same URL
+// with X-Fragment; without JavaScript, or when the link is opened directly or
+// shared, the identical form renders as an ordinary page. This is the mechanism
+// the submission reader already uses — the overlay is an enhancement over markup
+// that works without it, never the only way in.
+func (h *TokensHandler) NewPage(w http.ResponseWriter, r *http.Request) {
+	h.renderForm(w, r, "", "", nil)
+}
+
+// renderForm draws the create form, as a fragment when the drawer asked for it
+// and as a page otherwise.
+//
+// Both presentations are defined in one template and share one body, so they
+// cannot drift into offering different scopes.
+func (h *TokensHandler) renderForm(w http.ResponseWriter, r *http.Request, errMsg, name string, ticked []string) {
+	data := tokenFormData{
+		PageData: h.Shell(w, r, "New API token", "tokens"),
+		Scopes:   scopeOptions(),
+		Error:    errMsg,
+		Enabled:  h.MCPEnabled,
+		TTLDays:  h.TTLDays,
+		Name:     name,
+		Ticked:   map[string]bool{},
+	}
+	for _, s := range ticked {
+		data.Ticked[s] = true
+	}
+
+	if r.Header.Get("X-Fragment") != "" {
+		tmpl := h.Templates["token_new.html"]
+		if err := tmpl.ExecuteTemplate(w, "drawer", data); err != nil {
+			log.Printf("token form drawer template error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	h.Render(w, "token_new.html", data)
+}
+
+// render draws the list. Every exit that shows it goes through here, so the list
+// is always rebuilt from storage and never rendered stale.
+//
+// newToken is the raw value to show once, and only ever arrives from Create.
+func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken string) {
 	user, _ := auth.UserFromContext(r.Context())
 
 	data := tokensData{
-		PageData:   h.Shell(w, r, "API tokens", "tokens"),
-		Scopes:     scopeOptions(),
-		Error:      opts.Err,
-		Enabled:    h.MCPEnabled,
-		TTLDays:    h.TTLDays,
-		BaseURL:    h.Base.BaseURL,
-		NewToken:   opts.NewToken,
-		FormName:   opts.Name,
-		FormScopes: map[string]bool{},
-	}
-	for _, s := range opts.Ticked {
-		data.FormScopes[s] = true
+		PageData: h.Shell(w, r, "API tokens", "tokens"),
+		Scopes:   scopeOptions(),
+		Enabled:  h.MCPEnabled,
+		TTLDays:  h.TTLDays,
+		BaseURL:  h.Base.BaseURL,
+		NewToken: newToken,
 	}
 
 	tokens, err := h.Store.ListAPITokens(user.ID)
@@ -198,8 +228,10 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	ticked := r.Form["scopes"]
 
+	// A refusal comes back on the form, carrying what was typed. Sending someone
+	// to the list on a typo drops them somewhere the form is not.
 	fail := func(msg string) {
-		h.render(w, r, renderOpts{Err: msg, Name: name, Ticked: ticked})
+		h.renderForm(w, r, msg, name, ticked)
 	}
 
 	if name == "" {
@@ -235,7 +267,7 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// is a local and not a field on anything.
 	log.Printf("tokens: created %s (%q, scopes %s) for user %s", tok.ID, tok.Name, scopes, user.Username)
 
-	h.render(w, r, renderOpts{NewToken: raw})
+	h.render(w, r, raw)
 }
 
 // Delete revokes one of the signed-in user's own tokens.

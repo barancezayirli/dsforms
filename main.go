@@ -138,7 +138,7 @@ var basePages = []string{
 	"submission_detail.html", "users.html", "users_new.html", "account.html",
 	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
 	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
-	"quarantine.html", "rules.html", "home.html", "search.html", "tokens.html",
+	"quarantine.html", "rules.html", "home.html", "search.html", "tokens.html", "token_new.html",
 }
 
 var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
@@ -1085,6 +1085,7 @@ func routes(d serverDeps) *chi.Mux {
 		r.Post("/admin/users/new", usersHandler.CreateUser)
 		r.Post("/admin/users/{id}/delete", usersHandler.DeleteUser)
 		r.Get("/admin/tokens", tokensHandler.Page)
+		r.Get("/admin/tokens/new", tokensHandler.NewPage)
 		r.Post("/admin/tokens", tokensHandler.Create)
 		r.Post("/admin/tokens/{id}/delete", tokensHandler.Delete)
 		r.Get("/admin/account", usersHandler.AccountPage)

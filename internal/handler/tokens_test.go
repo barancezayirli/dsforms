@@ -33,7 +33,18 @@ func setupTokens(t *testing.T) (*store.Store, *chi.Mux) {
 			`{{if .NewToken}}<code id="new-token">{{.NewToken}}</code>{{end}}` +
 			`{{range .Tokens}}<span class="token" data-id="{{.ID}}">{{.Name}}:{{.ScopeList}}:{{.LastUsed}}</span>{{end}}` +
 			`{{range .Scopes}}<label class="scope">{{.Value}} {{.Description}}</label>{{end}}`))
-	templates := map[string]*template.Template{"tokens.html": tok}
+	nw, _ := baseTmpl.Clone()
+	template.Must(nw.New("content").Parse(
+		`{{if .Error}}<p class="error">{{.Error}}</p>{{end}}` +
+			`<form id="page-form" value="{{.Name}}">` +
+			`{{range .Scopes}}<label class="scope">{{.Value}} {{.Description}}</label>{{end}}</form>`))
+	template.Must(nw.New("drawer").Parse(
+		`<div class="backdrop"></div><div class="drawer" role="dialog">` +
+			`{{if .Error}}<p class="error">{{.Error}}</p>{{end}}` +
+			`<form id="drawer-form">` +
+			`{{range .Scopes}}<label class="scope">{{.Value}}</label>{{end}}</form></div>`))
+
+	templates := map[string]*template.Template{"tokens.html": tok, "token_new.html": nw}
 
 	th := &TokensHandler{
 		Store:   s,
@@ -50,6 +61,7 @@ func setupTokens(t *testing.T) (*store.Store, *chi.Mux) {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth(s))
 		r.Get("/admin/tokens", th.Page)
+		r.Get("/admin/tokens/new", th.NewPage)
 		r.Post("/admin/tokens", th.Create)
 		r.Post("/admin/tokens/{id}/delete", th.Delete)
 	})
@@ -296,4 +308,103 @@ func TestTokenListReportsUseAndScopes(t *testing.T) {
 		t.Errorf("the token's scopes are not listed: %.400q", body)
 	}
 	_ = unused
+}
+
+// TestNewTokenPageServesBothPresentations is the progressive-enhancement
+// contract this screen now rests on.
+//
+// The "New token" control is a real link. app.js turns it into the drawer by
+// re-fetching the same URL with X-Fragment; with JavaScript off, or when the
+// link is opened directly or shared, the identical form has to render as an
+// ordinary page. One of the two missing means the button either does nothing
+// or opens a full document inside an overlay.
+func TestNewTokenPageServesBothPresentations(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokens(t)
+
+	t.Run("full page without the header", func(t *testing.T) {
+		w := doTokenRequest(t, s, r, "GET", "/admin/tokens/new", "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, `id="page-form"`) {
+			t.Errorf("no page form rendered: %.200q", body)
+		}
+		if strings.Contains(body, `class="drawer"`) {
+			t.Error("the drawer fragment was served for an ordinary page load")
+		}
+	})
+
+	t.Run("fragment with X-Fragment", func(t *testing.T) {
+		admin, _ := s.GetUserByUsername("admin")
+		token, _ := s.CreateSession(admin.ID, 30*24*time.Hour)
+		req := httptest.NewRequest("GET", "/admin/tokens/new", nil)
+		req.AddCookie(auth.CreateSessionCookie(token, "https://example.com"))
+		req.Header.Set("X-Fragment", "1")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, `class="drawer"`) || !strings.Contains(body, `id="drawer-form"`) {
+			t.Fatalf("no drawer fragment rendered: %.200q", body)
+		}
+		if strings.Contains(body, `id="page-form"`) {
+			t.Error("the full page was served into the drawer")
+		}
+	})
+
+	t.Run("both offer every scope", func(t *testing.T) {
+		// The two presentations share one scope list, so neither can quietly
+		// offer fewer powers than the other.
+		for _, scope := range mcpserver.AllScopes {
+			page := doTokenRequest(t, s, r, "GET", "/admin/tokens/new", "").Body.String()
+			if !strings.Contains(page, string(scope)) {
+				t.Errorf("the page form does not offer %q", scope)
+			}
+		}
+	})
+}
+
+// TestNewTokenPageRequiresASession. It is a new route outside the walk that
+// routes_test.go does for /admin, so it gets its own check here too.
+func TestNewTokenPageRequiresASession(t *testing.T) {
+	t.Parallel()
+	_, r := setupTokens(t)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/admin/tokens/new", nil))
+	if w.Code != http.StatusFound && w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d without a session, want a refusal", w.Code)
+	}
+}
+
+// TestRefusedCreationComesBackOnTheForm.
+//
+// A rejected create used to re-render the token *list*. Now that the form lives
+// in a drawer, sending someone to the list on a typo drops them somewhere the
+// form is not, with their input gone. The refusal has to land back on the form,
+// carrying what they typed.
+func TestRefusedCreationComesBackOnTheForm(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokens(t)
+
+	form := url.Values{"name": {"laptop"}, "scopes": {"wirte"}}
+	w := doTokenRequest(t, s, r, "POST", "/admin/tokens", form.Encode())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `id="page-form"`) {
+		t.Fatalf("a refused creation did not come back on the form: %.300q", body)
+	}
+	if !strings.Contains(body, "wirte") {
+		t.Errorf("the error does not name the bad scope: %.300q", body)
+	}
+	if !strings.Contains(body, `value="laptop"`) {
+		t.Errorf("the typed name was lost on the way back: %.300q", body)
+	}
 }

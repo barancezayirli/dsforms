@@ -57,7 +57,7 @@ var basePageNames = []string{
 	"submission_detail.html", "users.html", "users_new.html", "account.html",
 	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
 	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
-	"quarantine.html", "rules.html", "home.html", "search.html", "tokens.html",
+	"quarantine.html", "rules.html", "home.html", "search.html", "tokens.html", "token_new.html",
 }
 
 // TestBasePagesExecuteWithTheirRealData is the coverage the parse tests cannot
@@ -153,17 +153,21 @@ func populatedPageData() map[string]any {
 			Users: []UserWithYou{{User: store.User{ID: "u1", Username: "admin"}, IsYou: true}}},
 		"users_new.html": usersNewData{PageData: shell, Error: "bad", FormUsername: "new"},
 		"account.html":   accountData{PageData: shell, Error: "bad"},
-		// Populated enough to take every branch: the new-token card, the
-		// endpoint-disabled notice, a listed token and a ticked checkbox all
-		// live behind an {{if}}, and a zero fixture renders none of them.
-		"tokens.html": tokensData{PageData: shell, Error: "bad",
-			NewToken: "dsf_shown_once", FormName: "laptop", Enabled: false, TTLDays: 90,
-			BaseURL:    "https://x.example",
-			FormScopes: map[string]bool{"read": true},
-			Scopes:     scopeOptions(),
+		// Populated enough to take every branch: the one-time reveal card, the
+		// endpoint-disabled notice and a listed token each live behind an {{if}},
+		// and a zero fixture renders none of them.
+		"tokens.html": tokensData{PageData: shell,
+			NewToken: "dsf_shown_once", Enabled: false, TTLDays: 90,
+			BaseURL: "https://x.example",
+			Scopes:  scopeOptions(),
 			Tokens: []tokenRow{{
 				APIToken:  store.APIToken{ID: "t1", Name: "laptop", Scopes: []string{"read", "write"}},
 				ScopeList: "read, write", LastUsed: "Never", Expires: "Never"}}},
+		// The create form, which is its own page now. Error and a ticked box are
+		// both behind {{if}}s, so both are set.
+		"token_new.html": tokenFormData{PageData: shell, Error: "bad",
+			Scopes: scopeOptions(), Enabled: false, TTLDays: 90,
+			Name: "laptop", Ticked: map[string]bool{"read": true}},
 		"backups.html": backupPageData{PageData: shell},
 		"waitlists.html": waitlistListData{PageData: shell,
 			Waitlists: []store.WaitlistSummary{{Waitlist: wl, EntryCount: 42}}},
@@ -230,6 +234,7 @@ var pageMarkers = map[string][]string{
 	"broadcast_new.html":     {"42 recipient"},
 	"users.html":             {"admin"},
 	"tokens.html":            {"dsf_shown_once", "laptop", "read, write", "https://x.example/mcp"},
+	"token_new.html":         {"laptop", "Create token"},
 
 	// No populated/empty split: these render the same shape whatever the data,
 	// so a marker would pin nothing. Stated rather than omitted, so the next
