@@ -202,8 +202,10 @@ Field *names* are scanned as well as values, because they come from the
 submitted form — dsforms keeps every key it is sent. A field whose **name**
 carries a marker is dropped from `fields` entirely rather than cleaned, since a
 name carrying a forged turn is not a name that lost some characters. Its entry
-in `redacted` sets `in_field_name` and gives no `field`, because naming it would
-put the hostile name back in the same block.
+in `redacted` sets `in_field_name` and leaves `field` empty, because naming it
+would put the hostile name back in the same block. Read `in_field_name` rather
+than an empty `field` — a form can legitimately post a field with no name at
+all. A held submission's `signals[]` does the same, with `field_withheld`.
 
 Each submission that was touched carries a `redacted` list saying what went,
 which field, and which lines. The markers are named without their delimiters —

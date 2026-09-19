@@ -158,10 +158,14 @@ func toHits(hits []redact.Hit) []hitOut {
 
 // signalOut is one recorded reason a submission was held.
 type signalOut struct {
-	Check  string `json:"check"`
-	Field  string `json:"field,omitempty"`
-	Match  string `json:"match,omitempty"`
-	Weight int    `json:"weight"`
+	Check string `json:"check"`
+	Field string `json:"field,omitempty"`
+
+	// FieldWithheld says the field name was redacted rather than shown, so an
+	// absent field means "not shown" rather than "no field". See toSignals.
+	FieldWithheld bool   `json:"field_withheld,omitempty" jsonschema:"the field name carried a marker and is not being named"`
+	Match         string `json:"match,omitempty"`
+	Weight        int    `json:"weight"`
 }
 
 // toSubmission is a method rather than a function so it can honour
@@ -220,8 +224,20 @@ func toSignals(sigs []store.SpamSignal) []signalOut {
 	out := make([]signalOut, 0, len(sigs))
 	for _, s := range sigs {
 		clean, _ := redact.Fields(map[string]string{"field": s.Field, "match": s.Match})
+
+		// A field name that needed redacting is withheld, not cleaned. Cleaning
+		// it is worse than showing nothing, because cleaning can land on a real
+		// field: "na<U+200B>me" loses its zero-width space and becomes exactly
+		// "name", which would report a signal against a genuine, innocent field
+		// while the one that actually tripped the check is absent. The redacted
+		// list refuses to name such a field for the same reason.
+		field, withheld := clean["field"], false
+		if field != s.Field {
+			field, withheld = "", true
+		}
+
 		out = append(out, signalOut{
-			Check: string(s.Check), Field: clean["field"],
+			Check: string(s.Check), Field: field, FieldWithheld: withheld,
 			Match: clean["match"], Weight: s.Weight,
 		})
 	}

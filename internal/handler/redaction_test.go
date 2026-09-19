@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"html/template"
 	"net/http"
@@ -242,5 +243,34 @@ func TestAHostileFieldNameIsReportedAsOne(t *testing.T) {
 	}
 	if len(blocks[0].Lines) != 0 {
 		t.Errorf("lines were quoted for a field that was dropped, not cleaned: %q", blocks[0].Lines)
+	}
+}
+
+// TestAFieldWithNoNameIsDescribedAsOne. submit.go keeps an empty POST key, so a
+// hit can name no field and not be about a name. The panel needs a branch for
+// it, or it renders "field <code></code>" — an element naming nothing.
+func TestAFieldWithNoNameIsDescribedAsOne(t *testing.T) {
+	t.Parallel()
+
+	tmpl := realTemplates(t)["submission_detail.html"]
+	base, ok := populatedPageData()["submission_detail.html"].(submissionDetailData)
+	if !ok {
+		t.Fatal("fixture is not submissionDetailData")
+	}
+	base.Hidden = hiddenBlocks(map[string]string{"": hiddenPayload})
+	if len(base.Hidden) != 1 || base.Hidden[0].Field != "" || base.Hidden[0].InName {
+		t.Fatalf("fixture did not produce an unnamed-field hit: %+v", base.Hidden)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "base", base); err != nil {
+		t.Fatalf("executing: %v", err)
+	}
+	body := buf.String()
+	if strings.Contains(body, "field <code></code>") {
+		t.Error("the panel rendered an empty field element rather than saying the field has no name")
+	}
+	if !strings.Contains(body, "no name") {
+		t.Error("the panel does not say the field was submitted without a name")
 	}
 }

@@ -527,3 +527,54 @@ func TestAHostileFieldNameNeverReachesAClient(t *testing.T) {
 		t.Error("the client got a shorter map and no reason why")
 	}
 }
+
+// TestASignalIsNeverReattributedToAnInnocentField.
+//
+// Cleaning a hostile field name is worse than withholding it, because cleaning
+// can land on a real field. A key of "na<U+200B>me" loses its zero-width space
+// and becomes exactly "name" — so a signal recorded against the hostile field
+// would be reported against the genuine one, telling the operator that "name"
+// (value "Ada") contains link markup while the field that actually tripped the
+// check is absent with nothing tying the signal to it.
+//
+// The redacted list already refuses to name such a field. So does this.
+func TestASignalIsNeverReattributedToAnInnocentField(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, "read")
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	const hostileKey = "na​me"
+	raw, err := json.Marshal(map[string]string{
+		"name": "Ada", "message": "hi", hostileKey: "<a href=x>",
+	})
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	if err := h.store.CreateHeldSubmission(
+		store.Submission{ID: "held", FormID: "contact", RawData: string(raw), CreatedAt: time.Now().UTC()},
+		9, 6,
+		[]store.SpamSignal{{Check: "markup", Field: hostileKey, Match: "<a href=", Weight: 9}},
+	); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	session := h.connect(t)
+	out := decode[getSubmissionOut](t, call(t, session, "get_submission", map[string]any{"submission_id": "held"}))
+
+	if len(out.Signals) != 1 {
+		t.Fatalf("signals = %+v, want 1", out.Signals)
+	}
+	if got := out.Signals[0].Field; got != "" {
+		t.Errorf("the signal names field %q, which is a real and innocent field — a "+
+			"field name that had to be redacted must not be handed back cleaned", got)
+	}
+	if !out.Signals[0].FieldWithheld {
+		t.Error("the signal does not say its field name was withheld, so a client reads " +
+			"an empty field as 'no field' rather than 'not shown'")
+	}
+	if out.Submission.Fields["name"] != "Ada" {
+		t.Errorf("the innocent field was disturbed: %q", out.Submission.Fields["name"])
+	}
+}
