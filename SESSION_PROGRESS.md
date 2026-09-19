@@ -838,4 +838,43 @@ and the decision is the interesting part:
   unparseable value is refused rather than clamped, since reading it as "never
   expires" would grant more than was asked for.
 
+## Tested as a client, not just as a wire
+
+The branch had been verified with curl and the SDK's own Go client, which proves
+the wire format and nothing about whether a model that has never read the code
+can use it. So three isolated `claude` processes were pointed at a running
+instance with nothing but a URL and a token.
+
+Cold, a read-only client inferred the whole domain model — forms, the
+read/unread inbox, quarantine as a hold rather than a bin — from the tool
+descriptions alone. Given write scope and a realistic inbox it quarantined the
+obvious spam, added a block rule with a written note, left two borderline
+messages for a human, and worked out unprompted that allow rules are not
+reachable through the API. Asked with a read-only token to delete permanently,
+it refused, named the reason, and declined to substitute quarantine for
+deletion.
+
+That is also how the audit-trail gap was found, and it is the argument for the
+exercise: no unit test would have noticed.
+
+## The audit trail names the token
+
+A `mark_spam` recorded `admin` while the acting token was called
+`isolated-agent`. Not wrong — tokens are per-user — but with several clients on
+one account it could not say which one acted, which is the question asked when
+one misbehaves.
+
+The verifier now passes the token name through `auth.TokenInfo.Extra`, and the
+signal reads `admin (claude-desktop)`. Each failure degrades to the next most
+specific thing rather than to an empty string: user and token, then user, then
+the user id, then a bare marker. The actor is bounded at capture, because the
+token name is operator-supplied, the CLI does not cap it, and it lands in a
+column the quarantine screen renders.
+
+The guard for it lives in `routes_test.go`, not in `internal/mcpserver`. That
+package tests the formatting with its own verifier, so removing the one line in
+main.go that passes the name left every mcpserver test green — the same
+hollowness the code review found earlier, caught this time by watching the
+control fail in the wrong place first.
+
 Nothing is left open on this branch.

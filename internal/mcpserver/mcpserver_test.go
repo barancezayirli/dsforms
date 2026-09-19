@@ -46,17 +46,23 @@ type harness struct {
 // submitter IPs withheld — the shipped default.
 func newHarness(t *testing.T, scopes ...string) *harness {
 	t.Helper()
-	return newHarnessOpts(t, Options{}, scopes...)
+	return newHarnessOpts(t, Options{}, "test-token", scopes...)
 }
 
 // newHarnessWithIPs is the same, for an instance that has opted into returning
 // submitter IPs.
 func newHarnessWithIPs(t *testing.T, scopes ...string) *harness {
 	t.Helper()
-	return newHarnessOpts(t, Options{IncludeIPs: true}, scopes...)
+	return newHarnessOpts(t, Options{IncludeIPs: true}, "test-token", scopes...)
 }
 
-func newHarnessOpts(t *testing.T, opts Options, scopes ...string) *harness {
+// newHarnessNamed is the same with a named token, for the audit-trail tests.
+func newHarnessNamed(t *testing.T, tokenName string, scopes ...string) *harness {
+	t.Helper()
+	return newHarnessOpts(t, Options{}, tokenName, scopes...)
+}
+
+func newHarnessOpts(t *testing.T, opts Options, tokenName string, scopes ...string) *harness {
 	t.Helper()
 
 	st, err := store.New(":memory:")
@@ -74,7 +80,10 @@ func newHarnessOpts(t *testing.T, opts Options, scopes ...string) *harness {
 		if token != testToken {
 			return nil, auth.ErrInvalidToken
 		}
-		return &auth.TokenInfo{Scopes: scopes, UserID: admin.ID}, nil
+		return &auth.TokenInfo{
+			Scopes: scopes, UserID: admin.ID,
+			Extra: map[string]any{TokenNameKey: tokenName},
+		}, nil
 	}
 	// AllowMissingExpiration mirrors the production wiring: dsforms tokens may
 	// legitimately never expire, and without this the SDK rejects every one.
@@ -660,8 +669,9 @@ func TestMarkSpamThroughTheProtocol(t *testing.T) {
 	if len(signals) != 1 || signals[0].Check != "manual" {
 		t.Fatalf("signals = %+v, want one manual signal", signals)
 	}
-	if signals[0].Match != "admin" {
-		t.Errorf("Match = %q, want the acting user %q", signals[0].Match, "admin")
+	// The user *and* the token that acted — see TestActorNamesTheTokenNotJustTheUser.
+	if signals[0].Match != "admin (test-token)" {
+		t.Errorf("Match = %q, want the acting user and token", signals[0].Match)
 	}
 
 	// A retry says so plainly rather than failing in a way that invites the
@@ -984,5 +994,101 @@ func TestSubmitterIPsAppearWhenTheOperatorAsks(t *testing.T) {
 	one := decode[getSubmissionOut](t, call(t, session, "get_submission", map[string]any{"submission_id": "s1"}))
 	if one.Submission.IP != "198.51.100.1" {
 		t.Errorf("get_submission IP = %q, want the stored value", one.Submission.IP)
+	}
+}
+
+// TestActorNamesTheTokenNotJustTheUser.
+//
+// Found by pointing a real MCP client at a running instance: the signal a
+// mark_spam leaves read "admin", although the token was called
+// "isolated-agent". Tokens are per-user, so that was not wrong — but with
+// several tokens on one account it cannot say which client acted, which is
+// exactly the question asked when one misbehaves.
+//
+// The fallbacks matter as much as the happy path: a record that cannot name who
+// made it is still better than one that names nobody, so each degradation drops
+// to the next most specific thing rather than to an empty string.
+func TestActorNamesTheTokenNotJustTheUser(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, "read")
+
+	admin, err := h.store.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	srv := New(h.store, "test", Options{})
+
+	req := func(info *auth.TokenInfo) *mcp.CallToolRequest {
+		return &mcp.CallToolRequest{Extra: &mcp.RequestExtra{TokenInfo: info}}
+	}
+	withToken := func(name string) *auth.TokenInfo {
+		return &auth.TokenInfo{UserID: admin.ID, Extra: map[string]any{TokenNameKey: name}}
+	}
+
+	tests := []struct {
+		name string
+		req  *mcp.CallToolRequest
+		want string
+	}{
+		{"user and token", req(withToken("isolated-agent")), "admin (isolated-agent)"},
+		{"a token with no name falls back to the user", req(withToken("")), "admin"},
+		{"no Extra at all falls back to the user", req(&auth.TokenInfo{UserID: admin.ID}), "admin"},
+		{"an unknown user falls back to the id", req(&auth.TokenInfo{UserID: "nope"}), "nope"},
+		{"no user id at all", req(&auth.TokenInfo{}), "an api token"},
+		{"no token info", &mcp.CallToolRequest{Extra: &mcp.RequestExtra{}}, "an api token"},
+		{"nil request", nil, "an api token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := srv.actor(tt.req); got != tt.want {
+				t.Errorf("actor() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestActorIsBounded. The token name is operator-supplied and the CLI does not
+// cap it, so an actor string is attacker-adjacent input on its way into a column
+// the quarantine screen renders.
+func TestActorIsBounded(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, "read")
+	admin, err := h.store.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	srv := New(h.store, "test", Options{})
+
+	got := srv.actor(&mcp.CallToolRequest{Extra: &mcp.RequestExtra{TokenInfo: &auth.TokenInfo{
+		UserID: admin.ID,
+		Extra:  map[string]any{TokenNameKey: strings.Repeat("x", 500)},
+	}}})
+	if len(got) > maxActorLen {
+		t.Errorf("actor() is %d characters, want at most %d", len(got), maxActorLen)
+	}
+	if !strings.HasPrefix(got, "admin (") {
+		t.Errorf("actor() = %.40q, want it still to name the user", got)
+	}
+}
+
+// TestMarkSpamRecordsTheTokenName is the same thing end to end, through the real
+// protocol, landing in the column the quarantine screen reads.
+func TestMarkSpamRecordsTheTokenName(t *testing.T) {
+	t.Parallel()
+	h := newHarnessNamed(t, "my-laptop", "read", "write")
+	h.seed(t)
+
+	if res := call(t, h.connect(t), "mark_spam", map[string]any{"submission_id": "s2"}); res.IsError {
+		t.Fatalf("mark_spam: %s", resultText(res))
+	}
+	signals, err := h.store.SubmissionSignals("s2")
+	if err != nil {
+		t.Fatalf("SubmissionSignals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Fatalf("got %d signals, want 1", len(signals))
+	}
+	if signals[0].Match != "admin (my-laptop)" {
+		t.Errorf("Match = %q, want the user and the token that acted", signals[0].Match)
 	}
 }

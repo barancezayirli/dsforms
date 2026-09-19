@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/screen"
@@ -234,25 +235,69 @@ func requireScope(req *mcp.CallToolRequest, want Scope) error {
 	return fmt.Errorf("this token does not carry the %q scope", want)
 }
 
+// TokenNameKey is where the verifier puts the calling token's name, in
+// auth.TokenInfo.Extra.
+//
+// The SDK's TokenInfo carries scopes, an expiry and a user id, and no room for
+// anything else but Extra — so this is the agreed key between whoever verifies
+// the token and this package, which is the only reader. Exported so the two
+// cannot disagree by spelling it differently.
+const TokenNameKey = "dsforms.token_name"
+
+// maxActorLen bounds the recorded actor.
+//
+// The token name is operator-supplied and the CLI does not cap its length, so
+// this string is on its way into a column the quarantine screen renders. It is
+// truncated at capture rather than at each render site, the same way
+// internal/screen truncates a signal's matched text.
+const maxActorLen = 96
+
 // actor names whoever is behind a token, for the record a write leaves behind.
 //
-// Falls back to the token's user id, and then to a marker, rather than to an
-// empty string: a signal row reading "marked as spam by " is worse than one
-// naming an id, and both are better than a write that cannot say who made it.
+// It names the user *and* the token, because tokens are per-user and the
+// username alone cannot say which client acted. That is not hypothetical: a real
+// MCP client marking a submission as spam left a signal reading "admin" while
+// the token was called "isolated-agent", which is precisely the information
+// wanted when one of several clients misbehaves.
+//
+// Each failure degrades to the next most specific thing rather than to an empty
+// string — user and token, then user, then the user id, then a bare marker. A
+// record that cannot say who made it is still better than one that says nobody,
+// and "marked as spam by " is the worst of all.
 func (s *Server) actor(req *mcp.CallToolRequest) string {
 	if req == nil || req.Extra == nil || req.Extra.TokenInfo == nil {
 		return "an api token"
 	}
-	id := req.Extra.TokenInfo.UserID
-	if id == "" {
+	info := req.Extra.TokenInfo
+	if info.UserID == "" {
 		return "an api token"
 	}
-	user, err := s.store.GetUserByID(id)
-	if err != nil {
-		log.Printf("mcp: resolving actor %s: %v", id, err)
-		return id
+
+	who := info.UserID
+	if user, err := s.store.GetUserByID(info.UserID); err != nil {
+		log.Printf("mcp: resolving actor %s: %v", info.UserID, err)
+	} else {
+		who = user.Username
 	}
-	return user.Username
+
+	name, _ := info.Extra[TokenNameKey].(string)
+	if name = strings.TrimSpace(name); name == "" {
+		// An unnamed token is not worth an empty pair of brackets.
+		return truncate(who, maxActorLen)
+	}
+	return truncate(who+" ("+name+")", maxActorLen)
+}
+
+// truncate bounds a string by runes, so a multi-byte name cannot be cut in half.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
 }
 
 // clampLimit bounds a client-supplied page size.

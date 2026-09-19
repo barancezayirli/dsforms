@@ -474,3 +474,49 @@ func TestMCPSendsABearerChallenge(t *testing.T) {
 			"attached to a 401 and nothing else", got, w.Code)
 	}
 }
+
+// TestMCPRecordsTheActingTokenInTheAuditTrail guards the wiring, not the
+// formatting.
+//
+// internal/mcpserver decides what an actor string looks like, and tests it — but
+// with its own verifier, so nothing over there can notice main.go's verifier
+// forgetting to pass the token name through TokenInfo.Extra. Removing that one
+// line left every mcpserver test green. This is the only place the real
+// verifier runs, so it is the only place that can catch it.
+func TestMCPRecordsTheActingTokenInTheAuditTrail(t *testing.T) {
+	t.Parallel()
+	r, s, token := mcpRouter(t, "read", "write")
+
+	if err := s.CreateForm(store.Form{ID: "contact", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := s.CreateSubmission(store.Submission{
+		ID: "s1", FormID: "contact", RawData: `{"message":"hello"}`, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":` +
+		`{"name":"mark_spam","arguments":{"submission_id":"s1"}}}`
+	req := mcpRequest(body, token)
+	req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("mark_spam answered %d: %.200q", w.Code, w.Body.String())
+	}
+
+	signals, err := s.SubmissionSignals("s1")
+	if err != nil {
+		t.Fatalf("SubmissionSignals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Fatalf("got %d signals, want 1", len(signals))
+	}
+	// mcpRouter names its token "test"; the account is the seeded admin.
+	if signals[0].Match != "admin (test)" {
+		t.Errorf("the recorded actor is %q, want it to name the token as well as "+
+			"the account — with several tokens on one account, the username alone "+
+			"cannot say which client acted", signals[0].Match)
+	}
+}

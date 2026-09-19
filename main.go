@@ -506,6 +506,12 @@ func verifyMCPToken(st *store.Store, guard *ratelimit.LoginGuard) mcpauth.TokenV
 		return &mcpauth.TokenInfo{
 			Scopes: tok.Scopes,
 			UserID: tok.UserID,
+			// The token's name, so a write can record which client made it and
+			// not just which account. Tokens are per-user, so the username alone
+			// cannot tell two of someone's clients apart — which is exactly the
+			// question asked when one of them misbehaves. The key is owned by
+			// mcpserver, the only reader.
+			Extra: map[string]any{mcpserver.TokenNameKey: tok.Name},
 			// Left zero for a token that never expires, which is why the
 			// middleware is configured with AllowMissingExpiration. GetAPIToken
 			// has already refused an expired one.

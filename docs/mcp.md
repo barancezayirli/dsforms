@@ -134,7 +134,8 @@ per-day breakdowns, and which spam checks are firing most.
 quarantine the spam filter uses, where the admin can restore it. The submission
 keeps the score the filter originally gave it — so a manually held one shows a
 score *below* its threshold, which is the truth: no check fired, a person
-decided — and a signal is recorded naming who marked it.
+decided — and a signal is recorded naming both the account and the token that
+did it, so with several clients on one account you can tell which one acted.
 
 Restoring is deliberately **not** an MCP tool. A restore owes the notification
 email and webhook that the hold withheld, and that logic lives in the admin; a
