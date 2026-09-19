@@ -124,7 +124,13 @@ with a context window and usually a vendor behind it, so sending every
 submitter's address there should be a decision rather than a default. Set
 `MCP_INCLUDE_IPS=true` to include them. The admin UI shows them either way.
 
-It covers every route an address can take out, not just the `ip` field. The
+The `ip` field is also *validated*, not just withheld. dsforms records the
+`X-Forwarded-For` header as it arrived, so what is in it is whatever a stranger
+typed; if it is not an address, it is not passed on, and `ip_withheld` says so —
+which is what separates "this instance does not share addresses" from "what was
+recorded is not one". A trailing port is accepted and dropped.
+
+Withholding covers every route an address can take out, not just the `ip` field. The
 `repeat_ip` check records the address as what it matched, and a matched block
 rule records the rule's value — which for an `ip` rule is the submitter's own
 address and for a `cidr` rule is the network containing it — so those come back
@@ -132,7 +138,10 @@ with `match_withheld` set instead. `list_filter_rules` does the same for `ip`
 and `cidr` rules, with `value_withheld`: an `ip` rule is written *from* a
 submitter's address, so handing the rule list over would return through the back
 door exactly what the setting closes the front one to. Email, domain and keyword
-rules are your own words and are always shown.
+rules are your own words and are always shown. `add_block_rule` echoes back the
+value you sent it, since withholding it tells you nothing you did not send and
+hides the normalisation — a `cidr` rule for `45.155.204.7/24` is stored as
+`45.155.204.0/24`, and that is the network you would need to report.
 
 **Reading.** `list_submissions` defaults to unread and never includes
 quarantined submissions — `list_quarantine` is for those, and it carries the
