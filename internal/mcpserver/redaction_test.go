@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -57,6 +58,24 @@ func (h *harness) seedRedaction(t *testing.T) {
 	); err != nil {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
+}
+
+// wireText renders a result the way an assertion needs to read it.
+//
+// json.Marshal escapes < and > to \u003c and \u003e, so a
+// strings.Contains(raw, "<|im_start|>") can never match — which is exactly what
+// two marker-leak guards in this file did until review caught them, letting a
+// real leak through signals[].field pass a test written to catch it. A guard
+// that cannot match is not a guard.
+func wireText(t *testing.T, v any) string {
+	t.Helper()
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	return b.String()
 }
 
 // assertRedacted is the whole contract in one place: the forged turn is gone,
@@ -443,7 +462,9 @@ func TestSignalMatchesAreRedactedToo(t *testing.T) {
 	if err := h.store.CreateHeldSubmission(
 		store.Submission{ID: "held", FormID: "contact", RawData: string(raw), CreatedAt: time.Now().UTC()},
 		9, 6,
-		[]store.SpamSignal{{Check: "url_in_name", Field: "name", Match: payloadText, Weight: 9}},
+		// Field as well as Match: score/detail.go sets Field to the submitted
+		// key, which the submit handler takes straight from the form.
+		[]store.SpamSignal{{Check: "url_in_name", Field: payloadOpener + " name", Match: payloadText, Weight: 9}},
 	); err != nil {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
@@ -458,15 +479,12 @@ func TestSignalMatchesAreRedactedToo(t *testing.T) {
 		{"list_quarantine", nil},
 	} {
 		res := call(t, session, tc.tool, tc.args)
-		raw, err := json.Marshal(res.StructuredContent)
-		if err != nil {
-			t.Fatalf("%s: marshalling: %v", tc.tool, err)
+		body := wireText(t, res.StructuredContent)
+		if strings.Contains(body, payloadSecret) {
+			t.Errorf("%s: the payload reached the client through a signal:\n%s", tc.tool, body)
 		}
-		if strings.Contains(string(raw), payloadSecret) {
-			t.Errorf("%s: the payload reached the client through a signal match:\n%s", tc.tool, raw)
-		}
-		if strings.Contains(string(raw), payloadOpener) {
-			t.Errorf("%s: the marker reached the client through a signal match:\n%s", tc.tool, raw)
+		if strings.Contains(body, payloadOpener) {
+			t.Errorf("%s: the marker reached the client through a signal:\n%s", tc.tool, body)
 		}
 	}
 }
@@ -496,11 +514,8 @@ func TestAHostileFieldNameNeverReachesAClient(t *testing.T) {
 
 	session := h.connect(t)
 	res := call(t, session, "get_submission", map[string]any{"submission_id": "named"})
-	body, err := json.Marshal(res.StructuredContent)
-	if err != nil {
-		t.Fatalf("marshalling: %v", err)
-	}
-	if strings.Contains(string(body), payloadSecret) || strings.Contains(string(body), payloadOpener) {
+	body := wireText(t, res.StructuredContent)
+	if strings.Contains(body, payloadSecret) || strings.Contains(body, payloadOpener) {
 		t.Errorf("a forged turn reached the client through a field name:\n%s", body)
 	}
 

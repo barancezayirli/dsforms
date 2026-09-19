@@ -121,7 +121,7 @@
         <span class="tag tag-outline tag-sm nowrap">{{if eq .Line .Through}}line {{.Line}}{{else}}lines {{.Line}}&ndash;{{.Through}}{{end}}</span>
       </div>
       <div class="rule-field">
-        {{if .Field}}field <code>{{.Field}}</code>{{else}}in a field <em>name</em>, so the whole field was withheld{{end}}
+        {{if .InName}}in a field <em>name</em>, so the whole field was withheld{{else}}field <code>{{.Field}}</code>{{end}}
         &middot; matched <code>{{.Matched}}</code>
       </div>
       {{if .Lines}}

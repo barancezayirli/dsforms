@@ -477,6 +477,7 @@ type Field struct {
 // then prints it.
 type HiddenBlock struct {
 	Field   string
+	InName  bool
 	Line    int
 	Through int
 	Reason  string
@@ -499,14 +500,15 @@ func hiddenBlocks(data map[string]string) []HiddenBlock {
 	out := make([]HiddenBlock, 0, len(hits))
 	for _, h := range hits {
 		block := HiddenBlock{
-			Field: h.Field, Line: h.Line, Through: h.Through,
+			Field: h.Field, InName: h.InName, Line: h.Line, Through: h.Through,
 			Reason: h.Reason.Describe(), Matched: h.Matched,
 		}
 
-		// A hit naming no field is one about a field *name*, which was dropped
-		// rather than cleaned. There are no lines of a value to quote, and the
-		// operator can see the name itself in the field grid above.
-		if h.Field != "" {
+		// A hit about a field *name* names a field that was dropped rather than
+		// cleaned, so there is no value to quote; the operator sees the name
+		// itself in the field grid above. Read from the flag, not from an empty
+		// Field — a form can legitimately post an empty key.
+		if !h.InName {
 			lines := strings.Split(data[h.Field], "\n")
 			from, to := h.Line-1, h.Through
 			if from < 0 || to > len(lines) || from >= to {

@@ -198,8 +198,17 @@ characters, and an MCP client passes tool output as structured messages where a
 line of text cannot start a turn. Zero false positives is the property this is
 built on.
 
+Field *names* are scanned as well as values, because they come from the
+submitted form — dsforms keeps every key it is sent. A field whose **name**
+carries a marker is dropped from `fields` entirely rather than cleaned, since a
+name carrying a forged turn is not a name that lost some characters. Its entry
+in `redacted` sets `in_field_name` and gives no `field`, because naming it would
+put the hostile name back in the same block.
+
 Each submission that was touched carries a `redacted` list saying what went,
-which field, and which lines. **Nothing is changed in the database.** The admin
+which field, and which lines. The markers are named without their delimiters —
+`im_start`, not `<|im_start|>` — for the same reason: the report travels in the
+text block it describes. **Nothing is changed in the database.** The admin
 shows the message exactly as it was sent, with a panel naming the lines a client
 was not shown, and the list marks the rows that carry them.
 

@@ -98,6 +98,16 @@ type Hit struct {
 	Through int
 	Reason  Reason
 
+	// InName says the marker was in the field's *name* rather than its value,
+	// so the whole field was dropped and there is no value to quote. Field is
+	// then empty, because naming it would put the hostile name back.
+	//
+	// A separate flag rather than reading an empty Field as the signal: a form
+	// can legitimately post an empty key — url.ParseQuery keeps one — and its
+	// ordinary value hits also carry an empty Field, so the sentinel said "this
+	// field was withheld" about a field that was kept and cleaned.
+	InName bool
+
 	// Matched names what was removed: each marker's identity without its
 	// delimiters (im_start, INST), or the codepoints for invisible text. It is
 	// always printable ASCII, and never the surrounding prose.
@@ -155,9 +165,9 @@ func Fields(data map[string]string) (map[string]string, []Hit) {
 	for _, k := range keys {
 		if _, nameHits := value("", k); len(nameHits) > 0 {
 			for _, h := range nameHits {
-				// Field is left empty: there is no name to give, which is the
-				// finding. Callers that quote the original lines skip a hit
-				// naming no field they hold.
+				// Field is left empty: there is no name to give that would not
+				// put the hostile one back. InName is what callers read.
+				h.InName = true
 				h.Line, h.Through = 1, 1
 				hits = append(hits, h)
 			}
@@ -403,8 +413,6 @@ func stripForgedTurn(field, text string) (string, *Hit) {
 	}
 }
 
-// summarise deduplicates and bounds a list for Hit.Matched, preserving the
-// order the markers appeared in.
 // summarise lists the distinct markers found, bounded, in the order they
 // appeared.
 //

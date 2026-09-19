@@ -135,6 +135,7 @@ type submissionOut struct {
 // silently rename a key a client depends on.
 type hitOut struct {
 	Field   string `json:"field"`
+	InName  bool   `json:"in_field_name,omitempty" jsonschema:"the marker was in the field's name, so the whole field was withheld and no name is given"`
 	Line    int    `json:"line" jsonschema:"1-based line number in the original value, which the operator can still see in the admin"`
 	Through int    `json:"through" jsonschema:"last line covered, inclusive; equal to line when one line was affected"`
 	Reason  string `json:"reason" jsonschema:"control_token for a forged chat turn, invisible for text that renders as nothing, malformed for bytes that are not valid UTF-8"`
@@ -148,7 +149,7 @@ func toHits(hits []redact.Hit) []hitOut {
 	out := make([]hitOut, 0, len(hits))
 	for _, h := range hits {
 		out = append(out, hitOut{
-			Field: h.Field, Line: h.Line, Through: h.Through,
+			Field: h.Field, InName: h.InName, Line: h.Line, Through: h.Through,
 			Reason: string(h.Reason), Matched: h.Matched,
 		})
 	}
@@ -206,15 +207,21 @@ func (s *Server) toSubmission(sub store.Submission, formName string) submissionO
 // signals[].match while the identical marker was stripped from fields. That was
 // the second path toSubmission's comment claimed did not exist.
 //
-// The hits are discarded rather than reported: Match is derived from a field,
+// Field is redacted for the same reason and was missed on the first pass:
+// score/detail.go sets it to the submitted key, and the submit handler keeps
+// every non-internal POST key, so a signal's field name is attacker-controlled
+// exactly as its match is. A forged turn in a field name was delivered verbatim
+// in signals[].field, inside the block whose banner says markers were removed.
+//
+// The hits are discarded rather than reported: both are derived from a field,
 // so whatever was removed here is already named in that submission's own
 // redacted list, and reporting it twice would describe one payload as two.
 func toSignals(sigs []store.SpamSignal) []signalOut {
 	out := make([]signalOut, 0, len(sigs))
 	for _, s := range sigs {
-		clean, _ := redact.Fields(map[string]string{"match": s.Match})
+		clean, _ := redact.Fields(map[string]string{"field": s.Field, "match": s.Match})
 		out = append(out, signalOut{
-			Check: string(s.Check), Field: s.Field,
+			Check: string(s.Check), Field: clean["field"],
 			Match: clean["match"], Weight: s.Weight,
 		})
 	}
