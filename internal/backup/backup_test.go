@@ -480,3 +480,105 @@ func TestImportStripsCredentialsFromAnOldSnapshot(t *testing.T) {
 		t.Errorf("forms = %d after the restore, want 1", forms)
 	}
 }
+
+// TestImportAcceptsADatabaseFromBeforeTheseTablesExisted.
+//
+// Stripping on the way in is worth nothing if it refuses the files it was added
+// for. A database from before the MCP work has no api_tokens table at all, and
+// an unguarded DELETE against it fails the whole restore — closing the recovery
+// path for every older backup, and for the raw copy of a database file that
+// operations.md explicitly invites.
+func TestImportAcceptsADatabaseFromBeforeTheseTablesExisted(t *testing.T) {
+	t.Parallel()
+
+	legacy := filepath.Join(t.TempDir(), "ancient.db")
+	db, err := sql.Open("sqlite", legacy)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// The pre-quarantine schema, as internal/store's own upgrade test writes it:
+	// no api_tokens and no sessions, but enough that migrations can run.
+	if _, err := db.Exec(`
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE TABLE forms (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, email_to TEXT NOT NULL DEFAULT '',
+			redirect TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE TABLE submissions (
+			id TEXT PRIMARY KEY,
+			form_id TEXT NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
+			data TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '',
+			read INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);
+		INSERT INTO users (id, username) VALUES ('u1', 'admin');
+		INSERT INTO forms (id, name) VALUES ('f1', 'Contact');
+		INSERT INTO submissions (id, form_id, data) VALUES ('s1', 'f1', '{"message":"old"}');
+	`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	live, livePath := testStore(t)
+	if err := Import(live, legacy, livePath); err != nil {
+		t.Fatalf("Import refused a pre-MCP database: %v", err)
+	}
+
+	restored, err := store.New(livePath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer restored.Close()
+	var forms int
+	if err := restored.DB().QueryRow("SELECT COUNT(*) FROM forms").Scan(&forms); err != nil {
+		t.Fatalf("counting forms: %v", err)
+	}
+	if forms != 1 {
+		t.Errorf("forms = %d, want the restored one", forms)
+	}
+}
+
+// TestSweepRemovesTheSidecarsToo. Stripping opens the staged upload, and a raw
+// copy of a live database is in WAL mode — so the open creates sidecars beside
+// it. A sweep that matches only *.db leaves a file up to the size of the
+// database behind, forever, on the volume the sweep exists to protect.
+func TestSweepRemovesTheSidecarsToo(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	leftovers := []string{
+		"dsforms-import-123.db",
+		"dsforms-import-123.db-wal",
+		"dsforms-import-123.db-shm",
+		"dsforms-import-456.db-journal",
+	}
+	keep := filepath.Join(dir, "dsforms.db")
+	for _, name := range append(append([]string{}, leftovers...), "dsforms.db") {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	removed, err := SweepStagedUploads(dir)
+	if err != nil {
+		t.Fatalf("SweepStagedUploads: %v", err)
+	}
+	if removed != len(leftovers) {
+		t.Errorf("removed %d files, want %d", removed, len(leftovers))
+	}
+	for _, name := range leftovers {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the sweep", name)
+		}
+	}
+	// And it did not take the live database with it.
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("the sweep removed the live database: %v", err)
+	}
+}

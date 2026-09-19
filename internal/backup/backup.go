@@ -79,21 +79,48 @@ func Export(db *sql.DB) (string, error) {
 // grep finds them — this function would have looked like it worked while
 // shipping exactly what it was written to remove. Pinned by
 // TestDeleteAloneLeavesTheBytesInTheFile.
-func stripCredentials(path string) error {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return fmt.Errorf("export: open snapshot to strip credentials: %w", err)
+func stripCredentials(path string) (err error) {
+	db, openErr := sql.Open("sqlite", path)
+	if openErr != nil {
+		return fmt.Errorf("stripping credentials: open %s: %w", path, openErr)
 	}
-	defer db.Close()
+	// Closed explicitly, and its error returned.
+	//
+	// An uploaded file may be a raw copy of a live database, which is in WAL
+	// mode — so the DELETE and the VACUUM live in a sidecar until Close
+	// checkpoints them. Discarding that error meant a failed checkpoint
+	// (no space, say) returned nil, and Import then renamed the *unstripped*
+	// main file into place: a restore that reported success while resurrecting
+	// every revoked token and logged-out session.
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("stripping credentials: flushing %s: %w", path, closeErr)
+		}
+	}()
 
 	for _, table := range credentialTables {
-		// The names are this package's own constants, never input.
+		// Skipped when absent rather than failing.
+		//
+		// A database from before these tables existed is exactly the file this
+		// is here to clean, and an unguarded DELETE against it refuses the whole
+		// restore — closing the recovery path for every older backup and for the
+		// raw database copy operations.md invites. The names are this package's
+		// own constants, never input.
+		var present string
+		switch err := db.QueryRow(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", table,
+		).Scan(&present); {
+		case errors.Is(err, sql.ErrNoRows):
+			continue
+		case err != nil:
+			return fmt.Errorf("stripping credentials: looking for %s: %w", table, err)
+		}
 		if _, err := db.Exec("DELETE FROM " + table); err != nil {
-			return fmt.Errorf("export: clearing %s from the snapshot: %w", table, err)
+			return fmt.Errorf("stripping credentials: clearing %s: %w", table, err)
 		}
 	}
 	if _, err := db.Exec("VACUUM"); err != nil {
-		return fmt.Errorf("export: rewriting the snapshot after clearing credentials: %w", err)
+		return fmt.Errorf("stripping credentials: rewriting %s: %w", path, err)
 	}
 	return nil
 }
@@ -164,6 +191,19 @@ var (
 // database while a restore is in flight.
 const StagedUploadPattern = "dsforms-import-*.db"
 
+// stagedUploadSidecars matches the WAL and journal files SQLite writes beside a
+// staged upload while it is being stripped.
+//
+// A raw copy of a live database arrives in WAL mode, so opening it to clear the
+// credential tables creates these. Without them in the sweep, a crash mid-strip
+// leaks a file up to the size of the database, forever, on the volume the sweep
+// exists to keep from filling.
+var stagedUploadSidecars = []string{
+	StagedUploadPattern + "-wal",
+	StagedUploadPattern + "-shm",
+	StagedUploadPattern + "-journal",
+}
+
 // SweepStagedUploads removes leftover restore uploads from dir.
 //
 // The upload is staged next to the database so the final rename cannot cross a
@@ -179,9 +219,13 @@ const StagedUploadPattern = "dsforms-import-*.db"
 // Returns the number removed. A failure to remove one is not fatal — a leftover
 // file wastes space, and refusing to boot over it would be the worse trade.
 func SweepStagedUploads(dir string) (int, error) {
-	matches, err := filepath.Glob(filepath.Join(dir, StagedUploadPattern))
-	if err != nil {
-		return 0, fmt.Errorf("sweep staged uploads: %w", err)
+	var matches []string
+	for _, pattern := range append([]string{StagedUploadPattern}, stagedUploadSidecars...) {
+		found, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err != nil {
+			return 0, fmt.Errorf("sweep staged uploads: %w", err)
+		}
+		matches = append(matches, found...)
 	}
 	var removed int
 	for _, m := range matches {
