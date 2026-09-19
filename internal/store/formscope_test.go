@@ -159,8 +159,9 @@ func TestAPITokensCarryTheirForms(t *testing.T) {
 	}
 }
 
-// seedTwoForms plants two forms with distinguishable content, plus one held
-// submission each, so a scoped read has something it must not return.
+// seedTwoForms plants two forms with distinguishable content, one accepted and
+// one held submission each, and one waitlist entry — so a scoped read has both
+// something it must not return and something it cannot answer.
 func seedTwoForms(t *testing.T, s *Store) {
 	t.Helper()
 	for _, f := range []Form{

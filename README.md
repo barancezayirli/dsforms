@@ -45,7 +45,8 @@ delete. No per-submission fee, no vendor, no Redis, no Postgres.
 - **Honeypot, rate limiting and login lockout** built in. No CAPTCHA.
 - **MCP endpoint** (optional) — point an MCP client at your instance to list
   unread messages, read one, mark it as spam, or ask what is in the database.
-  Scoped, revocable bearer tokens; off unless you turn it on.
+  Revocable bearer tokens, scoped by permission and limitable to particular
+  forms; off unless you turn it on.
 - **CLI** for user management, API tokens and snapshots from inside the container.
 - **~20MB image**, health check included.
 
@@ -140,6 +141,9 @@ curl -X POST https://your-server.com/f/FORM_ID \
 - Chat-template control tokens and invisible Unicode are removed from submission
   content before an MCP client sees it, and reported to the client; the stored
   message is never changed, and the admin marks what was withheld
+- An API token can be limited to particular forms, and then cannot read, change
+  or delete anything in the others — enforced in SQL on every query, not by
+  filtering rows afterwards
 
 Found something? Please report it privately — see **[SECURITY.md](SECURITY.md)**.
 

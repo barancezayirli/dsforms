@@ -116,6 +116,42 @@ again before it touches the database.
 nothing can undo, and a token that files spam should not also be able to erase
 the evidence. Give a client `read` unless it needs more.
 
+## Limiting a token to certain forms
+
+A token can be bound to the forms it may reach. From **System → API tokens**,
+choose *Only the forms I choose* and tick them; from the CLI, pass the ids after
+the days argument:
+
+```bash
+docker compose exec dsforms ./dsforms token create admin "careers bot" read 0 <form-id>
+```
+
+Ticking a form binds the token whether or not you moved the radio, because the
+failure worth avoiding is a token reaching more than you meant. "All forms"
+records no forms at all rather than today's list, so a token you meant to be
+unbounded still covers the form you add next month.
+
+**A bound token does not see the others at all.** Not "is refused" — they are
+absent. It lists one form, its listings and searches and statistics cover one
+form, and an id belonging to another answers exactly as an id that does not
+exist, because saying "forbidden" would confirm that someone else's submission
+is real.
+
+It is also not offered `list_filter_rules` or `add_block_rule`. A block rule
+applies to every form and the rule list is your own configuration, so both would
+be the bound escaping sideways — through the settings rather than through the
+data. `get_stats` still works and reports only that token's forms; the waitlist
+figure comes back as `waitlist_withheld`, since a waitlist entry belongs to no
+form.
+
+This is the control that still holds when the one above does not. Stripping
+markers is deliberately partial — it removes what is not language and says so —
+and everything past that depends on your client behaving. A token bound to one
+form cannot lose another form's data however the client is talked into
+behaving, which is a property of dsforms rather than of the client.
+
+Tokens minted before this existed reach every form, as they always did.
+
 ## The tools
 
 **Submitter IP addresses are withheld by default.** They are your data and they
@@ -188,7 +224,7 @@ So the two risks are not the same shape:
 
 | Risk | Scope it needs | Worst case |
 |---|---|---|
-| Your data leaves | `read` | everything you have ever collected, permanently |
+| Your data leaves | `read` | every form the token reaches, permanently |
 | Messages misfiled, junk rules added | `write` | noisy, and undoable |
 | Submissions destroyed | `delete` | gone |
 
@@ -261,11 +297,13 @@ tool output as data; that is a property of the client, not of dsforms.
 
 **What you should do.**
 
+- **Bind the token to the forms the client actually needs.** It is the only
+  thing here that limits the damage after everything else has failed, and it
+  costs one click.
 - Point tokens at clients you trust with the whole inbox, because that is what
-  `read` grants. The choice of client is the real control here. The token form
-  starts at `read` and nothing else for that reason, and says beside each
-  checkbox what the scope costs if the client turns out not to be the one you
-  meant.
+  an unbound `read` token grants. The token form starts at `read` and nothing
+  else for that reason, and says beside each checkbox what the scope costs if
+  the client turns out not to be the one you meant.
 - Do not hand out `delete`. It is separate precisely so you can withhold it, and
   deleting from the admin costs you nothing.
 - Keep `MCP_INCLUDE_IPS` off unless you need it. It is less data in the blast

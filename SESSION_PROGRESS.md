@@ -978,9 +978,46 @@ decode `U+E0053 E0045 E004E E0044` as "SEND" and name the smuggling attempt —
 while the payload itself never reached it. Both genuine quote requests came
 through intact, including the one that Prompt Guard called malicious.
 
-Still not built: **per-form token scoping**. It remains the only control that
-bounds blast radius when detection fails, and detection here is deliberately
-partial.
+## Per-form token scoping
+
+Built, and it is the one that matters most. Everything above depends on the
+client behaving; a token bound to one form cannot lose another form's data
+however the client is talked into behaving.
+
+**The zero value denies.** `store.FormScope{}` matches nothing — not every
+form — and `clause()` returns `AND 1 = 0` rather than the empty string, because
+returning `""` for both "filter to nothing" and "do not filter" is exactly how a
+zero value comes to mean everything. `mcpserver.FormAccess` does the same on the
+transport side: a struct rather than a list with a sentinel for "all", so that
+the safe reading of a missing value and the common case do not collide.
+
+**Eleven store signatures changed rather than gaining scoped variants.** That is
+the point: it makes the compiler enumerate every caller of a security filter,
+and keeps one query per concern instead of two that drift. The filter is in the
+statement, never applied to rows on the way back — this branch had already
+shipped that bug once in the read filter, and here it would read as "the form
+you are scoped to is empty".
+
+**One exception, named once.** An empty `form_ids` column means every form,
+because that is what every token minted before this existed holds, and an
+upgrade that silently revoked live credentials would be worse than the feature
+is good. It lives in `ParseFormScope` and nowhere else, and a migration test
+starts from the pre-scoping schema and fails if that reading is removed.
+
+**The refusal is indistinguishable from a missing id.** Answering "forbidden"
+would confirm someone else's submission is real, which turns every bound token
+into an oracle for the existence of everyone else's data — the same distinction
+the endpoint's 401s refuse to draw.
+
+Two things the reviews corrected, both the same shape: a tradeoff chosen the
+wrong way round. Reading the radio alone on the create form minted an unbounded
+token for someone who ticked a form and forgot to move it — granting more than
+was asked for, silently; ticking now binds, which can only grant less.
+`omitempty` on the waitlist count dropped a measured zero, so an empty waitlist
+was indistinguishable from one nobody counted.
+
+Verified live: a client holding a bound token, told to be exhaustive and to find
+everything, reported one form. The other was not refused — it was not there.
 
 ### What seven review rounds found
 
