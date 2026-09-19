@@ -810,17 +810,32 @@ correctness pass found six things, three of them bugs.
 - A hand-counted "fourteen tools" that was thirteen. AGENT.md §4 forbids these
   for exactly this reason; the count now lives only in `docs/mcp.md`'s table.
 
-## Open
+## Follow-ups, closed
 
-- **`/mcp` has no OAuth resource metadata**, so no `WWW-Authenticate`
-  parameters are emitted on a 401. Static bearer tokens are what "use it with
-  any client" means here, and the SDK's `ProtectedResourceMetadataHandler` needs
-  an authorization server dsforms does not have. Clients that insist on the full
-  OAuth discovery flow will not connect.
-- **Submission IPs are returned by the read tools.** That is the operator's own
-  data and it is what an IP block rule is written from, but it is worth a second
-  look if tokens are ever shared more widely than one person.
-- **`MCP_TOKEN_TTL_DAYS` does not apply to CLI-minted tokens**, which are always
-  non-expiring. The CLI deliberately does not load config — it would then need
-  `SECRET_KEY`, making it useless on a fresh install, which is when it is most
-  wanted. Documented in `docs/mcp.md` rather than hidden.
+All three open items were closed rather than carried. Each needed a decision,
+and the decision is the interesting part:
+
+- **No `WWW-Authenticate` on a 401.** Serving RFC 9728 protected-resource
+  metadata would have advertised an OAuth discovery flow that goes nowhere —
+  dsforms has no authorization server, and static tokens are the whole point. So
+  the fix is the plain RFC 6750 challenge instead, which is true: it tells a
+  generic client a bearer token is wanted without promising a flow. Attached on
+  401 and nothing else, which took a second test to prove: the success path
+  never reaches `WriteHeader` at all, so asserting on the 200 alone passed
+  against a middleware that attached the header unconditionally. The 405 from a
+  GET is what actually exercises it.
+- **Submitter IPs.** Now withheld unless `MCP_INCLUDE_IPS=true`. The address is
+  the operator's own data and it is what an IP block rule is written from, but
+  the other end of an MCP connection is a language model with a context window
+  and usually a vendor behind it — that should be a decision, not a default. It
+  is enforced in one funnel (`Server.toSubmission`), because "everywhere except
+  the one place someone forgot" is how this kind of fix usually fails; the test
+  checks all four read tools.
+- **`MCP_TOKEN_TTL_DAYS` not reaching CLI tokens.** The CLI still does not load
+  config — that would demand `SECRET_KEY` and make it useless on a fresh
+  install, which is when it is most wanted — so it takes the days as an
+  argument: `dsforms token create <user> <name> read,write 90`. A negative or
+  unparseable value is refused rather than clamped, since reading it as "never
+  expires" would grant more than was asked for.
+
+Nothing is left open on this branch.

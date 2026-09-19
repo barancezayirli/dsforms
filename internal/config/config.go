@@ -55,6 +55,15 @@ type Config struct {
 	// never expires, which is a real choice rather than an unset value — an MCP
 	// client in a config file is not somewhere a rotation reminder reaches.
 	MCPTokenTTLDays int
+
+	// MCPIncludeIPs returns submitters' IP addresses to MCP clients.
+	//
+	// Off by default. The address is the operator's own data and it is what an
+	// IP block rule is written from, but the other end of an MCP connection is
+	// a language model with a context window and usually a vendor behind it.
+	// Sending every submitter's address there should be a decision, not a
+	// default. The admin UI shows IPs either way.
+	MCPIncludeIPs bool
 }
 
 // Load reads configuration from environment variables.
@@ -93,6 +102,7 @@ func Load() Config {
 		// other than "no expiry", and a token born expired would be a refusal
 		// with no message attached to it.
 		MCPTokenTTLDays: max(envOrInt("MCP_TOKEN_TTL_DAYS", 0), 0),
+		MCPIncludeIPs:   envOrBool("MCP_INCLUDE_IPS", false),
 	}
 }
 

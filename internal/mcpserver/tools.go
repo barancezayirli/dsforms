@@ -52,7 +52,7 @@ type submissionOut struct {
 	Held      bool              `json:"held" jsonschema:"true when the submission is in spam quarantine rather than the inbox"`
 	SpamScore int               `json:"spam_score"`
 	Threshold int               `json:"spam_threshold" jsonschema:"the score at or above which this submission would have been held"`
-	IP        string            `json:"ip,omitempty"`
+	IP        string            `json:"ip,omitempty" jsonschema:"the submitter's IP address; omitted unless this instance is configured to share it"`
 	CreatedAt string            `json:"created_at" jsonschema:"RFC 3339"`
 }
 
@@ -64,7 +64,14 @@ type signalOut struct {
 	Weight int    `json:"weight"`
 }
 
-func toSubmission(sub store.Submission, formName string) submissionOut {
+// toSubmission is a method rather than a function so it can honour
+// Options.IncludeIPs. Every wire shape goes through it, which is what keeps the
+// withholding from being "everywhere except the one place someone forgot".
+func (s *Server) toSubmission(sub store.Submission, formName string) submissionOut {
+	ip := sub.IP
+	if !s.opts.IncludeIPs {
+		ip = ""
+	}
 	return submissionOut{
 		ID:        sub.ID,
 		FormID:    sub.FormID,
@@ -74,7 +81,7 @@ func toSubmission(sub store.Submission, formName string) submissionOut {
 		Held:      sub.IsHeld,
 		SpamScore: sub.SpamScore,
 		Threshold: sub.HeldThreshold,
-		IP:        sub.IP,
+		IP:        ip,
 		CreatedAt: rfc3339(sub.CreatedAt),
 	}
 }
@@ -329,7 +336,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 
 		out := listSubmissionsOut{Status: status, Submissions: make([]submissionOut, 0, len(subs))}
 		for _, sub := range subs {
-			out.Submissions = append(out.Submissions, toSubmission(sub, names[sub.FormID]))
+			out.Submissions = append(out.Submissions, s.toSubmission(sub, names[sub.FormID]))
 		}
 		out.Count = len(out.Submissions)
 		return nil, out, nil
@@ -361,7 +368,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 			return nil, getSubmissionOut{}, fmt.Errorf("reading the spam breakdown: %w", err)
 		}
 		return nil, getSubmissionOut{
-			Submission: toSubmission(sub, names[sub.FormID]),
+			Submission: s.toSubmission(sub, names[sub.FormID]),
 			Signals:    toSignals(signals),
 		}, nil
 	})
@@ -385,7 +392,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		}
 		out := listSubmissionsOut{Status: "all", Submissions: make([]submissionOut, 0, len(results))}
 		for _, r := range results {
-			out.Submissions = append(out.Submissions, toSubmission(r.Submission, r.FormName))
+			out.Submissions = append(out.Submissions, s.toSubmission(r.Submission, r.FormName))
 		}
 		out.Count = len(out.Submissions)
 		return nil, out, nil
@@ -425,7 +432,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 				return nil, listQuarantineOut{}, fmt.Errorf("reading the breakdown for %s: %w", sub.ID, err)
 			}
 			out.Submissions = append(out.Submissions, heldOut{
-				submissionOut: toSubmission(sub, names[sub.FormID]),
+				submissionOut: s.toSubmission(sub, names[sub.FormID]),
 				Signals:       toSignals(signals),
 			})
 		}
@@ -664,7 +671,7 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 		return nil, markSpamOut{
 			OK:         true,
 			Message:    "Moved to quarantine. Restore it from the dsforms admin if this was wrong.",
-			Submission: toSubmission(sub, names[sub.FormID]),
+			Submission: s.toSubmission(sub, names[sub.FormID]),
 		}, nil
 	})
 

@@ -42,8 +42,21 @@ type harness struct {
 	adminID string
 }
 
-// newHarness stands up the endpoint with a token carrying exactly scopes.
+// newHarness stands up the endpoint with a token carrying exactly scopes, with
+// submitter IPs withheld — the shipped default.
 func newHarness(t *testing.T, scopes ...string) *harness {
+	t.Helper()
+	return newHarnessOpts(t, Options{}, scopes...)
+}
+
+// newHarnessWithIPs is the same, for an instance that has opted into returning
+// submitter IPs.
+func newHarnessWithIPs(t *testing.T, scopes ...string) *harness {
+	t.Helper()
+	return newHarnessOpts(t, Options{IncludeIPs: true}, scopes...)
+}
+
+func newHarnessOpts(t *testing.T, opts Options, scopes ...string) *harness {
 	t.Helper()
 
 	st, err := store.New(":memory:")
@@ -67,7 +80,7 @@ func newHarness(t *testing.T, scopes ...string) *harness {
 	// legitimately never expire, and without this the SDK rejects every one.
 	mw := auth.RequireBearerToken(verify, &auth.RequireBearerTokenOptions{AllowMissingExpiration: true})
 
-	ts := httptest.NewServer(mw(New(st, "test").Handler()))
+	ts := httptest.NewServer(mw(New(st, "test", opts).Handler()))
 	t.Cleanup(ts.Close)
 
 	return &harness{store: st, http: ts, adminID: admin.ID}
@@ -350,7 +363,7 @@ func TestRequireScopeIsTheGateNotTheListing(t *testing.T) {
 // with nothing in the response to say why.
 func TestEveryScopeSubsetHasAServer(t *testing.T) {
 	t.Parallel()
-	s := New(nil, "test")
+	s := New(nil, "test", Options{})
 
 	want := 1
 	for range AllScopes {
@@ -372,7 +385,7 @@ func TestEveryScopeSubsetHasAServer(t *testing.T) {
 // middleware must not serve an unauthenticated client the whole tool set.
 func TestServerForRefusesWithoutTokenInfo(t *testing.T) {
 	t.Parallel()
-	s := New(nil, "test")
+	s := New(nil, "test", Options{})
 	if got := s.serverFor(httptest.NewRequest("POST", "/mcp", nil)); got != nil {
 		t.Fatal("serverFor returned a server for a request carrying no token info")
 	}
@@ -446,7 +459,9 @@ func TestListSubmissionsRefusesAnUnknownStatus(t *testing.T) {
 // as the partial reads AGENT.md §5 records, one layer further out.
 func TestListSubmissionsPopulatesTheWholeSubmission(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, "read")
+	// The IP-including harness, because this test is about every field arriving
+	// rather than about which fields are shared: withholding is its own test.
+	h := newHarnessWithIPs(t, "read")
 	h.seed(t)
 
 	out := decode[listSubmissionsOut](t, call(t, h.connect(t), "list_submissions", map[string]any{"status": "unread"}))
@@ -894,5 +909,80 @@ func TestListSubmissionsReadIsFilteredBeforePaging(t *testing.T) {
 	}
 	if !out.Submissions[0].Read {
 		t.Error("the returned submission is not marked read")
+	}
+}
+
+// TestSubmitterIPsAreWithheldByDefault closes the PII follow-up.
+//
+// A submission's IP is the operator's own data, and it is what an IP block rule
+// is written from — but an MCP client is a language model with a context window
+// and, often, a vendor behind it. Shipping every submitter's address into that
+// by default is a decision nobody made deliberately, so the default is now to
+// withhold, and an operator turns it on if they want it.
+//
+// Asserted on both listings and on the single-submission read, because "we only
+// leak it in one place" is the shape this kind of fix usually takes.
+func TestSubmitterIPsAreWithheldByDefault(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, "read")
+	h.seed(t)
+	session := h.connect(t)
+
+	list := decode[listSubmissionsOut](t, call(t, session, "list_submissions", map[string]any{"status": "all"}))
+	if len(list.Submissions) == 0 {
+		t.Fatal("no submissions returned")
+	}
+	for _, sub := range list.Submissions {
+		if sub.IP != "" {
+			t.Errorf("list_submissions returned the submitter IP %q for %s", sub.IP, sub.ID)
+		}
+	}
+
+	one := decode[getSubmissionOut](t, call(t, session, "get_submission", map[string]any{"submission_id": "s1"}))
+	if one.Submission.IP != "" {
+		t.Errorf("get_submission returned the submitter IP %q", one.Submission.IP)
+	}
+
+	held := decode[listQuarantineOut](t, call(t, session, "list_quarantine", nil))
+	if len(held.Submissions) == 0 {
+		t.Fatal("no quarantined submissions returned")
+	}
+	for _, sub := range held.Submissions {
+		if sub.IP != "" {
+			t.Errorf("list_quarantine returned the submitter IP %q for %s", sub.IP, sub.ID)
+		}
+	}
+
+	search := decode[listSubmissionsOut](t, call(t, session, "search_submissions", map[string]any{"query": "pricing"}))
+	for _, sub := range search.Submissions {
+		if sub.IP != "" {
+			t.Errorf("search_submissions returned the submitter IP %q for %s", sub.IP, sub.ID)
+		}
+	}
+}
+
+// TestSubmitterIPsAppearWhenTheOperatorAsks is the other half. A switch that
+// only ever withheld would satisfy the test above just as well, and would make
+// IP block rules unwritable from a client.
+func TestSubmitterIPsAppearWhenTheOperatorAsks(t *testing.T) {
+	t.Parallel()
+	h := newHarnessWithIPs(t, "read")
+	h.seed(t)
+	session := h.connect(t)
+
+	list := decode[listSubmissionsOut](t, call(t, session, "list_submissions", map[string]any{"status": "all"}))
+	var seen bool
+	for _, sub := range list.Submissions {
+		if sub.IP != "" {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Error("no submitter IP was returned although the instance opted in")
+	}
+
+	one := decode[getSubmissionOut](t, call(t, session, "get_submission", map[string]any{"submission_id": "s1"}))
+	if one.Submission.IP != "198.51.100.1" {
+		t.Errorf("get_submission IP = %q, want the stored value", one.Submission.IP)
 	}
 }

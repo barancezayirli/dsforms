@@ -380,10 +380,13 @@ func mountMCP(r *chi.Mux, d serverDeps) {
 	guard := ratelimit.NewLoginGuard(mcpMaxTokenFailures, mcpTokenLockout, time.Now)
 	guard.StartCleanup(30*time.Minute, 30*time.Minute)
 
-	srv := mcpserver.New(d.store, version)
+	srv := mcpserver.New(d.store, version, mcpserver.Options{
+		IncludeIPs: d.cfg.MCPIncludeIPs,
+	})
 
 	r.Group(func(r chi.Router) {
 		r.Use(rateLimitMiddleware(limiter))
+		r.Use(bearerChallenge)
 		r.Use(mcpauth.RequireBearerToken(verifyMCPToken(d.store, guard), &mcpauth.RequireBearerTokenOptions{
 			// dsforms tokens may legitimately never expire — a client in a
 			// config file is not somewhere a rotation reminder reaches — and
@@ -395,6 +398,51 @@ func mountMCP(r *chi.Mux, d serverDeps) {
 	})
 
 	log.Printf("MCP endpoint enabled at %s/mcp", d.cfg.BaseURL)
+}
+
+// bearerChallenge adds the WWW-Authenticate header RFC 6750 §3 asks a
+// bearer-protected resource to send with a 401.
+//
+// The SDK emits one only when it has OAuth resource metadata to point at, and
+// dsforms has none to give: these are static tokens an operator mints, with no
+// authorization server behind them. Serving RFC 9728 metadata anyway would
+// advertise a discovery flow that goes nowhere, so the honest fix is the plain
+// challenge — which is what tells a generic client "this endpoint wants a
+// bearer token" rather than leaving it to guess from a bare 401.
+//
+// Set before the response is written, because headers cannot be added once the
+// status has gone out. It is written unconditionally and removed again on any
+// non-401, which is cheaper than wrapping every write.
+func bearerChallenge(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&challengeWriter{ResponseWriter: w}, r)
+	})
+}
+
+// challengeWriter attaches the bearer challenge at the moment a 401 is written.
+type challengeWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (c *challengeWriter) WriteHeader(status int) {
+	if !c.wroteHeader {
+		c.wroteHeader = true
+		if status == http.StatusUnauthorized {
+			c.Header().Set("WWW-Authenticate",
+				`Bearer realm="dsforms", error="invalid_token", `+
+					`error_description="a dsforms API token is required"`)
+		}
+	}
+	c.ResponseWriter.WriteHeader(status)
+}
+
+// Write covers a handler that writes a body without calling WriteHeader, which
+// implies 200 — recorded so a later WriteHeader cannot add the header after the
+// status is already on the wire.
+func (c *challengeWriter) Write(b []byte) (int, error) {
+	c.wroteHeader = true
+	return c.ResponseWriter.Write(b)
 }
 
 // MCP rate limits. Deliberately more generous than the form-submit budget — a
@@ -677,11 +725,27 @@ func runTokenCLI(args []string) {
 
 	case "create":
 		if len(args) < 4 {
-			fmt.Fprintf(os.Stderr, "Usage: dsforms token create <username> <name> <scopes>\n"+
-				"  scopes is a comma-separated list: %s\n", mcpserver.Scopes(mcpserver.AllScopes))
+			fmt.Fprintf(os.Stderr, "Usage: dsforms token create <username> <name> <scopes> [days]\n"+
+				"  scopes is a comma-separated list: %s\n"+
+				"  days is optional; omit it, or pass 0, for a token that never expires\n",
+				mcpserver.Scopes(mcpserver.AllScopes))
 			os.Exit(1)
 		}
 		u := mustUser(s, args[1])
+
+		// The expiry is an argument rather than MCP_TOKEN_TTL_DAYS, because that
+		// is read by the *server* from the environment and honouring it here
+		// would mean loading config — which demands SECRET_KEY and makes this
+		// command useless on a fresh install, the one moment it matters most.
+		var days string
+		if len(args) > 4 {
+			days = args[4]
+		}
+		expiry, err := parseTokenExpiry(days)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 
 		// ValidateScopes, not ParseScopes: a typo here is a person's mistake to
 		// report, not a value to silently drop. Creating a token with fewer
@@ -692,17 +756,17 @@ func runTokenCLI(args []string) {
 			os.Exit(1)
 		}
 
-		// No expiry from the CLI. The TTL is an instance-wide policy read from
-		// the environment by the server, and honouring it here would mean
-		// loading config — which requires SECRET_KEY and would make this command
-		// unusable on a fresh install. A CLI token is revoked by hand.
-		raw, tok, err := s.CreateAPIToken(u.ID, args[2], scopes.Strings(), 0)
+		raw, tok, err := s.CreateAPIToken(u.ID, args[2], scopes.Strings(), expiry)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Printf("Token %q created for %s with scopes %s.\n\n", tok.Name, u.Username, scopes)
+		expires := "never expires"
+		if !tok.ExpiresAt.IsZero() {
+			expires = "expires " + tok.ExpiresAt.Format("2006-01-02 15:04") + " UTC"
+		}
+		fmt.Printf("Token %q created for %s with scopes %s, %s.\n\n", tok.Name, u.Username, scopes, expires)
 		fmt.Printf("  %s\n\n", raw)
 		fmt.Println("This is the only time it is shown — only a hash is stored.")
 		fmt.Println("Send it as an Authorization: Bearer header to the /mcp endpoint.")
@@ -731,6 +795,27 @@ func runTokenCLI(args []string) {
 		fmt.Fprintf(os.Stderr, "Unknown command: token %s\n", args[0])
 		os.Exit(1)
 	}
+}
+
+// parseTokenExpiry turns the CLI's optional days argument into a duration.
+//
+// An empty argument and an explicit 0 both mean "never expires", which is the
+// documented default. Anything else that is not a plain non-negative integer is
+// refused rather than clamped: a negative value would mint a token that is
+// already dead, and quietly reading it as "never expires" would grant more than
+// was asked for — the same direction every other value-set decision here takes.
+func parseTokenExpiry(days string) (time.Duration, error) {
+	if days == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(days)
+	if err != nil {
+		return 0, fmt.Errorf("days must be a whole number of days, got %q", days)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("days must not be negative, got %d", n)
+	}
+	return time.Duration(n) * 24 * time.Hour, nil
 }
 
 // mustUser resolves a username or exits. Every token command is scoped to a

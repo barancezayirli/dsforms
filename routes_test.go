@@ -406,3 +406,71 @@ func TestMCPIsExemptFromTheGlobalBodyLimit(t *testing.T) {
 		t.Fatalf("an 80KB MCP request answered %d: %.200q", w.Code, w.Body.String())
 	}
 }
+
+// TestMCPSendsABearerChallenge closes the follow-up about the missing
+// WWW-Authenticate header.
+//
+// RFC 6750 §3 asks a bearer-protected resource to say so on a 401. The SDK
+// emits one only when it has OAuth resource metadata to point at, and dsforms
+// has none: these are static tokens an operator mints, with no authorization
+// server behind them. Serving RFC 9728 metadata anyway would advertise a
+// discovery flow that goes nowhere, so the plain challenge is what ships — and
+// it must not leak onto successful responses, which would be a different lie.
+func TestMCPSendsABearerChallenge(t *testing.T) {
+	t.Parallel()
+	r, _, valid := mcpRouter(t, "read")
+
+	for _, tc := range []struct{ name, token string }{
+		{"no token", ""},
+		{"a token that was never issued", "dsf_0000000000000000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, mcpRequest(initialize, tc.token))
+
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", w.Code)
+			}
+			got := w.Header().Get("WWW-Authenticate")
+			if got == "" {
+				t.Fatal("no WWW-Authenticate header on a 401; a client has nothing to tell it a token is wanted")
+			}
+			if !strings.HasPrefix(got, "Bearer") {
+				t.Errorf("WWW-Authenticate = %q, want a Bearer challenge", got)
+			}
+			if !strings.Contains(got, `realm="dsforms"`) {
+				t.Errorf("WWW-Authenticate = %q, want it to name the realm", got)
+			}
+		})
+	}
+
+	// Not on a success. A challenge on a 200 tells a client its working token
+	// was rejected.
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, mcpRequest(initialize, valid))
+	if w.Code != http.StatusOK {
+		t.Fatalf("a valid token answered %d", w.Code)
+	}
+	if got := w.Header().Get("WWW-Authenticate"); got != "" {
+		t.Errorf("WWW-Authenticate = %q on a successful request, want none", got)
+	}
+
+	// And not on some other failure. This is the case that actually exercises
+	// the status check: the 200 above never reaches WriteHeader at all, because
+	// the SDK writes its body straight out, so on its own it would pass against
+	// a middleware that attached the challenge unconditionally. A GET is 405
+	// here — the server is stateless — and goes through WriteHeader with a
+	// status that is not 401.
+	authed := httptest.NewRequest("GET", "/mcp", nil)
+	authed.Header.Set("Authorization", "Bearer "+valid)
+	authed.Header.Set("Accept", "text/event-stream")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, authed)
+	if w.Code == http.StatusUnauthorized {
+		t.Fatalf("an authenticated GET answered 401; this case no longer tests what it claims")
+	}
+	if got := w.Header().Get("WWW-Authenticate"); got != "" {
+		t.Errorf("WWW-Authenticate = %q on a %d, want none — the challenge must be "+
+			"attached to a 401 and nothing else", got, w.Code)
+	}
+}

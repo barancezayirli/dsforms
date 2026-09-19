@@ -47,9 +47,14 @@ recovered: if you lose it, revoke it and make another. Tokens belong to a user,
 so deleting that user revokes theirs in the same statement, and each one is
 revocable on its own without disturbing the others.
 
-By default a token never expires. Set `MCP_TOKEN_TTL_DAYS` to expire the ones
-created through the admin; CLI tokens are always non-expiring, since the CLI
-does not read that setting.
+By default a token never expires. `MCP_TOKEN_TTL_DAYS` sets the lifetime of
+tokens created through the admin. The CLI does not read your `.env` — that
+would demand `SECRET_KEY` and make it useless on a fresh install, which is when
+it is most wanted — so it takes the days as a fourth argument instead:
+
+```bash
+docker compose exec dsforms ./dsforms token create admin "ci" read 90
+```
 
 ## Connecting a client
 
@@ -79,9 +84,21 @@ curl -s -X POST https://forms.example.com/mcp \
         "clientInfo":{"name":"curl","version":"1"}}}'
 ```
 
-An unknown, revoked or expired token all answer `401`. They are deliberately not
-distinguished: telling them apart is a distinction only useful to someone
-guessing.
+An unknown, revoked or expired token all answer `401`, with an RFC 6750
+challenge:
+
+```
+WWW-Authenticate: Bearer realm="dsforms", error="invalid_token"
+```
+
+They are deliberately not distinguished from each other: telling them apart is
+a distinction only useful to someone guessing.
+
+dsforms serves **no** OAuth protected-resource metadata (RFC 9728), because it
+has no authorization server to point at — these are static tokens you mint.
+Advertising a discovery flow that goes nowhere would be worse than not
+advertising one, so a client that insists on completing OAuth discovery will
+not connect. Clients that accept a bearer token you configure will.
 
 ## Scopes
 
@@ -100,6 +117,12 @@ nothing can undo, and a token that files spam should not also be able to erase
 the evidence. Give a client `read` unless it needs more.
 
 ## The tools
+
+**Submitter IP addresses are withheld by default.** They are your data and they
+are what an IP block rule is written from, but an MCP client is a language model
+with a context window and usually a vendor behind it, so sending every
+submitter's address there should be a decision rather than a default. Set
+`MCP_INCLUDE_IPS=true` to include them. The admin UI shows them either way.
 
 **Reading.** `list_submissions` defaults to unread and never includes
 quarantined submissions — `list_quarantine` is for those, and it carries the

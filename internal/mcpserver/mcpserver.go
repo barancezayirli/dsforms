@@ -85,10 +85,23 @@ const (
 // /mcp precisely so the two cannot disagree about which applies.
 const maxRequestBody = 1 << 20 // 1 MiB
 
+// Options are the instance-wide choices the tool surface honours.
+type Options struct {
+	// IncludeIPs returns each submission's originating IP address to clients.
+	//
+	// Off by default. The address is the operator's own data and it is what an
+	// IP block rule is written from — but the other end of this connection is a
+	// language model with a context window and, usually, a vendor behind it, so
+	// shipping every submitter's address into it is a decision an operator
+	// should make rather than inherit. The admin UI shows IPs either way.
+	IncludeIPs bool
+}
+
 // Server builds the per-scope MCP servers and the HTTP handler in front of them.
 type Server struct {
 	store   Store
 	version string
+	opts    Options
 
 	// byScope holds one prebuilt mcp.Server per scope subset, keyed by
 	// Scopes.Key(). There are 2^len(AllScopes) of them — eight today — so they
@@ -104,8 +117,8 @@ type Server struct {
 
 // New builds the server. version is reported to clients in the initialize
 // handshake, so a client can tell which dsforms it is talking to.
-func New(st Store, version string) *Server {
-	s := &Server{store: st, version: version, byScope: map[string]*mcp.Server{}}
+func New(st Store, version string, opts Options) *Server {
+	s := &Server{store: st, version: version, opts: opts, byScope: map[string]*mcp.Server{}}
 	for _, scopes := range scopeSubsets() {
 		s.byScope[scopes.Key()] = s.build(scopes)
 	}
