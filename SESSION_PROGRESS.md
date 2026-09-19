@@ -1059,3 +1059,34 @@ redaction was doing the attacker's work. Position decides now.
 
 The pattern under all of it: **a claim in a comment is not a property.** Every
 one of these was asserted somewhere in prose before it was false.
+
+## Backups carry no credentials
+
+Asked whether a backup exports the tokens table. It did — a snapshot is
+`VACUUM INTO`, a copy of the whole database — and testing it turned up the
+sharper problem: **restoring a snapshot undid revocation.** Mint, back up,
+revoke (401), restore, restart, and the revoked token answered 200 again.
+
+Both directions are stripped now, and both halves of that matter:
+
+`VACUUM` is the load-bearing part, not the `DELETE`. SQLite frees a deleted
+row's page rather than rewriting it, so the digests stay in the file for a grep
+to find — the fix would have looked done while shipping exactly what it removes.
+Pinned by its own contract test, and the control that drops the `VACUUM` still
+fails on the raw bytes.
+
+**Stripped on the way in as well as out.** An export-side defence only runs on
+files this build wrote, and operations.md tells people they may drop in a raw
+copy of the database file. Either walked a revoked credential straight back in.
+
+**Sessions went in too, after the first version left them out on reasoning that
+did not survive being tested.** The claim was that dropping them would sign
+everyone out of a restored instance. Both halves were wrong: the operator
+performing a restore is signed out regardless, because their session postdates
+the snapshot, and keeping sessions resurrected ones deliberately destroyed — a
+logout, a password change, a deleted user's cascade, which `internal/handler/auth.go`
+calls a guarantee. Measured: a logged-out session answered 200 after a restore.
+
+The cost is documented where an operator meets it, on the restore button and in
+operations.md: after restoring, tokens are gone and everyone signs in again.
+A client or a person visibly stopping is the better failure.

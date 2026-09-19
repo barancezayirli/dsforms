@@ -48,21 +48,24 @@ including the write-ahead log.
 You can open it with any SQLite client, or drop it in as a direct replacement
 for the live database.
 
-**API tokens are not in a snapshot.** They are cleared from the copy, and the
-copy is rewritten so the hashes are gone from the file rather than merely
-unlinked. Two reasons: a backup gets copied to laptops and object stores and had
-no business carrying credential material, and — the sharper one — restoring a
-snapshot used to bring back **every token revoked since it was taken**.
-Revocation is a security action, and whoever you revoked may still be holding
-the string.
+**No credentials are in a snapshot** — neither API tokens nor login sessions.
+They are cleared from the copy, and the copy is rewritten so the hashes are gone
+from the file rather than merely unlinked. Two reasons: a backup gets copied to
+laptops and object stores and had no business carrying credential material, and
+— the sharper one — restoring a snapshot used to undo revocation. A token you
+revoked, a session you logged out of, a session cascaded away with a deleted
+user: all of them came back and worked again.
 
-The cost is the other side of that: **after restoring, your API tokens are
-gone** and MCP clients stop working until you mint new ones. That is deliberate.
-A client that visibly stops is a better failure than a revoked credential
-quietly working again.
+They are stripped on the way in as well as on the way out, so a snapshot taken
+by an older build, or a raw copy of a database file, cannot walk them back in
+either.
 
-Login sessions *are* kept, so a restore does not sign everyone out. They expire
-on their own, which tokens need not.
+The cost is the other side of that. **After restoring, your API tokens are gone
+and everyone is signed out, including you.** MCP clients stop working until you
+mint new tokens. That is deliberate: a client or a person visibly stopping is a
+better failure than a revoked credential quietly working again — and the
+operator performing a restore was always signed out by it anyway, since their
+own session postdates the snapshot.
 
 ## What happens if a restore fails
 

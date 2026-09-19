@@ -23,14 +23,20 @@ import (
 // copied to laptops and object stores, and it had no business carrying
 // credential material it does not need.
 //
-// The cost is real and documented: a restore no longer brings live tokens back
-// either, so they are re-minted after a recovery. Clients visibly stopping is
-// the better failure than a revoked credential quietly working again.
+// sessions are here for the same reason, and were left out of the first version
+// of this on reasoning that did not survive being tested. The claim was that
+// dropping them would sign every operator out of a restored instance. Both
+// halves were wrong: a restore signs out whoever performs it regardless, since
+// their session postdates the snapshot, and keeping them brings back sessions
+// that were deliberately destroyed — a logout, a password change, the cascade
+// from a deleted user. internal/handler/auth.go calls that last one a guarantee
+// the product makes, and a restore was quietly breaking it.
 //
-// Sessions are deliberately not in this list. They expire on their own and
-// dropping them would sign every operator out of a restored instance, which is
-// a different trade — worth making, but not silently as part of this one.
-var credentialTables = []string{"api_tokens"}
+// The cost is real and documented: a restore no longer brings live tokens back
+// either, so they are re-minted after a recovery, and everyone signs in again.
+// Clients and people visibly stopping is the better failure than a revoked
+// credential quietly working again.
+var credentialTables = []string{"api_tokens", "sessions"}
 
 // Export creates a snapshot of the DB using VACUUM INTO, with the credential
 // tables emptied.
@@ -232,6 +238,20 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	defer importMu.Unlock()
 
 	if err := Validate(uploadedPath); err != nil {
+		return fmt.Errorf("%w: %w", ErrRejected, err)
+	}
+
+	// Stripped again on the way in, not only on the way out.
+	//
+	// Export is the wrong place for this to live alone: a snapshot taken before
+	// that existed still carries credentials, and operations.md explicitly tells
+	// people they can drop in a raw copy of the database file. Either would walk
+	// a revoked token or a logged-out session straight back into a live
+	// instance, past a defence that only ever ran on files this build wrote.
+	//
+	// It is the uploaded file being modified, before anything is swapped, so a
+	// rejected restore leaves the live database untouched as before.
+	if err := stripCredentials(uploadedPath); err != nil {
 		return fmt.Errorf("%w: %w", ErrRejected, err)
 	}
 

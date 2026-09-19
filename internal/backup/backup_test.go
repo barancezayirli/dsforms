@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -310,5 +311,172 @@ func TestASnapshotWithoutTokensStillValidates(t *testing.T) {
 
 	if err := Validate(path); err != nil {
 		t.Errorf("a stripped snapshot no longer validates: %v", err)
+	}
+}
+
+// TestExportLeavesTheSessionsBehind.
+//
+// Sessions were kept out of the first version of this on the reasoning that
+// dropping them would sign every operator out of a restored instance. Both
+// halves of that turned out to be wrong when tested: a restore signs out the
+// operator performing it regardless (their session postdates the snapshot), and
+// keeping them resurrects sessions that were deliberately destroyed — a logout,
+// a password change, a deleted user's cascade. internal/handler/auth.go calls
+// that last one a guarantee.
+func TestExportLeavesTheSessionsBehind(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	seedWithToken(t, s)
+
+	u, err := s.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	if _, err := s.CreateSession(u.ID, 24*time.Hour); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	var hash string
+	if err := s.DB().QueryRow("SELECT token_hash FROM sessions LIMIT 1").Scan(&hash); err != nil {
+		t.Fatalf("reading the stored session hash: %v", err)
+	}
+
+	path, err := Export(s.DB())
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	defer os.Remove(path)
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if bytes.Contains(raw, []byte(hash)) {
+		t.Error("a session hash is still in the snapshot's bytes")
+	}
+}
+
+// TestEveryCredentialTableIsEmptyInASnapshot ranges the list rather than naming
+// tables, so a table added to it later is covered without anyone remembering
+// this test — and one added to the schema but not to the list is the gap this
+// cannot see, which is why the list is short and commented.
+func TestEveryCredentialTableIsEmptyInASnapshot(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	seedWithToken(t, s)
+	u, _ := s.GetUserByUsername("admin")
+	if _, err := s.CreateSession(u.ID, 24*time.Hour); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Every one has a row before the export, or the assertion below is vacuous.
+	for _, table := range credentialTables {
+		var n int
+		if err := s.DB().QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+			t.Fatalf("counting %s in the live database: %v", table, err)
+		}
+		if n == 0 {
+			t.Fatalf("%s is empty before the export, so this test proves nothing", table)
+		}
+	}
+
+	path, err := Export(s.DB())
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	defer os.Remove(path)
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open snapshot: %v", err)
+	}
+	defer db.Close()
+	for _, table := range credentialTables {
+		var n int
+		if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+			t.Fatalf("counting %s in the snapshot: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("snapshot holds %d %s rows, want none", n, table)
+		}
+	}
+}
+
+// TestImportStripsCredentialsFromAnOldSnapshot.
+//
+// The export-side defence only ever runs on files this build wrote. A snapshot
+// taken before it existed still carries credentials, and operations.md tells
+// people they may drop in a raw copy of the database file — either would walk a
+// revoked token or a logged-out session straight back into a live instance.
+func TestImportStripsCredentialsFromAnOldSnapshot(t *testing.T) {
+	t.Parallel()
+
+	// A "snapshot" with credentials in it, exactly as an older build produced.
+	old, oldPath := testStore(t)
+	seedWithToken(t, old)
+	u, err := old.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	if _, err := old.CreateSession(u.ID, 24*time.Hour); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	legacy := filepath.Join(t.TempDir(), "legacy-snapshot.db")
+	in, err := os.ReadFile(oldPath)
+	if err != nil {
+		t.Fatalf("read the old database: %v", err)
+	}
+	if err := os.WriteFile(legacy, in, 0o600); err != nil {
+		t.Fatalf("write the legacy snapshot: %v", err)
+	}
+
+	// It really does carry them, or the assertion below proves nothing.
+	src, err := sql.Open("sqlite", legacy)
+	if err != nil {
+		t.Fatalf("open legacy snapshot: %v", err)
+	}
+	for _, table := range credentialTables {
+		var n int
+		if err := src.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+			t.Fatalf("counting %s: %v", table, err)
+		}
+		if n == 0 {
+			t.Fatalf("the legacy snapshot has no %s rows, so this test proves nothing", table)
+		}
+	}
+	if err := src.Close(); err != nil {
+		t.Fatalf("close legacy snapshot: %v", err)
+	}
+
+	live, livePath := testStore(t)
+	if err := Import(live, legacy, livePath); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+
+	restored, err := store.New(livePath)
+	if err != nil {
+		t.Fatalf("reopen the restored database: %v", err)
+	}
+	defer restored.Close()
+	for _, table := range credentialTables {
+		var n int
+		if err := restored.DB().QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+			t.Fatalf("counting %s after the restore: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("%d %s rows survived the restore of a legacy snapshot", n, table)
+		}
+	}
+
+	// And the data the restore was for did come back.
+	var forms int
+	if err := restored.DB().QueryRow("SELECT COUNT(*) FROM forms").Scan(&forms); err != nil {
+		t.Fatalf("counting forms: %v", err)
+	}
+	if forms != 1 {
+		t.Errorf("forms = %d after the restore, want 1", forms)
 	}
 }
