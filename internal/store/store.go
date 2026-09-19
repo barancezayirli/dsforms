@@ -884,6 +884,51 @@ func (s *Store) MarkRead(submissionID string) error {
 	return nil
 }
 
+// MarkUnread puts a submission back in the unread state.
+//
+// The inverse of MarkRead, and it exists because a client that can only ever
+// mark things read can never undo a misclick. The unread badge counts this
+// column, so the two stay in step by construction.
+func (s *Store) MarkUnread(submissionID string) error {
+	_, err := s.conn().Exec("UPDATE submissions SET read = 0 WHERE id = ?", submissionID)
+	if err != nil {
+		return fmt.Errorf("mark unread: %w", err)
+	}
+	return nil
+}
+
+// ListSubmissionsFiltered returns a page of accepted submissions, optionally
+// narrowed to one form and to the unread ones.
+//
+// It exists because neither existing listing answers "what have I not read?"
+// across forms: ListSubmissions and ListSubmissionsPaged are both scoped to a
+// single form and neither filters on read. An empty formID means every form.
+//
+// Held submissions are excluded, like every other inbox read — quarantine is
+// reviewed on its own screen, and a message awaiting a spam decision is not
+// something anyone has failed to read.
+//
+// The query is built by appending fixed clause strings and binding every value,
+// never by interpolating one: the two inputs that vary are a bound formID and a
+// constant `AND read = 0`.
+func (s *Store) ListSubmissionsFiltered(formID string, unreadOnly bool, limit, offset int) ([]Submission, error) {
+	query := "SELECT " + heldColumns + " FROM submissions WHERE is_held = 0"
+	var args []any
+	if formID != "" {
+		query += " AND form_id = ?"
+		args = append(args, formID)
+	}
+	if unreadOnly {
+		query += " AND read = 0"
+	}
+	// Tie-broken by id: created_at alone is not stable, and submissions arriving
+	// in the same second would let a LIMIT/OFFSET page repeat or skip a row.
+	query += " ORDER BY created_at DESC, id LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	return s.querySubmissions("list submissions filtered", query, args...)
+}
+
 // CountAllSubmissions returns the total count of all submissions across all forms.
 func (s *Store) CountAllSubmissions() (int, error) {
 	var count int

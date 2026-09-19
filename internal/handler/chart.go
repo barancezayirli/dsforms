@@ -217,6 +217,7 @@ var ruleIcons = map[screen.Check]string{
 	screen.CheckExtraLinks: "link",
 	screen.CheckRepeatIP:   "fingerprint",
 	screen.CheckBlocked:    "prohibit",
+	screen.CheckManual:     "flag",
 }
 
 var ruleLabels = map[screen.Check]string{
@@ -228,6 +229,7 @@ var ruleLabels = map[screen.Check]string{
 	screen.CheckExtraLinks: "Multiple raw URLs",
 	screen.CheckRepeatIP:   "Repeat submissions from this IP",
 	screen.CheckBlocked:    "Blocked by a filter rule",
+	screen.CheckManual:     "Marked as spam by hand",
 }
 
 // RuleIcon returns the icon name for a spam rule. The fallback matters: a row

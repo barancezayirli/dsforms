@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1454,5 +1455,169 @@ func TestCreateSubmissionStoresTheScoreOnEveryReadPath(t *testing.T) {
 	}
 	if len(signals) != 0 {
 		t.Errorf("SubmissionSignals returned %d rows for an accepted submission, want 0", len(signals))
+	}
+}
+
+// subFixture is an accepted submission for the listing tests below.
+func subFixture(id, formID string, at time.Time) Submission {
+	return Submission{
+		ID:        id,
+		FormID:    formID,
+		Data:      map[string]string{"message": id},
+		RawData:   `{"message":"` + id + `"}`,
+		CreatedAt: at,
+	}
+}
+
+// TestMarkUnreadIsTheInverseOfMarkRead. Without it the MCP surface can only ever
+// move a message one way, and "mark it back, I hadn't dealt with it" is the
+// obvious next request.
+func TestMarkUnreadIsTheInverseOfMarkRead(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := s.CreateSubmission(subFixture("s1", "f1", time.Now())); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if err := s.MarkRead("s1"); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+
+	if err := s.MarkUnread("s1"); err != nil {
+		t.Fatalf("MarkUnread: %v", err)
+	}
+	got, err := s.GetSubmission("s1")
+	if err != nil {
+		t.Fatalf("GetSubmission: %v", err)
+	}
+	if got.Read {
+		t.Error("Read = true after MarkUnread")
+	}
+
+	n, err := s.UnreadCount("f1")
+	if err != nil {
+		t.Fatalf("UnreadCount: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("UnreadCount = %d, want 1 — the badge must agree with the row", n)
+	}
+}
+
+// TestListSubmissionsFiltered covers the cross-form unread listing the MCP
+// client asks for, which no existing method provides: ListSubmissionsPaged is
+// scoped to one form and does not filter on read.
+func TestListSubmissionsFiltered(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	for _, id := range []string{"f1", "f2"} {
+		if err := s.CreateForm(Form{ID: id, Name: id}); err != nil {
+			t.Fatalf("CreateForm(%s): %v", id, err)
+		}
+	}
+	base := time.Now().UTC().Truncate(time.Second)
+	// Deliberately out of insertion order, so an ORDER BY that does nothing
+	// would be visible.
+	for i, sub := range []Submission{
+		subFixture("a", "f1", base.Add(-3*time.Hour)),
+		subFixture("b", "f1", base.Add(-1*time.Hour)),
+		subFixture("c", "f2", base.Add(-2*time.Hour)),
+	} {
+		if err := s.CreateSubmission(sub); err != nil {
+			t.Fatalf("CreateSubmission #%d: %v", i, err)
+		}
+	}
+	if err := s.MarkRead("b"); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+	// A held submission must never appear: quarantine is not the inbox.
+	if err := s.CreateHeldSubmission(
+		Submission{ID: "held", FormID: "f1", RawData: `{}`, CreatedAt: base}, 9, 6, nil,
+	); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	ids := func(subs []Submission) []string {
+		out := make([]string, 0, len(subs))
+		for _, s := range subs {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+
+	tests := []struct {
+		name          string
+		formID        string
+		unreadOnly    bool
+		limit, offset int
+		want          []string
+	}{
+		{"every form, newest first", "", false, 10, 0, []string{"b", "c", "a"}},
+		{"unread across every form", "", true, 10, 0, []string{"c", "a"}},
+		{"one form", "f1", false, 10, 0, []string{"b", "a"}},
+		{"one form, unread only", "f1", true, 10, 0, []string{"a"}},
+		{"paged", "", false, 2, 0, []string{"b", "c"}},
+		{"paged, second page", "", false, 2, 2, []string{"a"}},
+		{"past the end", "", false, 10, 99, nil},
+		{"unknown form", "nope", false, 10, 0, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := s.ListSubmissionsFiltered(tt.formID, tt.unreadOnly, tt.limit, tt.offset)
+			if err != nil {
+				t.Fatalf("ListSubmissionsFiltered: %v", err)
+			}
+			if !slices.Equal(ids(got), tt.want) {
+				t.Errorf("ids = %v, want %v", ids(got), tt.want)
+			}
+			for _, sub := range got {
+				if sub.IsHeld {
+					t.Errorf("submission %s is held; quarantine must not leak into the inbox listing", sub.ID)
+				}
+			}
+		})
+	}
+}
+
+// TestListSubmissionsFilteredPopulatesTheWholeStruct. AGENT.md §5: a query
+// selecting a subset of the columns returns a value whose other fields are
+// silently zero, which shipped a screen reading score 0 beside a breakdown
+// summing to 11.
+func TestListSubmissionsFilteredPopulatesTheWholeStruct(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	sub := subFixture("s1", "f1", time.Now())
+	sub.IP = "203.0.113.9"
+	sub.SpamScore = 4
+	sub.HeldThreshold = 6
+	if err := s.CreateSubmission(sub); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	got, err := s.ListSubmissionsFiltered("f1", false, 10, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsFiltered: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d submissions, want 1", len(got))
+	}
+	switch {
+	case got[0].IP != "203.0.113.9":
+		t.Errorf("IP = %q, want the stored value", got[0].IP)
+	case got[0].SpamScore != 4:
+		t.Errorf("SpamScore = %d, want 4", got[0].SpamScore)
+	case got[0].HeldThreshold != 6:
+		t.Errorf("HeldThreshold = %d, want 6", got[0].HeldThreshold)
+	case !got[0].Notified:
+		t.Error("Notified = false; an accepted submission defaults to notified")
+	case got[0].Data["message"] != "s1":
+		t.Errorf("Data = %v, want the decoded JSON", got[0].Data)
+	case got[0].CreatedAt.IsZero():
+		t.Error("CreatedAt is zero")
 	}
 }
