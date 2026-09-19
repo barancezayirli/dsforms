@@ -508,9 +508,13 @@ func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
 	return int(n), nil
 }
 
-// NavCounts returns the three sidebar badge numbers in one round trip. It runs
-// on every admin page render, so it is deliberately three indexed COUNTs and
+// NavCounts returns the sidebar badge numbers in one round trip. It runs on
+// every admin page render, so it is deliberately a few indexed COUNTs and
 // nothing more.
+//
+// Under a form scope it returns two of them: a waitlist entry belongs to no
+// form, so that count is left unmeasured and WaitlistKnown says so rather than
+// reporting a zero nothing looked for.
 func (s *Store) NavCounts(forms FormScope) (NavCounts, error) {
 	scopeClause, scopeArgs := forms.clause("form_id")
 	args := append(append([]any{}, scopeArgs...), scopeArgs...)
@@ -520,14 +524,23 @@ func (s *Store) NavCounts(forms FormScope) (NavCounts, error) {
 		SELECT
 			(SELECT COUNT(*) FROM submissions WHERE read = 0 AND is_held = 0` + scopeClause + `),
 			(SELECT COUNT(*) FROM submissions WHERE is_held = 1` + scopeClause + `)`
-	if err := s.conn().QueryRow(query, args...).Scan(&n.Unread, &n.Held); err != nil {
+	// Still one statement on the path the admin takes. The waitlist subquery is
+	// added rather than run separately, so scoping did not quietly turn every
+	// page render into two round trips.
+	if n.WaitlistKnown {
+		query += `,
+			(SELECT COUNT(*) FROM waitlist_entries)`
+	}
+
+	row := s.conn().QueryRow(query, args...)
+	var err error
+	if n.WaitlistKnown {
+		err = row.Scan(&n.Unread, &n.Held, &n.Waitlist)
+	} else {
+		err = row.Scan(&n.Unread, &n.Held)
+	}
+	if err != nil {
 		return NavCounts{}, fmt.Errorf("nav counts: %w", err)
-	}
-	if !n.WaitlistKnown {
-		return n, nil
-	}
-	if err := s.conn().QueryRow("SELECT COUNT(*) FROM waitlist_entries").Scan(&n.Waitlist); err != nil {
-		return NavCounts{}, fmt.Errorf("nav counts: waitlist: %w", err)
 	}
 	return n, nil
 }

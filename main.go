@@ -833,13 +833,6 @@ func runTokenCLI(args []string) {
 	}
 }
 
-// parseTokenExpiry turns the CLI's optional days argument into a duration.
-//
-// An empty argument and an explicit 0 both mean "never expires", which is the
-// documented default. Anything else that is not a plain non-negative integer is
-// refused rather than clamped: a negative value would mint a token that is
-// already dead, and quietly reading it as "never expires" would grant more than
-// was asked for — the same direction every other value-set decision here takes.
 // validateFormIDs turns a comma-separated list into the ids of forms that
 // exist, refusing anything else.
 //
@@ -878,6 +871,13 @@ func validateFormIDs(s *store.Store, raw string) ([]string, error) {
 	return out, nil
 }
 
+// parseTokenExpiry turns the CLI's optional days argument into a duration.
+//
+// An empty argument and an explicit 0 both mean "never expires", which is the
+// documented default. Anything else that is not a plain non-negative integer is
+// refused rather than clamped: a negative value would mint a token that is
+// already dead, and quietly reading it as "never expires" would grant more than
+// was asked for — the same direction every other value-set decision here takes.
 func parseTokenExpiry(days string) (time.Duration, error) {
 	if days == "" {
 		return 0, nil

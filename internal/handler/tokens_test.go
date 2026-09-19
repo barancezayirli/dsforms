@@ -613,15 +613,47 @@ func TestATokenCanBeBoundToForms(t *testing.T) {
 	}
 }
 
-// TestChoosingEveryFormRecordsNoForms. "All forms" has to store nothing, not
-// every id: a form added tomorrow would otherwise be outside a token the
-// operator believed was unbounded.
-func TestChoosingEveryFormRecordsNoForms(t *testing.T) {
+// TestTickingAFormBindsTheTokenWhateverTheRadioSays.
+//
+// The radio and the checkboxes can disagree: nothing couples them, and a
+// browser submits boxes that were ticked before the radio moved. Reading the
+// radio alone minted an unbounded token for a person who ticked one form and
+// forgot to move it — granting more than was asked for, silently, which is the
+// one direction this must not fail in. Binding can only grant less than
+// intended, which the list shows and a revoke undoes.
+func TestTickingAFormBindsTheTokenWhateverTheRadioSays(t *testing.T) {
 	t.Parallel()
 	s, r := setupTokensRealForm(t)
 	seedTokenForms(t, s)
 
-	form := url.Values{"name": {"everything"}, "scopes": {"read"}, "reach": {"all"}, "form_ids": {"f1"}}
+	form := url.Values{"name": {"mixed"}, "scopes": {"read"}, "reach": {"all"}, "form_ids": {"f1"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/tokens", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(loginCookie(t, s))
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	admin, _ := s.GetUserByUsername("admin")
+	tokens, _ := s.ListAPITokens(admin.ID)
+	if len(tokens) != 1 {
+		t.Fatalf("tokens = %d, want 1", len(tokens))
+	}
+	if tokens[0].Scope().All() {
+		t.Error("a token with a form ticked reaches every form")
+	}
+	if !tokens[0].Scope().Allows("f1") || tokens[0].Scope().Allows("f2") {
+		t.Errorf("scope = %v, want only the ticked form", tokens[0].FormIDs)
+	}
+}
+
+// TestAllFormsWithNothingTickedRecordsNoForms. The unbounded case still has to
+// store nothing rather than every id: a form added tomorrow would otherwise be
+// outside a token the operator believed was unbounded.
+func TestAllFormsWithNothingTickedRecordsNoForms(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+	seedTokenForms(t, s)
+
+	form := url.Values{"name": {"everything"}, "scopes": {"read"}, "reach": {"all"}}
 	req := httptest.NewRequest(http.MethodPost, "/admin/tokens", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(loginCookie(t, s))
@@ -633,8 +665,7 @@ func TestChoosingEveryFormRecordsNoForms(t *testing.T) {
 		t.Fatalf("tokens = %d, want 1", len(tokens))
 	}
 	if len(tokens[0].FormIDs) != 0 {
-		t.Errorf("FormIDs = %v, want none — a ticked box under an unchosen option "+
-			"must not narrow a token the operator asked to be unbounded", tokens[0].FormIDs)
+		t.Errorf("FormIDs = %v, want none recorded", tokens[0].FormIDs)
 	}
 	if !tokens[0].Scope().All() {
 		t.Error("the token does not reach every form")

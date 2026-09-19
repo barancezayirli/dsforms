@@ -289,7 +289,17 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	ticked := r.Form["scopes"]
 	tickedForms := r.Form["form_ids"]
-	allForms := r.FormValue("reach") != "listed"
+
+	// Ticking a form binds the token, whatever the radio says.
+	//
+	// The radio and the checkboxes can disagree — there is no JavaScript
+	// coupling them, and a browser submits boxes ticked before the radio moved.
+	// Reading the radio alone meant a person who ticked "Careers" and forgot to
+	// move it got a token reaching everything, which is the one direction this
+	// must not fail in: granting more than was asked for, silently. Binding
+	// instead can only grant less than intended, which the list shows and a
+	// revoke undoes.
+	allForms := r.FormValue("reach") != "listed" && len(tickedForms) == 0
 
 	// A refusal comes back on the form, carrying what was typed. Sending someone
 	// to the list on a typo drops them somewhere the form is not.
@@ -315,9 +325,6 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only when the operator chose to bind it. A box left ticked under an
-	// unchosen radio must not narrow a token they asked to be unbounded, and
-	// browsers submit hidden checkboxes that were ticked before the radio moved.
 	var formIDs []string
 	if !allForms {
 		var err error
@@ -375,6 +382,7 @@ func describeReach(t store.APIToken, names map[string]string) string {
 func (h *TokensHandler) validateForms(ids []string) ([]string, error) {
 	forms, err := h.Store.ListForms(store.AllForms())
 	if err != nil {
+		log.Printf("tokens: listing forms to validate a token's reach: %v", err)
 		return nil, fmt.Errorf("the list of forms could not be read, so this token cannot be limited to one")
 	}
 	known := make(map[string]bool, len(forms))

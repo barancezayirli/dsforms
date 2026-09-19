@@ -286,8 +286,8 @@ func TestGetStatsWithholdsTheWaitlistWhenScoped(t *testing.T) {
 	if !out.WaitlistWithheld {
 		t.Error("a scoped get_stats did not say the waitlist figure is unavailable")
 	}
-	if out.WaitlistEntries != 0 {
-		t.Errorf("waitlist_entries = %d, want it absent", out.WaitlistEntries)
+	if out.WaitlistEntries != nil {
+		t.Errorf("waitlist_entries = %d, want it absent", *out.WaitlistEntries)
 	}
 
 	all := newHarness(t, "read")
@@ -295,6 +295,15 @@ func TestGetStatsWithholdsTheWaitlistWhenScoped(t *testing.T) {
 	full := decode[statsOut](t, call(t, all.connect(t), "get_stats", nil))
 	if full.WaitlistWithheld {
 		t.Error("an unscoped get_stats withheld the waitlist figure")
+	}
+	// A measured zero has to be reported as zero. omitempty on an int dropped
+	// it, leaving both keys absent and a client unable to tell an empty
+	// waitlist from one nobody counted.
+	if full.WaitlistEntries == nil {
+		t.Error("an unscoped get_stats reported no waitlist figure at all, so an " +
+			"empty waitlist is indistinguishable from one that was not measured")
+	} else if *full.WaitlistEntries != 0 {
+		t.Errorf("waitlist_entries = %d, want 0", *full.WaitlistEntries)
 	}
 }
 

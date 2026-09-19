@@ -196,6 +196,15 @@ func looksLikeAddress(text string) bool {
 // something real, because the stored value is normalised: a cidr rule for
 // 45.155.204.7/24 is stored as 45.155.204.0/24, and a client that never sees
 // that cannot report which network it actually blocked.
+// waitlistEntries is the count when it was measured, and nil when it was not.
+func waitlistEntries(counts store.NavCounts) *int {
+	if !counts.WaitlistKnown {
+		return nil
+	}
+	n := counts.Waitlist
+	return &n
+}
+
 func (s *Server) toRule(r screen.Rule, callerKnows bool) ruleOut {
 	value, withheld := r.Value, false
 	if !callerKnows && !s.opts.IncludeIPs && (r.Type == screen.TypeIP || r.Type == screen.TypeCIDR) {
@@ -529,7 +538,11 @@ type statsOut struct {
 	Unread      int `json:"unread"`
 	Quarantined int `json:"quarantined"`
 
-	WaitlistEntries int `json:"waitlist_entries,omitempty"`
+	// A pointer so an instance with an empty waitlist is distinguishable from
+	// one that was not asked. omitempty on an int drops a measured zero, which
+	// left both keys absent and a client unable to tell "none" from "not
+	// reported" — the same ambiguity WaitlistWithheld exists to remove.
+	WaitlistEntries *int `json:"waitlist_entries,omitempty"`
 	// WaitlistWithheld says the figure above is not being reported because this
 	// token is limited to particular forms and a waitlist entry belongs to no
 	// form. Said rather than reported as zero: a number from a query that could
@@ -799,7 +812,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		out := statsOut{
 			Unread:           counts.Unread,
 			Quarantined:      counts.Held,
-			WaitlistEntries:  counts.Waitlist,
+			WaitlistEntries:  waitlistEntries(counts),
 			WaitlistWithheld: !counts.WaitlistKnown,
 			TotalAccepted:    total,
 			Days:             days,

@@ -401,6 +401,17 @@ func TestAnUnscopedReadStillSeesEverything(t *testing.T) {
 		t.Errorf("forms = %d, want both", len(forms))
 	}
 
+	// A waitlist entry, so the count is a number this can hold NavCounts to
+	// rather than a zero that would pass whether or not it was read.
+	if err := s.CreateWaitlist(Waitlist{ID: "w1", Name: "Beta"}); err != nil {
+		t.Fatalf("CreateWaitlist: %v", err)
+	}
+	if _, _, err := s.CreateEntry(WaitlistEntry{
+		ID: "e1", WaitlistID: "w1", Email: "a@example.com",
+	}); err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+
 	n, err := s.NavCounts(AllForms())
 	if err != nil {
 		t.Fatalf("NavCounts: %v", err)
@@ -410,6 +421,10 @@ func TestAnUnscopedReadStillSeesEverything(t *testing.T) {
 	}
 	if !n.WaitlistKnown {
 		t.Error("an unscoped NavCounts must be able to answer the waitlist count")
+	}
+	if n.Waitlist != 1 {
+		t.Errorf("Waitlist = %d, want 1 — the count must actually be read, not just "+
+			"declared known", n.Waitlist)
 	}
 }
 
