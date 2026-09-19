@@ -191,6 +191,19 @@ func seedTwoForms(t *testing.T, s *Store) {
 			t.Fatalf("CreateHeldSubmission(%sh): %v", spec.id, err)
 		}
 	}
+
+	// A waitlist entry, which belongs to no form. Without one, a scoped
+	// NavCounts returning Waitlist == 0 proves nothing — it is the answer
+	// whether the count was skipped or simply empty, the same "zero that passes
+	// either way" the unscoped assertion had to be strengthened against.
+	if err := s.CreateWaitlist(Waitlist{ID: "w1", Name: "Beta"}); err != nil {
+		t.Fatalf("CreateWaitlist: %v", err)
+	}
+	if _, _, err := s.CreateEntry(WaitlistEntry{
+		ID: "e1", WaitlistID: "w1", Email: "a@example.com",
+	}); err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
 }
 
 // TestEveryScopedReadHonoursTheScope walks the reads the MCP path makes and
@@ -264,9 +277,15 @@ func TestEveryScopedReadHonoursTheScope(t *testing.T) {
 			t.Errorf("counts = %+v, want one unread and one held", n)
 		}
 		// The waitlist has no form, so a scoped call cannot answer it. It says
-		// so rather than reporting a zero it did not measure.
+		// so rather than reporting a zero it did not measure — and there is a
+		// real entry to not report, so the zero is a decision rather than the
+		// absence of data.
 		if n.WaitlistKnown {
 			t.Error("a scoped NavCounts claimed to know the waitlist count")
+		}
+		if n.Waitlist != 0 {
+			t.Errorf("Waitlist = %d, want 0 — an unanswerable count must be left "+
+				"at zero rather than half-filled", n.Waitlist)
 		}
 	})
 
@@ -399,17 +418,6 @@ func TestAnUnscopedReadStillSeesEverything(t *testing.T) {
 	}
 	if len(forms) != 2 {
 		t.Errorf("forms = %d, want both", len(forms))
-	}
-
-	// A waitlist entry, so the count is a number this can hold NavCounts to
-	// rather than a zero that would pass whether or not it was read.
-	if err := s.CreateWaitlist(Waitlist{ID: "w1", Name: "Beta"}); err != nil {
-		t.Fatalf("CreateWaitlist: %v", err)
-	}
-	if _, _, err := s.CreateEntry(WaitlistEntry{
-		ID: "e1", WaitlistID: "w1", Email: "a@example.com",
-	}); err != nil {
-		t.Fatalf("CreateEntry: %v", err)
 	}
 
 	n, err := s.NavCounts(AllForms())

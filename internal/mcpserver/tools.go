@@ -185,17 +185,6 @@ func looksLikeAddress(text string) bool {
 	return err == nil
 }
 
-// toRule is the single place a filter rule becomes a wire shape, for the reason
-// toSubmission and toSignals are: it has to honour Options.IncludeIPs.
-//
-// add_block_rule used to hand-build its own ruleOut and so was the one route
-// that ignored the withholding — the same shape of defect as toSignals, found
-// the same way. Two constructors for one wire type is one too many.
-// callerKnows says the client supplied this rule's value itself, so echoing it
-// back discloses nothing it does not already hold — and withholding it costs
-// something real, because the stored value is normalised: a cidr rule for
-// 45.155.204.7/24 is stored as 45.155.204.0/24, and a client that never sees
-// that cannot report which network it actually blocked.
 // waitlistEntries is the count when it was measured, and nil when it was not.
 func waitlistEntries(counts store.NavCounts) *int {
 	if !counts.WaitlistKnown {
@@ -205,6 +194,18 @@ func waitlistEntries(counts store.NavCounts) *int {
 	return &n
 }
 
+// toRule is the single place a filter rule becomes a wire shape, for the reason
+// toSubmission and toSignals are: it has to honour Options.IncludeIPs.
+//
+// add_block_rule used to hand-build its own ruleOut and so was the one route
+// that ignored the withholding — the same shape of defect as toSignals, found
+// the same way. Two constructors for one wire type is one too many.
+//
+// callerKnows says the client supplied this rule's value itself, so echoing it
+// back discloses nothing it does not already hold — and withholding it costs
+// something real, because the stored value is normalised: a cidr rule for
+// 45.155.204.7/24 is stored as 45.155.204.0/24, and a client that never sees
+// that cannot report which network it actually blocked.
 func (s *Server) toRule(r screen.Rule, callerKnows bool) ruleOut {
 	value, withheld := r.Value, false
 	if !callerKnows && !s.opts.IncludeIPs && (r.Type == screen.TypeIP || r.Type == screen.TypeCIDR) {
