@@ -59,6 +59,56 @@
     </span>
   </div>
 
+  <!-- The bound. Scopes say what a client may do; this says how much there is
+       to do it to, and it is the only control here that still holds when the
+       client itself has been talked into something. -->
+  <div class="field">
+    <span style="display:block">Forms</span>
+    <span class="form-hint" style="display:block;margin-top:2px;margin-bottom:2px">
+      A token limited to one form cannot read, change or delete anything in the
+      others &mdash; whatever a message in it asks the client to do.
+    </span>
+
+    <label style="display:flex;gap:9px;align-items:flex-start;margin-top:11px;font-size:13px">
+      <input type="radio" name="reach" value="all" style="margin-top:3px"
+             {{if .AllForms}}checked{{end}}>
+      <span>
+        <strong>All forms</strong>
+        <span class="dim" style="display:block;font-size:12px;line-height:1.45">
+          Everything you collect now, and every form you add later.
+        </span>
+      </span>
+    </label>
+
+    <label style="display:flex;gap:9px;align-items:flex-start;margin-top:11px;font-size:13px">
+      <input type="radio" name="reach" value="listed" style="margin-top:3px"
+             {{if not .AllForms}}checked{{end}}>
+      <span>
+        <strong>Only the forms I choose</strong>
+        <span class="dim" style="display:block;font-size:12px;line-height:1.45">
+          A form added later is outside this token until you mint a new one.
+        </span>
+      </span>
+    </label>
+
+    {{if .Forms}}
+    <div style="margin:9px 0 0 26px">
+      {{range .Forms}}
+      <label style="display:flex;gap:9px;align-items:center;margin-top:7px;font-size:13px">
+        <input type="checkbox" name="form_ids" value="{{.ID}}"
+               {{if index $.TickedForms .ID}}checked{{end}}>
+        <span>{{.Name}}</span>
+      </label>
+      {{end}}
+    </div>
+    {{else}}
+    <span class="form-hint" style="display:block;margin:9px 0 0 26px">
+      No forms yet, so there is nothing to choose between — this token will
+      reach every form you create.
+    </span>
+    {{end}}
+  </div>
+
   <div style="display:flex;gap:8px;margin-top:16px">
     <button class="btn btn-primary" type="submit">
       <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Create token

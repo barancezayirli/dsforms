@@ -170,12 +170,18 @@ func populatedPageData() map[string]any {
 			BaseURL: "https://x.example",
 			Tokens: []tokenRow{{
 				APIToken:  store.APIToken{ID: "t1", Name: "laptop", Scopes: []string{"read", "write"}},
-				ScopeList: "read, write", LastUsed: "Never", Expires: "Never"}}},
-		// The create form, which is its own page now. Error and a ticked box are
-		// both behind {{if}}s, so both are set.
+				ScopeList: "read, write", Reach: "All forms", LastUsed: "Never", Expires: "Never"}, {
+				APIToken:  store.APIToken{ID: "t2", Name: "careers bot", Scopes: []string{"read"}, FormIDs: []string{"f1"}},
+				ScopeList: "read", Reach: "Contact", LastUsed: "Never", Expires: "Never"}}},
+		// The create form, which is its own page now. Error, a ticked scope and a
+		// ticked form are all behind {{if}}s, so all three are set — and
+		// AllForms is left false so the form picker renders rather than the
+		// branch that says there is nothing to choose between.
 		"token_new.html": tokenFormData{PageData: shell, Error: "bad",
 			Scopes: scopeOptions(), Enabled: false, TTLDays: 90,
-			Name: "laptop", Ticked: map[string]bool{"read": true}},
+			Name: "laptop", Ticked: map[string]bool{"read": true},
+			Forms:       []store.FormSummary{{Form: form}},
+			TickedForms: map[string]bool{"f1": true}, AllForms: false},
 		"backups.html": backupPageData{PageData: shell},
 		"waitlists.html": waitlistListData{PageData: shell,
 			Waitlists: []store.WaitlistSummary{{Waitlist: wl, EntryCount: 42}}},
@@ -241,8 +247,8 @@ var pageMarkers = map[string][]string{
 	"broadcast_detail.html":  {"Hi"},
 	"broadcast_new.html":     {"42 recipient"},
 	"users.html":             {"admin"},
-	"tokens.html":            {"dsf_shown_once", "laptop", "read, write", "https://x.example/mcp"},
-	"token_new.html":         {"laptop", "Create token"},
+	"tokens.html":            {"dsf_shown_once", "laptop", "read, write", "https://x.example/mcp", "All forms", "careers bot"},
+	"token_new.html":         {"laptop", "Create token", "All forms", "Only the forms I choose", "Contact"},
 
 	// No populated/empty split: these render the same shape whatever the data,
 	// so a marker would pin nothing. Stated rather than omitted, so the next

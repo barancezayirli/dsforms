@@ -560,3 +560,210 @@ func TestTokenFormStatesWhatEachScopeRisks(t *testing.T) {
 		}
 	}
 }
+
+// seedForms gives the token form something to offer.
+func seedTokenForms(t *testing.T, s *store.Store) {
+	t.Helper()
+	for _, f := range []store.Form{
+		{ID: "f1", Name: "Contact", EmailTo: "me@example.com"},
+		{ID: "f2", Name: "Careers", EmailTo: "jobs@example.com"},
+	} {
+		if err := s.CreateForm(f); err != nil {
+			t.Fatalf("CreateForm(%s): %v", f.ID, err)
+		}
+	}
+}
+
+// TestATokenCanBeBoundToForms is the point of the whole feature reaching the
+// operator: if the picker does not work, the control does not exist.
+func TestATokenCanBeBoundToForms(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+	seedTokenForms(t, s)
+
+	form := url.Values{
+		"name":     {"careers bot"},
+		"scopes":   {"read"},
+		"reach":    {"listed"},
+		"form_ids": {"f2"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/admin/tokens", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(loginCookie(t, s))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST = %d, want 200", rec.Code)
+	}
+
+	admin, _ := s.GetUserByUsername("admin")
+	tokens, err := s.ListAPITokens(admin.ID)
+	if err != nil {
+		t.Fatalf("ListAPITokens: %v", err)
+	}
+	if len(tokens) != 1 {
+		t.Fatalf("tokens = %d, want 1", len(tokens))
+	}
+	scope := tokens[0].Scope()
+	if scope.All() {
+		t.Fatal("the token reaches every form despite naming one")
+	}
+	if !scope.Allows("f2") || scope.Allows("f1") {
+		t.Errorf("scope = %v, want only f2", tokens[0].FormIDs)
+	}
+}
+
+// TestChoosingEveryFormRecordsNoForms. "All forms" has to store nothing, not
+// every id: a form added tomorrow would otherwise be outside a token the
+// operator believed was unbounded.
+func TestChoosingEveryFormRecordsNoForms(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+	seedTokenForms(t, s)
+
+	form := url.Values{"name": {"everything"}, "scopes": {"read"}, "reach": {"all"}, "form_ids": {"f1"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/tokens", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(loginCookie(t, s))
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	admin, _ := s.GetUserByUsername("admin")
+	tokens, _ := s.ListAPITokens(admin.ID)
+	if len(tokens) != 1 {
+		t.Fatalf("tokens = %d, want 1", len(tokens))
+	}
+	if len(tokens[0].FormIDs) != 0 {
+		t.Errorf("FormIDs = %v, want none — a ticked box under an unchosen option "+
+			"must not narrow a token the operator asked to be unbounded", tokens[0].FormIDs)
+	}
+	if !tokens[0].Scope().All() {
+		t.Error("the token does not reach every form")
+	}
+}
+
+// TestNamingNoFormsIsRefused. An empty set is a token that can read nothing,
+// which is never what anyone means to create — the same reasoning
+// ValidateScopes uses for a token with no scopes.
+func TestNamingNoFormsIsRefused(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+	seedTokenForms(t, s)
+
+	form := url.Values{"name": {"nothing"}, "scopes": {"read"}, "reach": {"listed"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/tokens", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(loginCookie(t, s))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	admin, _ := s.GetUserByUsername("admin")
+	tokens, _ := s.ListAPITokens(admin.ID)
+	if len(tokens) != 0 {
+		t.Fatalf("a token was created with no forms: %+v", tokens)
+	}
+	if !strings.Contains(rec.Body.String(), "form") {
+		t.Errorf("the refusal does not mention forms:\n%s", rec.Body.String())
+	}
+}
+
+// TestAnUnknownFormIsRefused. The ids come from a form post, so they are the
+// operator's input rather than ours, and a typo must be named rather than
+// silently producing a token that reaches nothing.
+func TestAnUnknownFormIsRefused(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+	seedTokenForms(t, s)
+
+	form := url.Values{"name": {"typo"}, "scopes": {"read"}, "reach": {"listed"}, "form_ids": {"f2", "nope"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/tokens", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(loginCookie(t, s))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	admin, _ := s.GetUserByUsername("admin")
+	if tokens, _ := s.ListAPITokens(admin.ID); len(tokens) != 0 {
+		t.Fatalf("a token was created naming a form that does not exist: %+v", tokens)
+	}
+}
+
+// TestTheTokenFormOffersEveryForm renders the shipped template, for the reason
+// TestTokenFormOffersEveryScope gives.
+func TestTheTokenFormOffersEveryForm(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+	seedTokenForms(t, s)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/tokens/new", nil)
+	req.AddCookie(loginCookie(t, s))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	for _, want := range []string{`value="f1"`, `value="f2"`, "Contact", "Careers"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the form does not offer %q", want)
+		}
+	}
+	// All forms is the default, because a picker defaulting to none would mint
+	// a token that can read nothing. Read off the rendered radios rather than
+	// matched as a literal, since attribute order is the template's business.
+	checked := checkedRadios(t, body, "reach")
+	if !checked["all"] {
+		t.Error("All forms is not the default choice")
+	}
+	if checked["listed"] {
+		t.Error("both reach options are checked")
+	}
+}
+
+// TestTheTokenListShowsWhatEachTokenReaches. An operator deciding whether a
+// token is still safe needs to see its bound without minting a new one.
+func TestTheTokenListShowsWhatEachTokenReaches(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+	seedTokenForms(t, s)
+
+	admin, _ := s.GetUserByUsername("admin")
+	if _, _, err := s.CreateAPIToken(admin.ID, "bounded", []string{"read"}, []string{"f2"}, 0); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	if _, _, err := s.CreateAPIToken(admin.ID, "unbounded", []string{"read"}, nil, 0); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/tokens", nil)
+	req.AddCookie(loginCookie(t, s))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	// The bounded one names the form; the unbounded one says so.
+	if !strings.Contains(body, "Careers") {
+		t.Error("the bounded token does not say which form it reaches")
+	}
+	if !strings.Contains(body, "All forms") {
+		t.Error("the unbounded token does not say it reaches all of them")
+	}
+}
+
+// checkedRadios reads which options of a radio group the rendered page marks
+// as chosen.
+var radioRE = regexp.MustCompile(`(?s)<input type="radio" name="([a-z_]+)" value="([a-z]+)"(.*?)>`)
+
+func checkedRadios(t *testing.T, body, group string) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	var found bool
+	for _, m := range radioRE.FindAllStringSubmatch(body, -1) {
+		if m[1] != group {
+			continue
+		}
+		found = true
+		out[m[2]] = strings.Contains(m[3], "checked")
+	}
+	if !found {
+		t.Fatalf("no %q radios in the rendered page", group)
+	}
+	return out
+}

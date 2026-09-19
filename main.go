@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -732,20 +733,24 @@ func runTokenCLI(args []string) {
 			fmt.Printf("No API tokens for %q.\n", args[1])
 			return
 		}
-		fmt.Printf("%-38s %-20s %-18s %s\n", "ID", "NAME", "SCOPES", "LAST USED")
+		fmt.Printf("%-38s %-20s %-18s %-22s %s\n", "ID", "NAME", "SCOPES", "REACH", "LAST USED")
 		for _, t := range tokens {
 			lastUsed := "never"
 			if !t.LastUsedAt.IsZero() {
 				lastUsed = t.LastUsedAt.Format("2006-01-02 15:04")
 			}
-			fmt.Printf("%-38s %-20s %-18s %s\n", t.ID, t.Name, strings.Join(t.Scopes, ","), lastUsed)
+			fmt.Printf("%-38s %-20s %-18s %-22s %s\n",
+				t.ID, t.Name, strings.Join(t.Scopes, ","), t.Scope(), lastUsed)
 		}
 
 	case "create":
 		if len(args) < 4 {
-			fmt.Fprintf(os.Stderr, "Usage: dsforms token create <username> <name> <scopes> [days]\n"+
+			fmt.Fprintf(os.Stderr, "Usage: dsforms token create <username> <name> <scopes> [days] [form-ids]\n"+
 				"  scopes is a comma-separated list: %s\n"+
-				"  days is optional; omit it, or pass 0, for a token that never expires\n",
+				"  days is optional; omit it, or pass 0, for a token that never expires\n"+
+				"  form-ids is a comma-separated list of form ids; omit it to reach every form.\n"+
+				"    It comes after days because both are positional, so pass 0 for days if you\n"+
+				"    want a token that never expires but does name its forms.\n",
 				mcpserver.Scopes(mcpserver.AllScopes))
 			os.Exit(1)
 		}
@@ -774,7 +779,19 @@ func runTokenCLI(args []string) {
 			os.Exit(1)
 		}
 
-		raw, tok, err := s.CreateAPIToken(u.ID, args[2], scopes.Strings(), nil, expiry)
+		// Checked against the forms that exist, for the reason ValidateScopes is
+		// used above: a mistyped id would otherwise mint a token that silently
+		// reaches nothing, which reads as a broken endpoint rather than a typo.
+		var formIDs []string
+		if len(args) > 5 {
+			formIDs, err = validateFormIDs(s, args[5])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+		raw, tok, err := s.CreateAPIToken(u.ID, args[2], scopes.Strings(), formIDs, expiry)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -784,7 +801,8 @@ func runTokenCLI(args []string) {
 		if !tok.ExpiresAt.IsZero() {
 			expires = "expires " + tok.ExpiresAt.Format("2006-01-02 15:04") + " UTC"
 		}
-		fmt.Printf("Token %q created for %s with scopes %s, %s.\n\n", tok.Name, u.Username, scopes, expires)
+		fmt.Printf("Token %q created for %s with scopes %s, reaching %s, %s.\n\n",
+			tok.Name, u.Username, scopes, tok.Scope(), expires)
 		fmt.Printf("  %s\n\n", raw)
 		fmt.Println("This is the only time it is shown — only a hash is stored.")
 		fmt.Println("Send it as an Authorization: Bearer header to the /mcp endpoint.")
@@ -822,6 +840,44 @@ func runTokenCLI(args []string) {
 // refused rather than clamped: a negative value would mint a token that is
 // already dead, and quietly reading it as "never expires" would grant more than
 // was asked for — the same direction every other value-set decision here takes.
+// validateFormIDs turns a comma-separated list into the ids of forms that
+// exist, refusing anything else.
+//
+// The same reasoning as ValidateScopes and the admin form's own check: an id
+// typed at a terminal is a person stating an intent, and silently dropping one
+// produces a token narrower than they asked for — or, if every id goes, one
+// that reaches nothing, which reads as a broken endpoint rather than a typo.
+func validateFormIDs(s *store.Store, raw string) ([]string, error) {
+	forms, err := s.ListForms(store.AllForms())
+	if err != nil {
+		return nil, fmt.Errorf("reading forms: %w", err)
+	}
+	known := make(map[string]bool, len(forms))
+	for _, f := range forms {
+		known[f.ID] = true
+	}
+
+	var out, unknown []string
+	for _, id := range strings.Split(raw, ",") {
+		switch id = strings.TrimSpace(id); {
+		case id == "":
+		case known[id]:
+			if !slices.Contains(out, id) {
+				out = append(out, id)
+			}
+		default:
+			unknown = append(unknown, id)
+		}
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("no form with id %s", strings.Join(unknown, ", "))
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no form ids given; omit the argument for a token that reaches every form")
+	}
+	return out, nil
+}
+
 func parseTokenExpiry(days string) (time.Duration, error) {
 	if days == "" {
 		return 0, nil

@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +24,11 @@ type TokensStore interface {
 	CreateAPIToken(userID, name string, scopes, formIDs []string, expiry time.Duration) (string, store.APIToken, error)
 	DeleteAPIToken(userID, id string) (bool, error)
 	ListAPITokens(userID string) ([]store.APIToken, error)
+
+	// ListForms is the exception to the scoping above, and it reads no personal
+	// data: the picker has to offer the forms that exist, and the list has to
+	// name the ones a token reaches rather than printing ids at the operator.
+	ListForms(forms store.FormScope) ([]store.FormSummary, error)
 }
 
 // TokensHandler serves the API token screen, where an operator mints and revokes
@@ -51,6 +58,11 @@ type tokenRow struct {
 	ScopeList string
 	LastUsed  string
 	Expires   string
+
+	// Reach is what this token can see: "All forms", or the names of the ones it
+	// is bounded to. Names rather than ids, because an id tells an operator
+	// deciding whether to revoke something nothing at all.
+	Reach string
 }
 
 // scopeOption is one checkbox on the create form.
@@ -104,6 +116,14 @@ type tokenFormData struct {
 	// rejected form does not also lose what they typed.
 	Name   string
 	Ticked map[string]bool
+
+	// Forms are the forms this operator can bind a token to, and TickedForms is
+	// which of them were chosen. AllForms is the radio's state: true is the
+	// default, because a picker that starts at "none" mints a token that can
+	// read nothing.
+	Forms       []store.FormSummary
+	TickedForms map[string]bool
+	AllForms    bool
 }
 
 // scopeOptions builds the checkbox list from the package that owns the value
@@ -138,7 +158,7 @@ func (h *TokensHandler) Page(w http.ResponseWriter, r *http.Request) {
 // the rejected-form path below re-renders their actual choice, because
 // re-ticking a box they cleared would be the handler overruling them.
 func (h *TokensHandler) NewPage(w http.ResponseWriter, r *http.Request) {
-	h.renderForm(w, r, "", "", []string{string(mcpserver.ScopeRead)})
+	h.renderForm(w, r, "", "", []string{string(mcpserver.ScopeRead)}, nil, true)
 }
 
 // renderForm draws the create form, as a fragment when the drawer asked for it
@@ -146,19 +166,33 @@ func (h *TokensHandler) NewPage(w http.ResponseWriter, r *http.Request) {
 //
 // Both presentations are defined in one template and share one body, so they
 // cannot drift into offering different scopes.
-func (h *TokensHandler) renderForm(w http.ResponseWriter, r *http.Request, errMsg, name string, ticked []string) {
+func (h *TokensHandler) renderForm(w http.ResponseWriter, r *http.Request, errMsg, name string, ticked, tickedForms []string, allForms bool) {
 	data := tokenFormData{
-		PageData: h.Shell(w, r, "New API token", "tokens"),
-		Scopes:   scopeOptions(),
-		Error:    errMsg,
-		Enabled:  h.MCPEnabled,
-		TTLDays:  h.TTLDays,
-		Name:     name,
-		Ticked:   map[string]bool{},
+		PageData:    h.Shell(w, r, "New API token", "tokens"),
+		Scopes:      scopeOptions(),
+		Error:       errMsg,
+		Enabled:     h.MCPEnabled,
+		TTLDays:     h.TTLDays,
+		Name:        name,
+		Ticked:      map[string]bool{},
+		TickedForms: map[string]bool{},
+		AllForms:    allForms,
 	}
 	for _, s := range ticked {
 		data.Ticked[s] = true
 	}
+	for _, f := range tickedForms {
+		data.TickedForms[f] = true
+	}
+
+	// A failure here loses the picker, not the page: the operator can still
+	// mint an all-forms token, which is what they could do before this existed.
+	forms, err := h.Store.ListForms(store.AllForms())
+	if err != nil {
+		log.Printf("tokens: listing forms for the picker: %v", err)
+		data.Degraded = true
+	}
+	data.Forms = forms
 
 	if r.Header.Get("X-Fragment") != "" {
 		tmpl := h.Templates["token_new.html"]
@@ -194,10 +228,23 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 		log.Printf("tokens: list for %s: %v", user.ID, err)
 		data.Degraded = true
 	}
+	// Form names for the reach column. A failure degrades that one column to
+	// ids rather than the page, since an id is still an answer.
+	names := map[string]string{}
+	if forms, err := h.Store.ListForms(store.AllForms()); err != nil {
+		log.Printf("tokens: naming the forms tokens reach: %v", err)
+		data.Degraded = true
+	} else {
+		for _, f := range forms {
+			names[f.ID] = f.Name
+		}
+	}
+
 	for _, t := range tokens {
 		data.Tokens = append(data.Tokens, tokenRow{
 			APIToken:  t,
 			ScopeList: strings.Join(t.Scopes, ", "),
+			Reach:     describeReach(t, names),
 			LastUsed:  humanTime(t.LastUsedAt, "Never"),
 			Expires:   humanTime(t.ExpiresAt, "Never"),
 		})
@@ -241,11 +288,13 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
 	ticked := r.Form["scopes"]
+	tickedForms := r.Form["form_ids"]
+	allForms := r.FormValue("reach") != "listed"
 
 	// A refusal comes back on the form, carrying what was typed. Sending someone
 	// to the list on a typo drops them somewhere the form is not.
 	fail := func(msg string) {
-		h.renderForm(w, r, msg, name, ticked)
+		h.renderForm(w, r, msg, name, ticked, tickedForms, allForms)
 	}
 
 	if name == "" {
@@ -266,12 +315,24 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only when the operator chose to bind it. A box left ticked under an
+	// unchosen radio must not narrow a token they asked to be unbounded, and
+	// browsers submit hidden checkboxes that were ticked before the radio moved.
+	var formIDs []string
+	if !allForms {
+		var err error
+		if formIDs, err = h.validateForms(tickedForms); err != nil {
+			fail(capitalise(err.Error()) + ".")
+			return
+		}
+	}
+
 	var expiry time.Duration
 	if h.TTLDays > 0 {
 		expiry = time.Duration(h.TTLDays) * 24 * time.Hour
 	}
 
-	raw, tok, err := h.Store.CreateAPIToken(user.ID, name, scopes.Strings(), nil, expiry)
+	raw, tok, err := h.Store.CreateAPIToken(user.ID, name, scopes.Strings(), formIDs, expiry)
 	if err != nil {
 		log.Printf("tokens: create for %s: %v", user.ID, err)
 		fail("That token could not be created.")
@@ -279,9 +340,69 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	// The id and the scopes, never the value. This line is the reason the value
 	// is a local and not a field on anything.
-	log.Printf("tokens: created %s (%q, scopes %s) for user %s", tok.ID, tok.Name, scopes, user.Username)
+	log.Printf("tokens: created %s (%q, scopes %s, %s) for user %s",
+		tok.ID, tok.Name, scopes, tok.Scope(), user.Username)
 
 	h.render(w, r, raw)
+}
+
+// describeReach says what a token can see, in form names.
+//
+// A form that has since been deleted keeps its id here rather than vanishing:
+// the token still names it, and a reach that silently shortened would tell an
+// operator the token is narrower than it is.
+func describeReach(t store.APIToken, names map[string]string) string {
+	if t.Scope().All() {
+		return "All forms"
+	}
+	out := make([]string, 0, len(t.FormIDs))
+	for _, id := range t.FormIDs {
+		if name, ok := names[id]; ok {
+			out = append(out, name)
+			continue
+		}
+		out = append(out, id)
+	}
+	return strings.Join(out, ", ")
+}
+
+// validateForms checks the ids a person ticked against the forms that exist.
+//
+// Named rather than dropped, for the reason ValidateScopes gives: these arrive
+// from a person stating an intent, and silently discarding one produces a token
+// that reaches less than they asked for — or, if all of them go, nothing at
+// all, which would look like the feature is broken rather than like a typo.
+func (h *TokensHandler) validateForms(ids []string) ([]string, error) {
+	forms, err := h.Store.ListForms(store.AllForms())
+	if err != nil {
+		return nil, fmt.Errorf("the list of forms could not be read, so this token cannot be limited to one")
+	}
+	known := make(map[string]bool, len(forms))
+	for _, f := range forms {
+		known[f.ID] = true
+	}
+
+	out := make([]string, 0, len(ids))
+	var unknown []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		switch {
+		case id == "":
+		case known[id]:
+			if !slices.Contains(out, id) {
+				out = append(out, id)
+			}
+		default:
+			unknown = append(unknown, id)
+		}
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("no form with id %s", strings.Join(unknown, ", "))
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("choose at least one form, or give the token every form")
+	}
+	return out, nil
 }
 
 // Delete revokes one of the signed-in user's own tokens.
