@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"strconv"
 	"strings"
 	"testing"
@@ -433,5 +434,73 @@ func TestAScopeThatNamesNothingReadsNothing(t *testing.T) {
 	}
 	if len(forms) != 0 {
 		t.Errorf("an unset scope returned %d forms", len(forms))
+	}
+}
+
+// TestUpgradeFromAnUnscopedTokenTable is the migration test that matters here.
+//
+// Every other test starts from the current schema, so none of them would notice
+// if the form_ids ALTER stopped running — and the failure mode is not a missing
+// feature but a revoked credential: a token minted before scoping existed has
+// no form_ids column to read, and if the upgrade left it empty *and* empty
+// meant "no forms", every MCP client an operator has would stop working on
+// restart with nothing to say why.
+func TestUpgradeFromAnUnscopedTokenTable(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/legacy.db"
+
+	// users and api_tokens exactly as they were before scoping.
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := legacy.Exec(`
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE TABLE api_tokens (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name TEXT NOT NULL DEFAULT '',
+			token_hash TEXT NOT NULL UNIQUE,
+			scopes TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			last_used_at DATETIME NOT NULL DEFAULT '',
+			expires_at DATETIME NOT NULL DEFAULT ''
+		);
+		INSERT INTO users (id, username) VALUES ('u1', 'olduser');
+		INSERT INTO api_tokens (id, user_id, name, token_hash, scopes)
+			VALUES ('t1', 'u1', 'laptop', 'somehash', 'read,write');
+	`); err != nil {
+		t.Fatalf("seed legacy schema: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New() on a pre-scoping database failed: %v", err)
+	}
+	defer s.Close()
+
+	tokens, err := s.ListAPITokens("u1")
+	if err != nil {
+		t.Fatalf("ListAPITokens: %v", err)
+	}
+	if len(tokens) != 1 {
+		t.Fatalf("tokens = %d, want the one that was already there", len(tokens))
+	}
+	if len(tokens[0].FormIDs) != 0 {
+		t.Errorf("FormIDs = %v, want none recorded", tokens[0].FormIDs)
+	}
+	if !tokens[0].Scope().All() {
+		t.Error("a token that predates scoping no longer reaches every form — " +
+			"upgrading in place has revoked a live credential")
+	}
+	if !tokens[0].Scope().Allows("any-form-at-all") {
+		t.Error("the migrated token reaches no form")
 	}
 }
