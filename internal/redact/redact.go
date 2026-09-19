@@ -98,14 +98,17 @@ type Hit struct {
 	Through int
 	Reason  Reason
 
-	// Matched names what was removed: the markers themselves, or the codepoints
-	// for invisible text. It is always printable ASCII, and never the
-	// surrounding prose.
+	// Matched names what was removed: each marker's identity without its
+	// delimiters (im_start, INST), or the codepoints for invisible text. It is
+	// always printable ASCII, and never the surrounding prose.
 	//
-	// That restriction is not tidiness. This report is read by the same model
-	// the payload was aimed at, so a Matched that echoed the raw characters
-	// would carry the thing it is reporting. The control-token pattern below
-	// bounds the marker to a single underscore-joined word for the same reason.
+	// That restriction is not tidiness, and it is why the delimiters are
+	// dropped. This report travels in the same text block as the payload it
+	// describes, read by the same model the payload was aimed at — so a Matched
+	// echoing "<|im_start|>" would put a working marker back inside the block
+	// whose banner says the markers were removed. Review found exactly that.
+	// The pattern below bounds a marker name to one underscore-joined word for
+	// the same reason.
 	Matched string
 }
 
@@ -124,9 +127,18 @@ const maxHitsPerField = 16
 //
 // data is not mutated — callers hand over a store.Submission's own map, and
 // redacting it in place would redact the copy the admin renders, which is the
-// one thing this package promises not to touch. A field that was redacted is
-// still present in the result, possibly empty; dropping the key would read as
-// "the submitter left it blank".
+// one thing this package promises not to touch. A field whose value was
+// redacted is still present in the result, possibly empty; dropping the key
+// would read as "the submitter left it blank".
+//
+// Field *names* are scanned too, and a field whose name carries a marker is
+// dropped entirely rather than cleaned. Names are as attacker-controlled as
+// values — the submit handler keeps every non-internal form key — and a name
+// carrying a forged turn is not a field name that lost some characters, it is
+// not a field name. Review found only values were being scanned, so such a key
+// reached clients verbatim and Any called the submission clean. The operator
+// still sees it: the admin renders the stored fields, and this drops nothing
+// there.
 //
 // Hits are ordered by field name and then by line, because Go randomises map
 // iteration and a report that reshuffles itself between two calls on the same
@@ -141,6 +153,16 @@ func Fields(data map[string]string) (map[string]string, []Hit) {
 
 	var hits []Hit
 	for _, k := range keys {
+		if _, nameHits := value("", k); len(nameHits) > 0 {
+			for _, h := range nameHits {
+				// Field is left empty: there is no name to give, which is the
+				// finding. Callers that quote the original lines skip a hit
+				// naming no field they hold.
+				h.Line, h.Through = 1, 1
+				hits = append(hits, h)
+			}
+			continue
+		}
 		cleaned, found := value(k, data[k])
 		out[k] = cleaned
 		hits = append(hits, found...)
@@ -156,7 +178,10 @@ func Fields(data map[string]string) (map[string]string, []Hit) {
 // that is almost always clean — does not buy a second implementation to keep in
 // step.
 func Any(data map[string]string) bool {
-	for _, v := range data {
+	for k, v := range data {
+		if _, hits := value("", k); len(hits) > 0 {
+			return true
+		}
 		if _, hits := value("", v); len(hits) > 0 {
 			return true
 		}
@@ -262,41 +287,60 @@ var (
 	bracketToken = regexp.MustCompile(`(?i)\[\s*/?\s*INST\s*\]|<<\s*/?\s*SYS\s*>>`)
 )
 
-// openers name a turn. A line carrying one with no closer after it is the
-// "everything below this is system" shape, which has no end to find.
-var openers = map[string]bool{
-	"im_start": true, "start_header_id": true, "begin_of_text": true,
-	"system": true, "user": true, "assistant": true,
-	"channel": true, "message": true,
-}
-
-// closers end one.
+// closers are the markers that end a turn. Everything else opens one.
+//
+// Only one list, and it is the conservative direction. A marker this build has
+// not heard of must be assumed to open a turn that is never closed, so the rest
+// of the value goes: assuming the opposite is what let Harmony's own
+// <|start|> through review, because it was in neither of the two lists this
+// used to keep and so counted as neither. Being wrong about an unknown marker
+// costs nothing, since a genuine message contains no marker at all.
 var closers = map[string]bool{
 	"im_end": true, "eot_id": true, "eom_id": true,
 	"end_header_id": true, "endoftext": true, "return": true,
 }
 
-// lineMarkers reports the markers on one line, and whether any of them opens or
-// closes a turn.
-func lineMarkers(line string) (found []string, opens, closes bool) {
-	for _, m := range angleToken.FindAllStringSubmatch(line, -1) {
-		found = append(found, m[0])
-		switch name := strings.ToLower(m[1]); {
-		case openers[name]:
-			opens = true
-		case closers[name]:
-			closes = true
-		}
+// marker is one forged boundary found on a line.
+type marker struct {
+	// name is what goes in Hit.Matched: the marker's identity without its
+	// delimiters, so the report cannot itself be a marker. See Hit.Matched.
+	name string
+	// at is the byte offset in the line, so markers can be put back into the
+	// order they were written in.
+	at int
+	// closes says this one ends a turn rather than starting one.
+	closes bool
+}
+
+// lineMarkers reports the markers on one line, in the order they appear.
+//
+// The order is the point. This used to return "did anything open" and "did
+// anything close" as two booleans, which made <|im_end|><|im_start|>system read
+// as balanced — so the removed region ended on that line and the instruction
+// below it was handed to the client while the genuine prose above was deleted.
+// The redaction was doing the attacker's work. Only the last marker decides,
+// and that cannot be known without positions.
+func lineMarkers(line string) []marker {
+	var ms []marker
+	for _, loc := range angleToken.FindAllStringSubmatchIndex(line, -1) {
+		name := strings.ToLower(line[loc[2]:loc[3]])
+		ms = append(ms, marker{name: name, at: loc[0], closes: closers[name]})
 	}
-	for _, m := range bracketToken.FindAllString(line, -1) {
-		found = append(found, m)
-		if strings.Contains(m, "/") {
-			closes = true
-		} else {
-			opens = true
-		}
+	for _, loc := range bracketToken.FindAllStringIndex(line, -1) {
+		text := line[loc[0]:loc[1]]
+		// Normalised to the bare identity: "[ /INST ]" and "[/INST]" are the
+		// same marker and should not read as two in the report.
+		name := strings.ToUpper(strings.Trim(strings.Map(func(r rune) rune {
+			switch r {
+			case '[', ']', '<', '>', ' ', '\t':
+				return -1
+			}
+			return r
+		}, text), " "))
+		ms = append(ms, marker{name: name, at: loc[0], closes: strings.Contains(text, "/")})
 	}
-	return found, opens, closes
+	slices.SortFunc(ms, func(a, b marker) int { return a.at - b.at })
+	return ms
 }
 
 // stripForgedTurn removes the injected turn, and only it.
@@ -319,26 +363,31 @@ func stripForgedTurn(field, text string) (string, *Hit) {
 	lines := strings.Split(text, "\n")
 
 	first, last := -1, -1
-	lastOpens, lastCloses := false, false
-	var matched []string
+	var found []marker
 	for i, line := range lines {
-		found, opens, closes := lineMarkers(line)
-		if len(found) == 0 {
+		ms := lineMarkers(line)
+		if len(ms) == 0 {
 			continue
 		}
 		if first < 0 {
 			first = i
 		}
-		last, lastOpens, lastCloses = i, opens, closes
-		matched = append(matched, found...)
+		last = i
+		found = append(found, ms...)
 	}
 	if first < 0 {
 		return text, nil
 	}
 
+	// The last marker written decides, not whatever the last line contained.
 	end := last
-	if lastOpens && !lastCloses {
+	if !found[len(found)-1].closes {
 		end = len(lines) - 1
+	}
+
+	matched := make([]string, 0, len(found))
+	for _, m := range found {
+		matched = append(matched, m.name)
 	}
 
 	kept := make([]string, 0, len(lines))
@@ -356,28 +405,25 @@ func stripForgedTurn(field, text string) (string, *Hit) {
 
 // summarise deduplicates and bounds a list for Hit.Matched, preserving the
 // order the markers appeared in.
+// summarise lists the distinct markers found, bounded, in the order they
+// appeared.
+//
+// It deduplicates first and truncates second, because the two previous versions
+// both decided "something was left out" from how many *items* remained rather
+// than how many distinct markers did — so a line carrying the same marker twice
+// claimed an omission that never happened.
 func summarise(items []string) string {
+	var distinct []string
+	for _, it := range items {
+		if !slices.Contains(distinct, it) {
+			distinct = append(distinct, it)
+		}
+	}
 	const max = 6
-	var out []string
-	truncated := false
-	for i, it := range items {
-		if !slices.Contains(out, it) {
-			out = append(out, it)
-		}
-		if len(out) == max && i < len(items)-1 {
-			// Only when something is genuinely left unlisted. Comparing counts
-			// instead — which is what this did until review — appended "..." to
-			// any line carrying the same marker twice, claiming omitted markers
-			// that do not exist.
-			truncated = true
-			break
-		}
+	if len(distinct) <= max {
+		return strings.Join(distinct, " ")
 	}
-	s := strings.Join(out, " ")
-	if truncated {
-		s += " ..."
-	}
-	return s
+	return strings.Join(distinct[:max], " ") + " ..."
 }
 
 // ---------------------------------------------------------------------------

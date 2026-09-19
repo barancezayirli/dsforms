@@ -498,19 +498,27 @@ func hiddenBlocks(data map[string]string) []HiddenBlock {
 	}
 	out := make([]HiddenBlock, 0, len(hits))
 	for _, h := range hits {
-		lines := strings.Split(data[h.Field], "\n")
-		from, to := h.Line-1, h.Through
-		if from < 0 || to > len(lines) || from >= to {
-			// A report that does not line up with the value it came from is a
-			// bug in redact, not something to render around. Skipped rather
-			// than clamped: a quietly wrong quotation is worse than none.
-			continue
-		}
-		out = append(out, HiddenBlock{
+		block := HiddenBlock{
 			Field: h.Field, Line: h.Line, Through: h.Through,
 			Reason: h.Reason.Describe(), Matched: h.Matched,
-			Lines: lines[from:to],
-		})
+		}
+
+		// A hit naming no field is one about a field *name*, which was dropped
+		// rather than cleaned. There are no lines of a value to quote, and the
+		// operator can see the name itself in the field grid above.
+		if h.Field != "" {
+			lines := strings.Split(data[h.Field], "\n")
+			from, to := h.Line-1, h.Through
+			if from < 0 || to > len(lines) || from >= to {
+				// A report that does not line up with the value it came from is
+				// a bug in redact, not something to render around. Skipped
+				// rather than clamped: a quietly wrong quotation is worse than
+				// none.
+				continue
+			}
+			block.Lines = lines[from:to]
+		}
+		out = append(out, block)
 	}
 	return out
 }

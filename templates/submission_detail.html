@@ -120,9 +120,14 @@
         <span class="rule-name">{{.Reason}}</span>
         <span class="tag tag-outline tag-sm nowrap">{{if eq .Line .Through}}line {{.Line}}{{else}}lines {{.Line}}&ndash;{{.Through}}{{end}}</span>
       </div>
-      <div class="rule-field">field <code>{{.Field}}</code> &middot; matched <code>{{.Matched}}</code></div>
+      <div class="rule-field">
+        {{if .Field}}field <code>{{.Field}}</code>{{else}}in a field <em>name</em>, so the whole field was withheld{{end}}
+        &middot; matched <code>{{.Matched}}</code>
+      </div>
+      {{if .Lines}}
       <div class="code" style="margin-top:5px;white-space:pre-wrap">{{range .Lines}}{{.}}
 {{end}}</div>
+      {{end}}
     </div>
     {{end}}
   </div>
