@@ -1,9 +1,11 @@
 package backup
 
 import (
+	"bytes"
 	"database/sql"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/barancezayirli/dsforms/internal/store"
 	_ "modernc.org/sqlite"
@@ -171,5 +173,142 @@ func TestImportInvalidFile(t *testing.T) {
 	_, err := s.ListForms(store.AllForms())
 	if err != nil {
 		t.Fatalf("store broken after failed import: %v", err)
+	}
+}
+
+// seedWithToken puts a form, a submission and an API token in a store, and
+// returns the token's stored hash so a test can look for it in a snapshot.
+func seedWithToken(t *testing.T, s *store.Store) string {
+	t.Helper()
+	if err := s.CreateForm(store.Form{ID: "f1", Name: "Contact", EmailTo: "a@b.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := s.CreateSubmission(store.Submission{
+		ID: "s1", FormID: "f1", RawData: `{"message":"keep me"}`, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	u, err := s.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	if _, _, err := s.CreateAPIToken(u.ID, "laptop", []string{"read"}, nil, 0); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	var hash string
+	if err := s.DB().QueryRow("SELECT token_hash FROM api_tokens LIMIT 1").Scan(&hash); err != nil {
+		t.Fatalf("reading the stored hash: %v", err)
+	}
+	if len(hash) != 64 {
+		t.Fatalf("stored hash is %d chars, want a SHA-256 hex digest", len(hash))
+	}
+	return hash
+}
+
+// TestExportLeavesTheAPITokensBehind.
+//
+// A snapshot is a copy of the whole database, so it used to carry every token's
+// hash — and, worse, restoring one resurrected tokens revoked since it was
+// taken. Revocation is a security action and a restore silently undoing it is
+// the wrong direction to fail in, especially as whoever was revoked may still
+// be holding the string.
+//
+// The cost is stated in the docs: a restore no longer brings your live tokens
+// back either, so they are re-minted after a recovery.
+func TestExportLeavesTheAPITokensBehind(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	hash := seedWithToken(t, s)
+
+	path, err := Export(s.DB())
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	defer os.Remove(path)
+
+	// Not merely unlinked: gone from the bytes. A DELETE without a VACUUM
+	// leaves the page intact and a grep still finds the digest — see
+	// TestDeleteAloneLeavesTheBytesInTheFile.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if bytes.Contains(raw, []byte(hash)) {
+		t.Error("the token's hash is still in the snapshot's bytes")
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open snapshot: %v", err)
+	}
+	defer db.Close()
+
+	// The table is still there, empty. Dropping it would make the snapshot a
+	// different shape from the schema, and Import re-runs migrations anyway.
+	var tokens int
+	if err := db.QueryRow("SELECT COUNT(*) FROM api_tokens").Scan(&tokens); err != nil {
+		t.Fatalf("counting api_tokens in the snapshot: %v", err)
+	}
+	if tokens != 0 {
+		t.Errorf("snapshot holds %d api_tokens rows, want none", tokens)
+	}
+
+	// And nothing else went with them.
+	for _, tc := range []struct {
+		table string
+		want  int
+	}{{"forms", 1}, {"submissions", 1}, {"users", 1}} {
+		var n int
+		if err := db.QueryRow("SELECT COUNT(*) FROM " + tc.table).Scan(&n); err != nil {
+			t.Fatalf("counting %s: %v", tc.table, err)
+		}
+		if n != tc.want {
+			t.Errorf("%s has %d rows in the snapshot, want %d", tc.table, n, tc.want)
+		}
+	}
+}
+
+// TestExportDoesNotTouchTheLiveDatabase. Export is a read of the instance, and
+// an operator taking a backup must not thereby revoke their own tokens.
+func TestExportDoesNotTouchTheLiveDatabase(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	seedWithToken(t, s)
+
+	path, err := Export(s.DB())
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	defer os.Remove(path)
+
+	u, err := s.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	tokens, err := s.ListAPITokens(u.ID)
+	if err != nil {
+		t.Fatalf("ListAPITokens: %v", err)
+	}
+	if len(tokens) != 1 {
+		t.Errorf("the live instance has %d tokens after a backup, want 1", len(tokens))
+	}
+}
+
+// TestASnapshotWithoutTokensStillValidates, because Import refuses a file that
+// does not look like a dsforms database and a stripped one still has to.
+func TestASnapshotWithoutTokensStillValidates(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	seedWithToken(t, s)
+
+	path, err := Export(s.DB())
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	defer os.Remove(path)
+
+	if err := Validate(path); err != nil {
+		t.Errorf("a stripped snapshot no longer validates: %v", err)
 	}
 }

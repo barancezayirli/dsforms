@@ -12,7 +12,28 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Export creates a snapshot of the DB using VACUUM INTO.
+// credentialTables are the tables a snapshot is stripped of before it leaves
+// the instance.
+//
+// api_tokens holds long-lived MCP credentials. They were in every snapshot
+// until it was noticed that restoring one *resurrects tokens revoked since it
+// was taken* — and revocation is a security action, so a restore silently
+// undoing it is the wrong direction to fail in, the more so because whoever was
+// revoked may still be holding the string. A backup is also a file that gets
+// copied to laptops and object stores, and it had no business carrying
+// credential material it does not need.
+//
+// The cost is real and documented: a restore no longer brings live tokens back
+// either, so they are re-minted after a recovery. Clients visibly stopping is
+// the better failure than a revoked credential quietly working again.
+//
+// Sessions are deliberately not in this list. They expire on their own and
+// dropping them would sign every operator out of a restored instance, which is
+// a different trade — worth making, but not silently as part of this one.
+var credentialTables = []string{"api_tokens"}
+
+// Export creates a snapshot of the DB using VACUUM INTO, with the credential
+// tables emptied.
 // Returns the path to the temp file. Caller must delete it.
 func Export(db *sql.DB) (string, error) {
 	tmpFile, err := os.CreateTemp("", "dsforms-backup-*.db")
@@ -32,7 +53,43 @@ func Export(db *sql.DB) (string, error) {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("export: vacuum into: %w", err)
 	}
+
+	// Stripped from the copy rather than excluded from the VACUUM, because
+	// VACUUM INTO takes the whole database or nothing. The live one is never
+	// touched: an operator taking a backup must not thereby revoke their own
+	// tokens.
+	if err := stripCredentials(tmpPath); err != nil {
+		os.Remove(tmpPath)
+		return "", err
+	}
 	return tmpPath, nil
+}
+
+// stripCredentials empties the credential tables in a snapshot and rewrites the
+// file so the rows are gone rather than merely unlinked.
+//
+// The VACUUM is the load-bearing half. SQLite frees a deleted row's page
+// instead of rewriting it, so without it the digests stay in the file and a
+// grep finds them — this function would have looked like it worked while
+// shipping exactly what it was written to remove. Pinned by
+// TestDeleteAloneLeavesTheBytesInTheFile.
+func stripCredentials(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("export: open snapshot to strip credentials: %w", err)
+	}
+	defer db.Close()
+
+	for _, table := range credentialTables {
+		// The names are this package's own constants, never input.
+		if _, err := db.Exec("DELETE FROM " + table); err != nil {
+			return fmt.Errorf("export: clearing %s from the snapshot: %w", table, err)
+		}
+	}
+	if _, err := db.Exec("VACUUM"); err != nil {
+		return fmt.Errorf("export: rewriting the snapshot after clearing credentials: %w", err)
+	}
+	return nil
 }
 
 // Validate checks that a file is a valid DSForms SQLite database.

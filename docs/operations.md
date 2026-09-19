@@ -48,6 +48,22 @@ including the write-ahead log.
 You can open it with any SQLite client, or drop it in as a direct replacement
 for the live database.
 
+**API tokens are not in a snapshot.** They are cleared from the copy, and the
+copy is rewritten so the hashes are gone from the file rather than merely
+unlinked. Two reasons: a backup gets copied to laptops and object stores and had
+no business carrying credential material, and — the sharper one — restoring a
+snapshot used to bring back **every token revoked since it was taken**.
+Revocation is a security action, and whoever you revoked may still be holding
+the string.
+
+The cost is the other side of that: **after restoring, your API tokens are
+gone** and MCP clients stop working until you mint new ones. That is deliberate.
+A client that visibly stops is a better failure than a revoked credential
+quietly working again.
+
+Login sessions *are* kept, so a restore does not sign everyone out. They expire
+on their own, which tokens need not.
+
 ## What happens if a restore fails
 
 A restore replaces the live database, so it is written to fail safely:

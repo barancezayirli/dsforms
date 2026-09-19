@@ -43,7 +43,10 @@ trust rather than crossing a network — and on a fresh install it is the only
 one, since you may want the endpoint before anyone has signed in.
 
 **The token is shown once.** Only a SHA-256 hash is stored, so it cannot be
-recovered: if you lose it, revoke it and make another. Tokens belong to a user,
+recovered: if you lose it, revoke it and make another. Tokens are also left out
+of backups entirely, so restoring a snapshot neither resurrects a revoked token
+nor brings your live ones back — expect to re-mint after a restore. See
+[operations](operations.md#backups). Tokens belong to a user,
 so deleting that user revokes theirs in the same statement, and each one is
 revocable on its own without disturbing the others.
 

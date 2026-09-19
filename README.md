@@ -135,7 +135,8 @@ curl -X POST https://your-server.com/f/FORM_ID \
 - `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and a CSP
 - 64KB request body limit (100MB for backup import, 1MB for MCP)
 - API tokens stored as SHA-256 hashes, shown once, scoped and individually
-  revocable; deleting a user revokes theirs in the same statement
+  revocable; deleting a user revokes theirs in the same statement, and they are
+  stripped from backups so a restore cannot resurrect a revoked one
 - dsforms refuses to start with the MCP endpoint enabled over plain http, since
   a bearer token would cross the network in the clear on every request
 - Chat-template control tokens and invisible Unicode are removed from submission
