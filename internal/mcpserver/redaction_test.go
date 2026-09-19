@@ -578,3 +578,95 @@ func TestASignalIsNeverReattributedToAnInnocentField(t *testing.T) {
 		t.Errorf("the innocent field was disturbed: %q", out.Submission.Fields["name"])
 	}
 }
+
+// TestAWithheldIPIsWithheldEverywhere.
+//
+// toSubmission blanks the IP when the operator has not opted in, and its
+// comment claims that is the only place a submission becomes a wire shape. That
+// claim has now been wrong three times, all of them toSignals — first the
+// forged turn in match, then the one in field, and now this: screen stores the
+// submitter's address as the repeat_ip check's match, so the address came back
+// in signals[].match with submission.ip blanked beside it.
+//
+// So this does not assert on a field. It asks whether the address appears
+// anywhere in any result, which is the question the option is actually making a
+// promise about, and a fourth path would fail it without anyone adding a case.
+func TestAWithheldIPIsWithheldEverywhere(t *testing.T) {
+	t.Parallel()
+
+	const ip = "203.0.113.9"
+	h := newHarness(t, "read")
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	raw, err := json.Marshal(map[string]string{"name": "Ada", "message": "Please quote 200 units."})
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	if err := h.store.CreateSubmission(store.Submission{
+		ID: "dirty", FormID: "contact", RawData: string(raw), IP: ip, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if err := h.store.CreateHeldSubmission(
+		store.Submission{ID: "dirtyheld", FormID: "contact", RawData: string(raw), IP: ip, CreatedAt: time.Now().UTC()},
+		9, 6,
+		// What screen actually records for this check: the address itself.
+		[]store.SpamSignal{{Check: "repeat_ip", Field: "", Match: ip, Weight: 6}},
+	); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	session := h.connect(t)
+	for _, name := range toolNames(t, session) {
+		args, ok := readArgsFor(name)
+		if !ok {
+			t.Fatalf("no arguments recorded for %q", name)
+		}
+		res := call(t, session, name, args)
+		if res.IsError {
+			t.Fatalf("%s: %s", name, resultText(res))
+		}
+		if body := wireText(t, res.StructuredContent); strings.Contains(body, ip) {
+			t.Errorf("%s returned the submitter's address while MCP_INCLUDE_IPS is off:\n%s", name, body)
+		}
+	}
+}
+
+// readArgsFor gives a valid call for a read-scope tool, reusing toolArgs.
+func readArgsFor(name string) (map[string]any, bool) {
+	args, ok := toolArgs[name]
+	return args, ok
+}
+
+// TestTheIPSignalIsShownWhenTheOperatorAsks. The other half: withholding must
+// be the option, not the behaviour. Without this, blanking the match
+// unconditionally would pass the test above and quietly remove the one piece of
+// evidence an operator writes an IP block rule from.
+func TestTheIPSignalIsShownWhenTheOperatorAsks(t *testing.T) {
+	t.Parallel()
+
+	const ip = "203.0.113.9"
+	h := newHarnessWithIPs(t, "read")
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := h.store.CreateHeldSubmission(
+		store.Submission{ID: "held", FormID: "contact", RawData: `{"message":"hi"}`, IP: ip, CreatedAt: time.Now().UTC()},
+		9, 6, []store.SpamSignal{{Check: "repeat_ip", Match: ip, Weight: 6}},
+	); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	session := h.connect(t)
+	out := decode[getSubmissionOut](t, call(t, session, "get_submission", map[string]any{"submission_id": "held"}))
+	if len(out.Signals) != 1 {
+		t.Fatalf("signals = %+v, want 1", out.Signals)
+	}
+	if out.Signals[0].Match != ip {
+		t.Errorf("match = %q, want the address the operator opted in to see", out.Signals[0].Match)
+	}
+	if out.Signals[0].MatchWithheld {
+		t.Error("the match is marked withheld on an instance that shares IPs")
+	}
+}

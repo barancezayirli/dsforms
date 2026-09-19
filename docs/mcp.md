@@ -124,6 +124,11 @@ with a context window and usually a vendor behind it, so sending every
 submitter's address there should be a decision rather than a default. Set
 `MCP_INCLUDE_IPS=true` to include them. The admin UI shows them either way.
 
+That covers the spam breakdown too: the `repeat_ip` check records the address as
+what it matched, so on a quarantined submission that signal's `match` is
+withheld with `match_withheld` set, rather than handing back beside a blanked
+`ip` the address the setting is there to withhold.
+
 **Reading.** `list_submissions` defaults to unread and never includes
 quarantined submissions — `list_quarantine` is for those, and it carries the
 recorded reasons each was held. `get_stats` answers the "what is in the

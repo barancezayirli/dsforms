@@ -165,7 +165,11 @@ type signalOut struct {
 	// absent field means "not shown" rather than "no field". See toSignals.
 	FieldWithheld bool   `json:"field_withheld,omitempty" jsonschema:"the field name carried a marker and is not being named"`
 	Match         string `json:"match,omitempty"`
-	Weight        int    `json:"weight"`
+
+	// MatchWithheld says the same about the match, which for the repeat_ip
+	// check is the submitter's address.
+	MatchWithheld bool `json:"match_withheld,omitempty" jsonschema:"what matched is not being shown; for repeat_ip it is the submitter's IP address, which this instance withholds"`
+	Weight        int  `json:"weight"`
 }
 
 // toSubmission is a method rather than a function so it can honour
@@ -220,7 +224,14 @@ func (s *Server) toSubmission(sub store.Submission, formName string) submissionO
 // The hits are discarded rather than reported: both are derived from a field,
 // so whatever was removed here is already named in that submission's own
 // redacted list, and reporting it twice would describe one payload as two.
-func toSignals(sigs []store.SpamSignal) []signalOut {
+// It is a method for the same reason toSubmission is: it has to honour
+// Options.IncludeIPs. screen records the submitter's address as the repeat_ip
+// check's match (screen.go:313), so a plain function forwarded the address that
+// toSubmission had just blanked two fields above it — the third time this one
+// function turned out to be the second wire path toSubmission's comment says
+// does not exist. The guard for it no longer asks about a field: it asks
+// whether the address appears anywhere in any result.
+func (srv *Server) toSignals(sigs []store.SpamSignal) []signalOut {
 	out := make([]signalOut, 0, len(sigs))
 	for _, s := range sigs {
 		clean, _ := redact.Fields(map[string]string{"field": s.Field, "match": s.Match})
@@ -236,9 +247,16 @@ func toSignals(sigs []store.SpamSignal) []signalOut {
 			field, withheld = "", true
 		}
 
+		// Named against the constant rather than the string, so renaming the
+		// check breaks the build instead of quietly reopening this.
+		match, matchWithheld := clean["match"], false
+		if s.Check == screen.CheckRepeatIP && !srv.opts.IncludeIPs {
+			match, matchWithheld = "", true
+		}
+
 		out = append(out, signalOut{
 			Check: string(s.Check), Field: field, FieldWithheld: withheld,
-			Match: clean["match"], Weight: s.Weight,
+			Match: match, MatchWithheld: matchWithheld, Weight: s.Weight,
 		})
 	}
 	return out
@@ -519,7 +537,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		}
 		return guarded(getSubmissionOut{
 			Submission: s.toSubmission(sub, names[sub.FormID]),
-			Signals:    toSignals(signals),
+			Signals:    s.toSignals(signals),
 		})
 	})
 
@@ -583,7 +601,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 			}
 			out.Submissions = append(out.Submissions, heldOut{
 				submissionOut: s.toSubmission(sub, names[sub.FormID]),
-				Signals:       toSignals(signals),
+				Signals:       s.toSignals(signals),
 			})
 		}
 		return guarded(out)
