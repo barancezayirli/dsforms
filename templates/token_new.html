@@ -28,12 +28,15 @@
   </label>
 
   <div class="field">
-    <span>Scopes</span>
+    <!-- A bare span is inline, and .field only blocks a child <label>. The Name
+         field above gets its line break from the full-width input that follows
+         it; this one has to ask. -->
+    <span style="display:block">Scopes</span>
     <!-- The sentence an operator most needs and is least likely to guess. read
          is pre-ticked because it is the least a client can be given, not
          because it is harmless: it is the scope an exfiltration attempt wants,
          and the one people hand out without thinking. -->
-    <span class="form-hint" style="margin-top:2px">
+    <span class="form-hint" style="display:block;margin-top:2px;margin-bottom:2px">
       Give a client only what it needs. <strong>read</strong> is not the harmless
       option &mdash; it is your whole inbox, and it is the one an attack wants.
     </span>

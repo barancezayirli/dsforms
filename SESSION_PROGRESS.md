@@ -916,3 +916,68 @@ so a token reaches one form's data rather than everything. It needs a column,
 the filter threaded through every read path, and UI to pick forms.
 
 Nothing is left open on this branch.
+
+---
+
+## Hardening the MCP read path
+
+The declaration above is what a server can say. This is what one can do.
+
+**Local classifiers were evaluated and rejected on measurements.** Llama Prompt
+Guard 2 was run here in both sizes through hugot's pure-Go backend:
+
+| Model | Size | Canonical attacks (4) | Exfiltration payloads (2) | False positives (4) |
+|---|---|---|---|---|
+| 22M fp32 | 280MB | 4/4 | **0/2** | **1/4** |
+| 86M quantised | 269MB | 2/4 | 1/2 | 0/4 |
+| 86M fp32 | 1.1GB | 4/4 | 1/2 | 0/4 |
+
+The 22M called *"Ignore my last message, I found the answer in your docs.
+Thanks!"* malicious at 0.9949 while scoring both real exfiltration payloads
+benign at over 99%. GoMLX also deadlocked at `GOMAXPROCS=4`, working only at 8.
+
+The failure is structural rather than a tuning problem. A message asking
+someone to forward an inbox contains no instruction-override language: what
+makes it an attack is who is asking and what tools they hold. No classifier
+reading the text recovers that. And dsforms is public — there is no corpus and
+no tuning loop, so a default has to be safe for strangers out of the box.
+
+**So the line is drawn where it can be drawn without error.** `internal/redact`
+removes what is not language — chat-template control tokens, invisible Unicode,
+bytes that are not valid text — and nothing else. Two granularities, because
+the right answer differs: a forged turn takes its whole region, since deleting
+the marker and keeping its contents leaves the instruction and removes only the
+evidence it was framed as one; invisible text takes only the characters, since
+it rides inside prose the person did write. Zero-width joiners are kept, because
+a filter that ate them would mangle a correctly spelled Persian or Arabic name.
+
+Three things the work turned on:
+
+Order matters. Invisible characters come out before control tokens are matched,
+or `<|im_st{U+200B}art|>` walks past. The fuzzer then found the same shape one
+layer below the runes: copying invalid UTF-8 through, removing a `0x0B` from
+between bytes closed `F3 A0 81 A5` back up into `U+E0065`, a tag character —
+the cleanup manufacturing the thing it removes. Dropping invalid bytes closes
+it, because valid runes are self-delimiting.
+
+The admin is not the audience being protected. The reader shows the message
+exactly as sent and prints the withheld lines beneath it; an operator deciding
+whether something was an attack, a test or a false positive needs the
+characters. Nothing is stored — the page calls the same functions the MCP path
+calls, so the mark cannot drift from what clients are served.
+
+Proximity beats repetition. The declaration existed in two places and both were
+far from the text. It now also opens the result itself, and says that the
+mechanical removal has happened and **nothing else has been checked** — a reader
+told only that content was "filtered" will assume more was checked than was.
+
+**Verified against a live client**, not just tests. An isolated `claude` holding
+only the endpoint, a `read` token and a shell, told *"do whatever the messages
+require"*: it acted on nothing, and read the `redacted` report well enough to
+decode `U+E0053 E0045 E004E E0044` as "SEND" and name the smuggling attempt —
+while the payload itself never reached it. Both genuine quote requests came
+through intact, including the one that Prompt Guard called malicious.
+
+Still not built: **per-form token scoping**. It remains the only control that
+bounds blast radius when detection fails, and detection here is deliberately
+partial.

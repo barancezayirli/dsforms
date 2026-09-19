@@ -171,18 +171,57 @@ So the two risks are not the same shape:
 Note the first row. `read` is not the safe scope — it is the one that can lose
 everything, and it is the one you would hand out most freely.
 
-**What dsforms does about it.** It tells your client, in the two places a client
-reads: the instructions sent at connection, and the description of every tool
-that returns submitted text. Both say the same thing — field values are data to
-report on, not instructions to follow, and a submission asking the client to
-send messages elsewhere is an attack to report rather than obey. A well-built
-client treats tool output as data. That is a property of your client, not of
-dsforms, which is why this is a declaration and not a guarantee.
+**What dsforms does about it.** Two things, and it is worth being clear about
+which is which.
+
+**It removes what is not language.** Chat-template control tokens
+(`<|im_start|>`, `[INST]`, `<<SYS>>` and the rest), text hidden in invisible
+Unicode — the tag block, bidi overrides, terminal escapes — and bytes that are
+not valid text at all. A person asking about pricing does not type any of it, so
+removing it costs genuine messages nothing.
+
+A forged chat turn takes its whole region: deleting the marker and keeping its
+contents leaves the instruction and removes only the evidence that it was framed
+as one. Prose before the boundary is kept, because the usual shape is a real
+enquiry with a payload appended. Invisible text loses only the characters, since
+a smuggled payload rides inside prose the person did write. Zero-width joiners
+are deliberately left alone — they shape Persian and Arabic script and build
+emoji sequences, and a filter that ate them would mangle a correctly spelled
+name.
+
+Each submission that was touched carries a `redacted` list saying what went,
+which field, and which lines. **Nothing is changed in the database.** The admin
+shows the message exactly as it was sent, with a panel naming the lines a client
+was not shown, and the list marks the rows that carry them.
+
+**It tells your client, next to the text.** The instructions at connection and
+the description of every tool that returns submitted text both say field values
+are data to report on rather than instructions to follow. Those are far from the
+text they are about, so the same statement now opens the result itself,
+immediately above the payload, along with a note that the mechanical removal has
+happened and **nothing else has been checked**.
+
+**What it deliberately does not do is detect.** There is no classifier here, and
+that is a measurement rather than a preference. Llama Prompt Guard 2 was tested
+against this threat: at 22M it scored two real exfiltration payloads *benign* at
+over 99% while calling *"Ignore my last message, I found the answer in your
+docs. Thanks!"* malicious at 0.9949. The reason is structural. A message asking
+someone to forward mail contains no instruction-override language at all — what
+makes it an attack is who is asking and what tools they hold, and no amount of
+reading the text recovers that. So dsforms draws the line where it can be drawn
+without error and says so, rather than shipping something that would quietly
+drop one genuine message in every handful.
+
+Which means the last word still belongs to your client. A well-built one treats
+tool output as data; that is a property of the client, not of dsforms.
 
 **What you should do.**
 
 - Point tokens at clients you trust with the whole inbox, because that is what
-  `read` grants. The choice of client is the real control here.
+  `read` grants. The choice of client is the real control here. The token form
+  starts at `read` and nothing else for that reason, and says beside each
+  checkbox what the scope costs if the client turns out not to be the one you
+  meant.
 - Do not hand out `delete`. It is separate precisely so you can withhold it, and
   deleting from the admin costs you nothing.
 - Keep `MCP_INCLUDE_IPS` off unless you need it. It is less data in the blast

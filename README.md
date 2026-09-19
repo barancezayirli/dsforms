@@ -137,6 +137,9 @@ curl -X POST https://your-server.com/f/FORM_ID \
   revocable; deleting a user revokes theirs in the same statement
 - dsforms refuses to start with the MCP endpoint enabled over plain http, since
   a bearer token would cross the network in the clear on every request
+- Chat-template control tokens and invisible Unicode are removed from submission
+  content before an MCP client sees it, and reported to the client; the stored
+  message is never changed, and the admin marks what was withheld
 
 Found something? Please report it privately — see **[SECURITY.md](SECURITY.md)**.
 
