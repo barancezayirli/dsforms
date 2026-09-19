@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"github.com/barancezayirli/dsforms/internal/redact"
@@ -142,6 +143,21 @@ type hitOut struct {
 	Matched string `json:"matched" jsonschema:"what was removed, as printable ASCII — never the surrounding prose"`
 }
 
+// looksLikeAddress reports whether text is an IP address or a CIDR network.
+//
+// Used to decide whether a spam signal's match is the sort of thing
+// MCP_INCLUDE_IPS exists to withhold. A false positive here — an operator's
+// keyword rule that happens to be "192.168.1.1" — costs one withheld match on
+// an instance that has already said it does not want addresses sent, which is
+// the harmless direction.
+func looksLikeAddress(text string) bool {
+	if _, err := netip.ParseAddr(text); err == nil {
+		return true
+	}
+	_, err := netip.ParsePrefix(text)
+	return err == nil
+}
+
 func toHits(hits []redact.Hit) []hitOut {
 	if len(hits) == 0 {
 		return nil
@@ -224,17 +240,17 @@ func (s *Server) toSubmission(sub store.Submission, formName string) submissionO
 // The hits are discarded rather than reported: both are derived from a field,
 // so whatever was removed here is already named in that submission's own
 // redacted list, and reporting it twice would describe one payload as two.
+//
 // It is a method for the same reason toSubmission is: it has to honour
 // Options.IncludeIPs. screen records the submitter's address as the repeat_ip
-// check's match (screen.go:313), so a plain function forwarded the address that
-// toSubmission had just blanked two fields above it — the third time this one
-// function turned out to be the second wire path toSubmission's comment says
-// does not exist. The guard for it no longer asks about a field: it asks
-// whether the address appears anywhere in any result.
-func (srv *Server) toSignals(sigs []store.SpamSignal) []signalOut {
+// check's match, and a block rule's match is the rule value — which for an ip
+// rule is the submitter's own address, and for a cidr rule is the network
+// containing it. A plain function forwarded both, beside the ip field that
+// toSubmission had just blanked.
+func (s *Server) toSignals(sigs []store.SpamSignal) []signalOut {
 	out := make([]signalOut, 0, len(sigs))
-	for _, s := range sigs {
-		clean, _ := redact.Fields(map[string]string{"field": s.Field, "match": s.Match})
+	for _, sig := range sigs {
+		clean, _ := redact.Fields(map[string]string{"field": sig.Field, "match": sig.Match})
 
 		// A field name that needed redacting is withheld, not cleaned. Cleaning
 		// it is worse than showing nothing, because cleaning can land on a real
@@ -243,20 +259,26 @@ func (srv *Server) toSignals(sigs []store.SpamSignal) []signalOut {
 		// while the one that actually tripped the check is absent. The redacted
 		// list refuses to name such a field for the same reason.
 		field, withheld := clean["field"], false
-		if field != s.Field {
+		if field != sig.Field {
 			field, withheld = "", true
 		}
 
-		// Named against the constant rather than the string, so renaming the
-		// check breaks the build instead of quietly reopening this.
+		// The test is the shape of the value, not a list of check names.
+		//
+		// A list was the first fix, naming repeat_ip, and it missed the block
+		// rule: screen stamps a matched rule's value as the match, so an ip
+		// rule's match is the submitter's address and a cidr rule's is the
+		// network containing it. Any check that records an address is covered
+		// by asking whether the thing being handed back is one, and a check
+		// added later is covered without anyone remembering this.
 		match, matchWithheld := clean["match"], false
-		if s.Check == screen.CheckRepeatIP && !srv.opts.IncludeIPs {
+		if !s.opts.IncludeIPs && looksLikeAddress(match) {
 			match, matchWithheld = "", true
 		}
 
 		out = append(out, signalOut{
-			Check: string(s.Check), Field: field, FieldWithheld: withheld,
-			Match: match, MatchWithheld: matchWithheld, Weight: s.Weight,
+			Check: string(sig.Check), Field: field, FieldWithheld: withheld,
+			Match: match, MatchWithheld: matchWithheld, Weight: sig.Weight,
 		})
 	}
 	return out

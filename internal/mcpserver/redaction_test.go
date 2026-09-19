@@ -583,14 +583,15 @@ func TestASignalIsNeverReattributedToAnInnocentField(t *testing.T) {
 //
 // toSubmission blanks the IP when the operator has not opted in, and its
 // comment claims that is the only place a submission becomes a wire shape. That
-// claim has now been wrong three times, all of them toSignals — first the
-// forged turn in match, then the one in field, and now this: screen stores the
-// submitter's address as the repeat_ip check's match, so the address came back
-// in signals[].match with submission.ip blanked beside it.
+// claim has now been wrong three times, all of them toSignals — a forged turn
+// in match, one in field, and the submitter's address.
 //
-// So this does not assert on a field. It asks whether the address appears
-// anywhere in any result, which is the question the option is actually making a
-// promise about, and a fourth path would fail it without anyone adding a case.
+// So this does not assert on a field. It seeds every signal shape that records
+// an address — the repeat_ip check, and a block rule whose value *is* the
+// address — and asks whether the string appears anywhere in any result. The
+// first version claimed to be path-agnostic and was not: it seeded repeat_ip
+// alone, so the block-rule leak passed it. It also has to prove the seeded rows
+// came back, or a listing default that hid them would make this a vacuous pass.
 func TestAWithheldIPIsWithheldEverywhere(t *testing.T) {
 	t.Parallel()
 
@@ -608,18 +609,29 @@ func TestAWithheldIPIsWithheldEverywhere(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateSubmission: %v", err)
 	}
-	if err := h.store.CreateHeldSubmission(
-		store.Submission{ID: "dirtyheld", FormID: "contact", RawData: string(raw), IP: ip, CreatedAt: time.Now().UTC()},
-		9, 6,
-		// What screen actually records for this check: the address itself.
-		[]store.SpamSignal{{Check: "repeat_ip", Field: "", Match: ip, Weight: 6}},
-	); err != nil {
-		t.Fatalf("CreateHeldSubmission: %v", err)
+	// Both shapes screen records an address in: the repeat_ip check, and a
+	// matched block rule, whose value for an ip rule is the address itself.
+	held := []struct {
+		id     string
+		signal store.SpamSignal
+	}{
+		{"dirtyheld", store.SpamSignal{Check: "repeat_ip", Match: ip, Weight: 6}},
+		{"ruleheld", store.SpamSignal{Check: "rule", Field: "ip", Match: ip, Weight: 9}},
+	}
+	for _, hs := range held {
+		if err := h.store.CreateHeldSubmission(
+			store.Submission{ID: hs.id, FormID: "contact", RawData: string(raw), IP: ip, CreatedAt: time.Now().UTC()},
+			9, 6, []store.SpamSignal{hs.signal},
+		); err != nil {
+			t.Fatalf("CreateHeldSubmission(%s): %v", hs.id, err)
+		}
 	}
 
 	session := h.connect(t)
+	want := []string{"dirty", "dirtyheld", "ruleheld"}
+	seen := map[string]bool{}
 	for _, name := range toolNames(t, session) {
-		args, ok := readArgsFor(name)
+		args, ok := toolArgs[name]
 		if !ok {
 			t.Fatalf("no arguments recorded for %q", name)
 		}
@@ -627,16 +639,23 @@ func TestAWithheldIPIsWithheldEverywhere(t *testing.T) {
 		if res.IsError {
 			t.Fatalf("%s: %s", name, resultText(res))
 		}
-		if body := wireText(t, res.StructuredContent); strings.Contains(body, ip) {
+		body := wireText(t, res.StructuredContent)
+		if strings.Contains(body, ip) {
 			t.Errorf("%s returned the submitter's address while MCP_INCLUDE_IPS is off:\n%s", name, body)
 		}
+		for _, id := range want {
+			if strings.Contains(body, `"`+id+`"`) {
+				seen[id] = true
+			}
+		}
 	}
-}
 
-// readArgsFor gives a valid call for a read-scope tool, reusing toolArgs.
-func readArgsFor(name string) (map[string]any, bool) {
-	args, ok := toolArgs[name]
-	return args, ok
+	// Without this the test passes when nothing came back at all.
+	for _, id := range want {
+		if !seen[id] {
+			t.Errorf("no tool returned %q, so nothing was actually inspected for it", id)
+		}
+	}
 }
 
 // TestTheIPSignalIsShownWhenTheOperatorAsks. The other half: withholding must
