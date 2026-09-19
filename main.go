@@ -71,6 +71,7 @@ var (
 	_ handler.WaitlistSubmitStore = (*store.Store)(nil)
 	_ handler.SearchStore         = (*store.Store)(nil)
 	_ handler.DigestStore         = (*store.Store)(nil)
+	_ handler.TokensStore         = (*store.Store)(nil)
 
 	// backup.Import swaps the database file underneath the process; it names the
 	// two methods that takes rather than importing store at all.
@@ -137,7 +138,7 @@ var basePages = []string{
 	"submission_detail.html", "users.html", "users_new.html", "account.html",
 	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
 	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
-	"quarantine.html", "rules.html", "home.html", "search.html",
+	"quarantine.html", "rules.html", "home.html", "search.html", "tokens.html",
 }
 
 var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
@@ -614,6 +615,128 @@ func runBackupCLI(args []string) {
 	fmt.Printf("Backup created: %s\n", destPath)
 }
 
+// runTokenCLI manages the API tokens MCP clients present.
+//
+// It exists alongside the admin page because this is the safer way to mint one:
+// the value is printed to a terminal the operator already trusts, rather than
+// crossing a network and landing in a browser. On a fresh install it is also the
+// only way, since the endpoint may be wanted before anyone has signed in.
+//
+// It opens the database directly rather than going through config.Load, matching
+// the user and backup commands — a CLI that refused to run without SECRET_KEY
+// set would be useless in exactly the recovery situations it is for.
+func runTokenCLI(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: dsforms token <list|create|revoke> [args...]")
+		os.Exit(1)
+	}
+
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "/data/dsforms.db"
+	}
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer s.Close()
+
+	switch args[0] {
+	case "list":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Usage: dsforms token list <username>")
+			os.Exit(1)
+		}
+		u := mustUser(s, args[1])
+		tokens, err := s.ListAPITokens(u.ID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if len(tokens) == 0 {
+			fmt.Printf("No API tokens for %q.\n", args[1])
+			return
+		}
+		fmt.Printf("%-38s %-20s %-18s %s\n", "ID", "NAME", "SCOPES", "LAST USED")
+		for _, t := range tokens {
+			lastUsed := "never"
+			if !t.LastUsedAt.IsZero() {
+				lastUsed = t.LastUsedAt.Format("2006-01-02 15:04")
+			}
+			fmt.Printf("%-38s %-20s %-18s %s\n", t.ID, t.Name, strings.Join(t.Scopes, ","), lastUsed)
+		}
+
+	case "create":
+		if len(args) < 4 {
+			fmt.Fprintf(os.Stderr, "Usage: dsforms token create <username> <name> <scopes>\n"+
+				"  scopes is a comma-separated list: %s\n", mcpserver.Scopes(mcpserver.AllScopes))
+			os.Exit(1)
+		}
+		u := mustUser(s, args[1])
+
+		// ValidateScopes, not ParseScopes: a typo here is a person's mistake to
+		// report, not a value to silently drop. Creating a token with fewer
+		// powers than asked for is a refusal discovered much later.
+		scopes, err := mcpserver.ValidateScopes(strings.Split(args[3], ","))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// No expiry from the CLI. The TTL is an instance-wide policy read from
+		// the environment by the server, and honouring it here would mean
+		// loading config — which requires SECRET_KEY and would make this command
+		// unusable on a fresh install. A CLI token is revoked by hand.
+		raw, tok, err := s.CreateAPIToken(u.ID, args[2], scopes.Strings(), 0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Token %q created for %s with scopes %s.\n\n", tok.Name, u.Username, scopes)
+		fmt.Printf("  %s\n\n", raw)
+		fmt.Println("This is the only time it is shown — only a hash is stored.")
+		fmt.Println("Send it as an Authorization: Bearer header to the /mcp endpoint.")
+		fmt.Println("The endpoint serves requests only when MCP_ENABLED=true.")
+
+	case "revoke":
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: dsforms token revoke <username> <token-id>")
+			os.Exit(1)
+		}
+		u := mustUser(s, args[1])
+		removed, err := s.DeleteAPIToken(u.ID, args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if !removed {
+			// Not an error exit: the end state the operator wanted is the end
+			// state they have. Saying nothing happened is the honest part.
+			fmt.Printf("No token %s belongs to %q — nothing was revoked.\n", args[2], args[1])
+			return
+		}
+		fmt.Printf("Token %s revoked. Any client using it is refused from now on.\n", args[2])
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: token %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+// mustUser resolves a username or exits. Every token command is scoped to a
+// user, so this is the same three lines four times over otherwise.
+func mustUser(s *store.Store, username string) store.User {
+	u, err := s.GetUserByUsername(username)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: no user %q\n", username)
+		os.Exit(1)
+	}
+	return u
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -622,6 +745,9 @@ func main() {
 			return
 		case "backup":
 			runBackupCLI(os.Args[2:])
+			return
+		case "token":
+			runTokenCLI(os.Args[2:])
 			return
 		default:
 			// Anything else used to fall through and start the server, which is
@@ -634,6 +760,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "  dsforms                      start the server")
 			fmt.Fprintln(os.Stderr, "  dsforms user <cmd> [args]    list, add, set-password, delete")
 			fmt.Fprintln(os.Stderr, "  dsforms backup <cmd>         create")
+			fmt.Fprintln(os.Stderr, "  dsforms token <cmd> [args]   list, create, revoke")
 			os.Exit(1)
 		}
 	}
@@ -843,6 +970,15 @@ func routes(d serverDeps) *chi.Mux {
 	}
 	adminHandler := &handler.AdminHandler{Base: base, Store: d.store, Webhook: d.webhook}
 	usersHandler := &handler.UsersHandler{Base: base, Store: d.store}
+	// Reachable whether or not MCP is switched on: an operator should be able to
+	// prepare a token before turning the endpoint on, and to revoke one after
+	// turning it off. The page says which it is.
+	tokensHandler := &handler.TokensHandler{
+		Base:       base,
+		Store:      d.store,
+		TTLDays:    d.cfg.MCPTokenTTLDays,
+		MCPEnabled: d.cfg.MCPEnabled,
+	}
 	backupHandler := &handler.BackupHandler{Base: base, Store: d.store}
 
 	waitlistSubmitHandler := &handler.WaitlistSubmitHandler{
@@ -948,6 +1084,9 @@ func routes(d serverDeps) *chi.Mux {
 		r.Get("/admin/users/new", usersHandler.NewUserPage)
 		r.Post("/admin/users/new", usersHandler.CreateUser)
 		r.Post("/admin/users/{id}/delete", usersHandler.DeleteUser)
+		r.Get("/admin/tokens", tokensHandler.Page)
+		r.Post("/admin/tokens", tokensHandler.Create)
+		r.Post("/admin/tokens/{id}/delete", tokensHandler.Delete)
 		r.Get("/admin/account", usersHandler.AccountPage)
 		r.Post("/admin/account/password", usersHandler.UpdatePassword)
 		r.Get("/admin/backups", backupHandler.Page)

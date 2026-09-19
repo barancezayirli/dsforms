@@ -1,0 +1,113 @@
+{{template "base" .}}
+
+{{define "content"}}
+<div class="page-head">
+  <h4>API tokens</h4>
+  <span class="muted" style="font-size:13px">Credentials for MCP clients. Each one belongs to you and can be revoked on its own.</span>
+</div>
+
+{{if .Error}}
+<div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
+{{end}}
+
+{{if not .Enabled}}
+<div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>
+  The MCP endpoint is switched off, so tokens created here will be refused.
+  Set <code>MCP_ENABLED=true</code> to turn it on.
+</span></div>
+{{end}}
+
+{{if .NewToken}}
+<div class="card elev-sm" style="margin-bottom:16px;border-color:var(--accent)">
+  <span class="card-title">
+    <svg class="i" style="font-size:15px"><use href="#ph-check-circle"/></svg>Copy this token now
+  </span>
+  <p class="card-body" style="flex:none">
+    This is the only time it is shown. Only a hash is stored, so it cannot be
+    recovered — if you lose it, revoke it and make another.
+  </p>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="code" id="new-token" style="flex:1;min-width:0;word-break:break-all;user-select:all">{{.NewToken}}</div>
+    <button class="btn btn-ghost" type="button" data-copy="#new-token">
+      <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">Copy</span>
+    </button>
+  </div>
+  <div class="card-meta" style="margin-top:10px">Point a client at this endpoint</div>
+  <div class="code" id="mcp-endpoint" style="font-size:11.5px;user-select:all">{{.BaseURL}}/mcp</div>
+  <div class="form-hint" style="margin-top:6px">
+    Send it as <code>Authorization: Bearer &lt;token&gt;</code> over Streamable HTTP.
+  </div>
+</div>
+{{end}}
+
+<div class="row">
+  <div class="col-main" style="flex:1.3 1 400px">
+    <div class="card elev-sm">
+      <span class="card-title">Your tokens</span>
+      {{if .Tokens}}
+      <div class="table-wrap">
+        <table class="table" style="min-width:520px">
+          <thead><tr><th>Name</th><th>Scopes</th><th>Last used</th><th>Expires</th><th style="width:90px"></th></tr></thead>
+          <tbody>
+            {{range .Tokens}}
+            <tr>
+              <td style="font-size:13.5px">{{.Name}}</td>
+              <td class="dim nowrap" style="font-size:12px">{{.ScopeList}}</td>
+              <td class="dim nowrap" style="font-size:12px">{{.LastUsed}}</td>
+              <td class="dim nowrap" style="font-size:12px">{{.Expires}}</td>
+              <td style="text-align:right">
+                <form method="POST" action="/admin/tokens/{{.ID}}/delete"
+                      data-confirm="Revoke {{.Name}}? Any client using it stops working immediately.">
+                  <button class="btn btn-quiet" type="submit">Revoke</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <p class="card-body" style="flex:none">
+        No tokens yet. Create one to connect an MCP client to this instance.
+      </p>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="col-side" style="flex:1 1 320px">
+    <form method="POST" action="/admin/tokens">
+      <div class="card elev-sm">
+        <span class="card-title">New token</span>
+
+        <label class="field">
+          <span>Name</span>
+          <input class="input" type="text" name="name" required maxlength="64"
+                 value="{{.FormName}}" placeholder="laptop, ci, desktop client">
+          <span class="form-hint">So you can tell it apart later.</span>
+        </label>
+
+        <div class="field" style="margin-bottom:0">
+          <span>Scopes</span>
+          {{range .Scopes}}
+          <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:13px">
+            <input type="checkbox" name="scopes" value="{{.Value}}" style="margin-top:3px"
+                   {{if index $.FormScopes .Value}}checked{{end}}>
+            <span>
+              <strong>{{.Value}}</strong>
+              <span class="dim" style="display:block;font-size:12px;line-height:1.45">{{.Description}}</span>
+            </span>
+          </label>
+          {{end}}
+          <span class="form-hint" style="margin-top:8px">
+            {{if .TTLDays}}Expires after {{.TTLDays}} days.{{else}}Does not expire — revoke it here when it is no longer needed.{{end}}
+          </span>
+        </div>
+
+        <button class="btn btn-primary btn-block" type="submit" style="margin-top:12px">
+          <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Create token
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
