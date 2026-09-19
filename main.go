@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -24,12 +25,14 @@ import (
 	"github.com/barancezayirli/dsforms/internal/config"
 	"github.com/barancezayirli/dsforms/internal/handler"
 	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/mcpserver"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/barancezayirli/dsforms/internal/webhook"
 	"github.com/go-chi/chi/v5"
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 // Compile-time checks that the concrete types satisfy the interfaces their
@@ -292,11 +295,22 @@ func newRouter(healthy healthCheck, templates map[string]*template.Template) *ch
 		})
 	})
 
-	// Request body size limit (64KB); backup import has its own 100MB limit.
+	// Request body size limit (64KB), with two exemptions.
+	//
+	// The cap is applied here, before any route runs, so a route that needs a
+	// different one cannot ask for it later: the body is already wrapped and a
+	// MaxBytesReader does not unwrap. Anything with its own limit has to be
+	// named here instead.
+	//
+	// Backup import sets its own 100MB limit inside the handler. /mcp sets its
+	// own on the SDK handler in internal/mcpserver — listed here so the limit
+	// has exactly one owner rather than two that disagree, with the smaller
+	// silently winning and the larger one reading as a setting that does
+	// something.
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Backup import sets its own limit inside the handler
-			if r.URL.Path == "/admin/backups/import" {
+			switch r.URL.Path {
+			case "/admin/backups/import", "/mcp":
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -336,6 +350,112 @@ func newRouter(healthy healthCheck, templates map[string]*template.Template) *ch
 	})
 
 	return r
+}
+
+// mountMCP wires POST /mcp, when the operator has asked for it.
+//
+// The route is absent entirely when MCP_ENABLED is unset, rather than present
+// and answering 401. A disabled feature that still has a live route is a thing
+// to keep auditing; one that was never registered is not, and `chi.Walk` says so.
+//
+// It sits outside the RequireAuth group deliberately: an MCP client presents a
+// bearer token, not a session cookie, and putting it inside would mean every
+// request redirecting to an HTML login page. The route table test in
+// routes_test.go only walks /admin*, so /mcp has its own refusal tests —
+// TestMCPRefusesEveryUnauthenticatedShape.
+func mountMCP(r *chi.Mux, d serverDeps) {
+	if !d.cfg.MCPEnabled {
+		return
+	}
+
+	// Its own limiter and its own guard, rather than the ones the submit path
+	// uses. An API client polling for new messages would otherwise evict the
+	// token buckets of real form submitters, and a form submitter's traffic
+	// would count towards an API client's budget. They are different populations
+	// with different shapes.
+	limiter := ratelimit.NewLimiter(mcpRateBurst, mcpRatePerMinute, time.Now)
+	limiter.StartCleanup(10*time.Minute, 30*time.Minute)
+
+	guard := ratelimit.NewLoginGuard(mcpMaxTokenFailures, mcpTokenLockout, time.Now)
+	guard.StartCleanup(30*time.Minute, 30*time.Minute)
+
+	srv := mcpserver.New(d.store, version)
+
+	r.Group(func(r chi.Router) {
+		r.Use(rateLimitMiddleware(limiter))
+		r.Use(mcpauth.RequireBearerToken(verifyMCPToken(d.store, guard), &mcpauth.RequireBearerTokenOptions{
+			// dsforms tokens may legitimately never expire — a client in a
+			// config file is not somewhere a rotation reminder reaches — and
+			// without this the SDK rejects every one of them for having no
+			// expiry, whatever the database says.
+			AllowMissingExpiration: true,
+		}))
+		r.Handle("/mcp", srv.Handler())
+	})
+
+	log.Printf("MCP endpoint enabled at %s/mcp", d.cfg.BaseURL)
+}
+
+// MCP rate limits. Deliberately more generous than the form-submit budget — a
+// client working through an inbox makes a burst of small calls, where a form
+// submitter making six requests a minute is already suspicious — and deliberately
+// finite, because the caller is an autonomous agent and a loop is one bug away.
+const (
+	mcpRateBurst     = 30
+	mcpRatePerMinute = 120
+
+	mcpMaxTokenFailures = 10
+	mcpTokenLockout     = 15 * time.Minute
+)
+
+// verifyMCPToken resolves a bearer token into the scopes it carries.
+//
+// The guard is checked before the database is touched, so a caller grinding
+// through token guesses is refused without a hash lookup per attempt. A correct
+// token clears its own IP's failure count, so one client's typo cannot lock out
+// a shared egress address for fifteen minutes once it is fixed.
+//
+// Every failure returns mcpauth.ErrInvalidToken and nothing else. Unknown, revoked
+// and expired are one answer on the wire: telling them apart is a distinction
+// available to whoever is guessing, and it is worth nothing to a legitimate
+// client, which either has a working token or does not.
+//
+// The token value itself is never logged, here or anywhere.
+func verifyMCPToken(st *store.Store, guard *ratelimit.LoginGuard) mcpauth.TokenVerifier {
+	return func(_ context.Context, token string, r *http.Request) (*mcpauth.TokenInfo, error) {
+		ip := handler.ExtractIP(r)
+		if guard.IsLocked(ip) {
+			return nil, fmt.Errorf("too many failed attempts: %w", mcpauth.ErrInvalidToken)
+		}
+
+		tok, err := st.GetAPIToken(token)
+		if err != nil {
+			guard.RecordFailure(ip)
+			if !errors.Is(err, store.ErrNotFound) {
+				// A database failure is not a bad token, and saying so lets an
+				// operator tell "someone is guessing" from "the disk is gone".
+				log.Printf("mcp: verifying a token: %v", err)
+			}
+			return nil, mcpauth.ErrInvalidToken
+		}
+		guard.RecordSuccess(ip)
+
+		// Best-effort, and deliberately not fatal: the request is already
+		// authenticated, and refusing it because a bookkeeping column would not
+		// write turns a cosmetic problem into an outage.
+		if err := st.TouchAPIToken(tok.ID); err != nil {
+			log.Printf("mcp: recording last use of token %s: %v", tok.ID, err)
+		}
+
+		return &mcpauth.TokenInfo{
+			Scopes: tok.Scopes,
+			UserID: tok.UserID,
+			// Left zero for a token that never expires, which is why the
+			// middleware is configured with AllowMissingExpiration. GetAPIToken
+			// has already refused an expired one.
+			Expiration: tok.ExpiresAt,
+		}, nil
+	}
 }
 
 func rateLimitMiddleware(l *ratelimit.Limiter) func(http.Handler) http.Handler {
@@ -771,6 +891,8 @@ func routes(d serverDeps) *chi.Mux {
 	}, d.templates)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
+
+	mountMCP(r, d)
 
 	// Embedded CSS, JS and the Inter woff2. Public and unauthenticated: the
 	// login page needs the stylesheet before anyone has a session.

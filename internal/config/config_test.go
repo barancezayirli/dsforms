@@ -245,3 +245,132 @@ func TestClampInt(t *testing.T) {
 		}
 	}
 }
+
+// TestMCPRefusesToRunInCleartext is the security decision of the whole MCP
+// feature, and it lives here because config is the only place that can refuse.
+//
+// dsforms never sees TLS — it is built to sit behind a proxy that terminates it,
+// which is why the session cookie's Secure flag is derived from BASE_URL rather
+// than from the connection. So BASE_URL is the only signal available, and a
+// long-lived bearer token in an Authorization header over plain http is
+// cleartext to everything between the client and that proxy.
+//
+// A warning in a container log is one nobody reads before exposing the port.
+// This is a refusal to start, with a named opt-out for localhost and private
+// networks, which is the bar AGENT.md §4 sets for a panic: something a running
+// process cannot fix.
+//
+// Does not use t.Parallel because t.Setenv is incompatible with it.
+func TestMCPRefusesToRunInCleartext(t *testing.T) {
+	tests := []struct {
+		name        string
+		baseURL     string
+		enabled     string
+		allowPlain  string
+		wantPanic   bool
+		wantEnabled bool
+	}{
+		{
+			name:        "https is fine",
+			baseURL:     "https://forms.example.com",
+			enabled:     "true",
+			wantEnabled: true,
+		},
+		{
+			name:      "http panics",
+			baseURL:   "http://forms.example.com",
+			enabled:   "true",
+			wantPanic: true,
+		},
+		{
+			name:      "an empty BASE_URL panics too",
+			baseURL:   "",
+			enabled:   "true",
+			wantPanic: true,
+		},
+		{
+			name:      "a scheme-less BASE_URL panics",
+			baseURL:   "forms.example.com",
+			enabled:   "true",
+			wantPanic: true,
+		},
+		{
+			// The prefix check must not be fooled by a host that merely starts
+			// with the letters.
+			name:      "httpsomething is not https",
+			baseURL:   "http://httpsomething.example.com",
+			enabled:   "true",
+			wantPanic: true,
+		},
+		{
+			name:        "the opt-out clears it",
+			baseURL:     "http://localhost:8080",
+			enabled:     "true",
+			allowPlain:  "true",
+			wantEnabled: true,
+		},
+		{
+			// The whole check is downstream of MCP_ENABLED: an instance that is
+			// not serving MCP has no token to leak, and must not be stopped from
+			// booting over one.
+			name:        "http is fine when MCP is off",
+			baseURL:     "http://forms.example.com",
+			enabled:     "",
+			wantEnabled: false,
+		},
+		{
+			name:        "off by default",
+			baseURL:     "https://forms.example.com",
+			enabled:     "",
+			wantEnabled: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setAllRequired(t)
+			t.Setenv("BASE_URL", tt.baseURL)
+			t.Setenv("MCP_ENABLED", tt.enabled)
+			t.Setenv("MCP_ALLOW_INSECURE", tt.allowPlain)
+
+			if tt.wantPanic {
+				defer func() {
+					if r := recover(); r == nil {
+						t.Fatal("MCP_ENABLED with a cleartext BASE_URL started anyway; " +
+							"every token this instance issues would cross the network in the clear")
+					}
+				}()
+				Load()
+				return
+			}
+
+			cfg := Load()
+			if cfg.MCPEnabled != tt.wantEnabled {
+				t.Errorf("MCPEnabled = %v, want %v", cfg.MCPEnabled, tt.wantEnabled)
+			}
+		})
+	}
+}
+
+// TestMCPTokenTTLDays. Zero means tokens never expire, which is a real choice
+// rather than an unset value, so it must survive Load.
+func TestMCPTokenTTLDays(t *testing.T) {
+	tests := []struct {
+		name string
+		set  string
+		want int
+	}{
+		{"unset means no expiry", "", 0},
+		{"explicit zero means no expiry", "0", 0},
+		{"a real value", "90", 90},
+		{"negative is clamped to no expiry", "-1", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setAllRequired(t)
+			t.Setenv("MCP_TOKEN_TTL_DAYS", tt.set)
+			if got := Load().MCPTokenTTLDays; got != tt.want {
+				t.Errorf("MCPTokenTTLDays = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/barancezayirli/dsforms/internal/screen"
 )
@@ -39,14 +40,34 @@ type Config struct {
 	BroadcastMaxAttempts int
 
 	BackupLocalDir string
+
+	// MCPEnabled turns on the /mcp endpoint. Off by default: an endpoint nobody
+	// is using is attack surface nobody is watching, and most instances will
+	// never want one.
+	MCPEnabled bool
+
+	// MCPAllowInsecure is the named opt-out from the cleartext refusal below.
+	// It exists for localhost and private-network deployments, where BASE_URL is
+	// legitimately http, and it is loud about it on every boot.
+	MCPAllowInsecure bool
+
+	// MCPTokenTTLDays is how long a newly minted API token lasts. 0 means it
+	// never expires, which is a real choice rather than an unset value — an MCP
+	// client in a config file is not somewhere a rotation reminder reaches.
+	MCPTokenTTLDays int
 }
 
 // Load reads configuration from environment variables.
 // It panics on missing required values so the app fails fast at startup.
 func Load() Config {
+	baseURL := os.Getenv("BASE_URL")
+	mcpEnabled := envOrBool("MCP_ENABLED", false)
+	mcpAllowInsecure := envOrBool("MCP_ALLOW_INSECURE", false)
+	requireMCPTransportSecurity(mcpEnabled, mcpAllowInsecure, baseURL)
+
 	return Config{
 		ListenAddr:           envOr("LISTEN_ADDR", ":8080"),
-		BaseURL:              os.Getenv("BASE_URL"),
+		BaseURL:              baseURL,
 		DBPath:               envOr("DB_PATH", "/data/dsforms.db"),
 		SecretKey:            requireEnv("SECRET_KEY"),
 		SMTPHost:             os.Getenv("SMTP_HOST"),
@@ -65,7 +86,75 @@ func Load() Config {
 		// is just as bad: a very high value silently disables the filter.
 		SpamThreshold: spamThreshold(),
 		DigestTo:      os.Getenv("DIGEST_TO"),
+
+		MCPEnabled:       mcpEnabled,
+		MCPAllowInsecure: mcpAllowInsecure,
+		// Clamped rather than rejected: a negative TTL has no sensible reading
+		// other than "no expiry", and a token born expired would be a refusal
+		// with no message attached to it.
+		MCPTokenTTLDays: max(envOrInt("MCP_TOKEN_TTL_DAYS", 0), 0),
 	}
+}
+
+// requireMCPTransportSecurity refuses to start an instance that would hand out
+// API tokens over cleartext.
+//
+// dsforms never terminates TLS — it is designed to sit behind a proxy that
+// does, which is why CreateSessionCookie derives the Secure flag from BASE_URL
+// rather than from the connection. BASE_URL is therefore the only statement
+// available about how clients actually reach this instance, and an MCP token
+// travels in an Authorization header on every single request.
+//
+// This is a panic rather than a warning for the reason AGENT.md §4 gives: it is
+// something a running process cannot fix, and a warning in a container log is
+// one nobody reads before exposing the port. The opt-out is named rather than
+// inferred from the hostname, because a private-network deployment behind a
+// proxy that does not rewrite BASE_URL is legitimate and a localhost check
+// cannot express it.
+func requireMCPTransportSecurity(enabled, allowInsecure bool, baseURL string) {
+	if !enabled {
+		// An instance not serving MCP has no token to leak, and must not be
+		// stopped from booting over a setting it is not using.
+		return
+	}
+	if strings.HasPrefix(baseURL, "https://") {
+		return
+	}
+	if allowInsecure {
+		log.Printf("config: ⚠  MCP is enabled with BASE_URL %q, which is not https. "+
+			"Every API token will cross the network in cleartext on every request. "+
+			"MCP_ALLOW_INSECURE=true is set, so this is allowed — only do this on "+
+			"localhost or a trusted private network.", baseURL)
+		return
+	}
+	panic(fmt.Sprintf(
+		"MCP_ENABLED is set but BASE_URL is %q, which is not https. API tokens are "+
+			"sent in an Authorization header on every request, so over plain http "+
+			"they are readable by anything between the client and this server. "+
+			"Set BASE_URL to the https:// address clients actually use, or set "+
+			"MCP_ALLOW_INSECURE=true if this instance is only reachable over "+
+			"localhost or a trusted private network.", baseURL))
+}
+
+// envOrBool reads a boolean environment variable.
+//
+// Only the spellings people actually write are true, and anything else is
+// false — including "yes", "on" and "1 " with a stray space. An unparseable
+// value is refused outright rather than silently read as false: MCP_ENABLED=ture
+// silently disabling the endpoint is a confusing afternoon, and the same typo on
+// MCP_ALLOW_INSECURE would silently re-enable a refusal the operator meant to
+// waive. This matches envOrInt, which panics on a malformed integer for the same
+// reason.
+func envOrBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		panic(fmt.Sprintf("environment variable %s must be true or false, got %q", key, v))
+	}
+	return b
 }
 
 // spamThreshold resolves SPAM_THRESHOLD. envOrInt only treats an empty string
