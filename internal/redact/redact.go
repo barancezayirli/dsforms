@@ -72,10 +72,10 @@ var AllReasons = []Reason{ReasonControlToken, ReasonInvisible, ReasonMalformed}
 // so an operator looking at the unmodified text in the admin can find them.
 // They are equal when a single line was affected.
 type Hit struct {
-	Field   string `json:"field"`
-	Line    int    `json:"line"`
-	Through int    `json:"through"`
-	Reason  Reason `json:"reason"`
+	Field   string
+	Line    int
+	Through int
+	Reason  Reason
 
 	// Matched names what was removed: the markers themselves, or the codepoints
 	// for invisible text. It is always printable ASCII, and never the
@@ -85,7 +85,7 @@ type Hit struct {
 	// the payload was aimed at, so a Matched that echoed the raw characters
 	// would carry the thing it is reporting. The control-token pattern below
 	// bounds the marker to a single underscore-joined word for the same reason.
-	Matched string `json:"matched"`
+	Matched string
 }
 
 // maxHitsPerField bounds the report.

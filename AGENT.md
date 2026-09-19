@@ -84,6 +84,7 @@ main.go        config, store, handler construction, routes, CLI — no logic
         ├── store                       every SQL statement in the project
         ├── screen                      the hold/accept decision, sealed
         ├── mcpserver                   the MCP surface; owns the token scopes
+        ├── redact                      what a stranger wrote that is not language
         ├── urlsafe                     which URLs we hand out or call
         └── ratelimit · flash · safe
 ```
@@ -99,9 +100,9 @@ Verified with `go list -f '{{join .Imports "\n"}}'`, not from memory:
 
 - `handler` → auth, backup, flash, mcpserver, ratelimit, safe, screen, store, urlsafe
 - `store` → screen · `config` → screen · `broadcaster` → safe, store
-- `mcpserver` → screen, store
+- `mcpserver` → redact, screen, store
 - `auth`, `mail`, `webhook` → store · `ratelimit` → safe
-- `backup`, `flash`, `safe` and `urlsafe` import nothing from `internal/`
+- `backup`, `flash`, `redact`, `safe` and `urlsafe` import nothing from `internal/`
 
 `backup` used to import `store`, for one parameter: `Import(s *store.Store, …)`,
 which called two methods on it. Naming those two in an interface `backup`
@@ -125,6 +126,14 @@ diagram claimed `mail` for two rounds because nobody did, and it claimed
   has no dependencies of its own and every layer needs it: a goroutine anywhere
   that is not guarded can take the process down. Anything else in a leaf is a
   design error.
+
+  `redact` is a leaf for the reason `safe` is one: two packages need it and
+  every other home inverts the direction. It is deliberately not part of
+  `screen`, which owns one thing — the hold/accept verdict. Removing a forged
+  chat turn before an MCP client reads a message is not a verdict, and filing it
+  under `screen` would imply these findings move the spam score. They do not,
+  and making them do so would silently change hold decisions on upgrade for
+  every existing deployment.
 
 - **`screen` is a sealed subtree, not a leaf.** Its public surface is one file;
   the implementation lives in `internal/screen/internal/{addr,rules,score,repeat}`,

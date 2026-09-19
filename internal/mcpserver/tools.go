@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/redact"
 	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -64,6 +65,39 @@ type submissionOut struct {
 	Threshold int               `json:"spam_threshold" jsonschema:"the score at or above which this submission would have been held"`
 	IP        string            `json:"ip,omitempty" jsonschema:"the submitter's IP address; omitted unless this instance is configured to share it"`
 	CreatedAt string            `json:"created_at" jsonschema:"RFC 3339"`
+
+	// Redacted is absent when nothing was removed, which is almost every
+	// submission. An empty array on all twenty-five rows of a listing is noise
+	// a model reads past twenty-five times, and that is how the one row that
+	// matters gets skimmed.
+	Redacted []hitOut `json:"redacted,omitempty" jsonschema:"present only when this submission carried something removed before you were shown it"`
+}
+
+// hitOut is one thing removed from a submission's field values.
+//
+// A separate type from redact.Hit for the reason stated above: a tool result is
+// a published interface, and renaming a field in an internal package should not
+// silently rename a key a client depends on.
+type hitOut struct {
+	Field   string `json:"field"`
+	Line    int    `json:"line" jsonschema:"1-based line number in the original value, which the operator can still see in the admin"`
+	Through int    `json:"through" jsonschema:"last line covered, inclusive; equal to line when one line was affected"`
+	Reason  string `json:"reason" jsonschema:"control_token for a forged chat turn, invisible for text that renders as nothing, malformed for bytes that are not valid UTF-8"`
+	Matched string `json:"matched" jsonschema:"what was removed, as printable ASCII — never the surrounding prose"`
+}
+
+func toHits(hits []redact.Hit) []hitOut {
+	if len(hits) == 0 {
+		return nil
+	}
+	out := make([]hitOut, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, hitOut{
+			Field: h.Field, Line: h.Line, Through: h.Through,
+			Reason: string(h.Reason), Matched: h.Matched,
+		})
+	}
+	return out
 }
 
 // signalOut is one recorded reason a submission was held.
@@ -77,22 +111,34 @@ type signalOut struct {
 // toSubmission is a method rather than a function so it can honour
 // Options.IncludeIPs. Every wire shape goes through it, which is what keeps the
 // withholding from being "everywhere except the one place someone forgot".
+//
+// Redaction rides the same funnel, for the same reason and with more at stake:
+// a tool added later that assembled its own wire shape would serve a submitter's
+// forged system turn straight into a model's context. Nothing else in this
+// package calls redact, so there is no second path to forget about.
+//
+// The stored submission is not modified — redact.Fields returns a new map — and
+// the admin renders the original in full. This is the only place the two
+// diverge, and it diverges in one direction: a client is never shown more than
+// the operator, only less.
 func (s *Server) toSubmission(sub store.Submission, formName string) submissionOut {
 	ip := sub.IP
 	if !s.opts.IncludeIPs {
 		ip = ""
 	}
+	fields, hits := redact.Fields(sub.Data)
 	return submissionOut{
 		ID:        sub.ID,
 		FormID:    sub.FormID,
 		FormName:  formName,
-		Fields:    sub.Data,
+		Fields:    fields,
 		Read:      sub.Read,
 		Held:      sub.IsHeld,
 		SpamScore: sub.SpamScore,
 		Threshold: sub.HeldThreshold,
 		IP:        ip,
 		CreatedAt: rfc3339(sub.CreatedAt),
+		Redacted:  toHits(hits),
 	}
 }
 
