@@ -673,3 +673,119 @@ fix; the reviewer's probe gave identical output before and after it.
   That blames the template instead of the connection, which breaks the §4 rule
   that messages must not point away from the truth. The code logged it the
   same way before it moved.
+
+---
+
+# MCP endpoint
+
+Branch: `claude/dsforms-mcp-messaging-u835vj`
+Docs: `docs/mcp.md`
+
+An MCP client can now connect to a dsforms instance with a token, list the
+messages it has not read, read one, mark it as spam, add a block rule, delete,
+and ask what is in the database. Six commits, one concern each.
+
+## What landed
+
+- **`api_tokens`** — one row is one bearer credential belonging to one user.
+  Only the SHA-256 hash is stored, through the same `hashToken` the sessions
+  table already uses. `ON DELETE CASCADE` is the point of binding a token to a
+  user rather than to the instance: deleting an account revokes its access in
+  the same statement.
+- **`MarkSpam`** — the one genuinely new behaviour. Nothing moved a submission
+  from an inbox into quarantine before; the hold decision was made once, on
+  arrival, and an operator who spotted spam afterwards could only delete it.
+- **`internal/mcpserver`** — fourteen tools across three scopes, the Streamable
+  HTTP handler, and the `Scope` value set.
+- **`/mcp`**, mounted only when `MCP_ENABLED` is set, behind the SDK's bearer
+  middleware with its own rate limiter and login guard.
+- **`/admin/tokens` and `dsforms token list|create|revoke`** — two ways to mint
+  a token, because they fail in different situations.
+
+## Decisions worth keeping
+
+**The fifth dependency.** `github.com/modelcontextprotocol/go-sdk` is the first
+addition to the four-dependency rule, and AGENT.md §4 now carries the argument:
+the protocol is not ours, third-party clients judge our correctness against a
+spec that revises on its own schedule, and being subtly wrong about it is
+invisible here and visible to every user. It cost seven transitive dependencies,
+all pure Go, so `CGO_ENABLED=0` and the single-file binary still hold.
+
+**Scope is enforced twice, and the halves are independent.** `tools/list` is
+built from the calling token's scopes, and every handler checks again before
+touching the store. Removing either one leaves the other catching it — verified
+by removing each and watching the *other* test fail.
+
+**`MarkSpam` leaves three columns alone**, each for a failure it would otherwise
+cause. `notified` stays 1, because an accepted submission's mail already went
+and the restore path re-sends on `!Notified` — clearing it would make every
+later restore deliver a duplicate. `spam_score` and `held_threshold` stay as
+they were, so a manually held submission shows a score *below* its threshold,
+which is the truth: no check fired, a person decided.
+
+**No restore tool.** A restore owes the email *and* the webhook the hold
+withheld, and that contract lives in `internal/handler`. A second implementation
+in `mcpserver` is exactly the duplicated shape §3 warns about, so `mark_spam`
+stays reversible only from the admin and says so in its own description.
+
+**`add_block_rule` passes `screen.KindBlock` as a constant, never from input.**
+An allow rule skips the block list and all scoring, and an IP allow rule turns
+one forgeable header into a bypass — the recorded risk in §6. There is no string
+a client can send to reach the permissive kind.
+
+**Cleartext is a refusal to start, not a warning.** dsforms never sees TLS, so
+`BASE_URL` is the only signal about how clients reach it, and a token rides an
+`Authorization` header on every request. `MCP_ALLOW_INSECURE=true` is the named
+opt-out, loud on every boot. A warning in a container log is one nobody reads
+before exposing the port.
+
+**`ParseScopes` drops, `ValidateScopes` reports.** Reading a token back from
+storage must reduce what it can do when it meets a value this build cannot
+interpret; a person ticking boxes deserves their typo named. Same value set,
+opposite handling of the unknown, because it is not the same question.
+
+## Two real bugs the tests caught
+
+- **A deadlock, not a failure.** `MarkSpam` classified a failed mark through
+  `s.conn()` while its own transaction still held the connection. An in-memory
+  store caps the pool at one, so the call *hung* rather than erroring. It now
+  classifies through the open transaction.
+- **One column, two Go types.** `modernc.org/sqlite` returns a `time.Time` from
+  a `DATETIME` column when the value parses and a bare `string` when it is `''`.
+  Scanning either concrete type is wrong in one direction and silently so: a
+  `*string` receives `database/sql`'s rendering of the `time.Time` in Go's own
+  layout, which fails to parse, so every token read as never used. Pinned by a
+  contract test, because it is the driver's behaviour and not ours.
+
+The template-execution test also caught `tokens.html` reading `.BaseURL` through
+a struct that did not carry it — which is the failure that test exists for, and
+it only fired because the fixture was populated enough to render the branch.
+
+## Verified by running it
+
+Not just green tests. On a real binary against a real database: the cleartext
+refusal fires with a message naming the fix; the CLI mints a token and names a
+scope typo rather than dropping it; two submissions posted through `/f/{id}`
+appear in `list_submissions` as unread; `mark_spam` moves one to quarantine and
+a repeat call says "already in quarantine"; the admin quarantine page renders
+"Marked as spam by hand — admin" with the flag icon; restoring leaves
+`is_held=0, read=0, notified=1` with the signal kept; a read-only token is
+offered 7 tools and gets "unknown tool" for `mark_spam` and `delete_submission`;
+a revoked token goes 200 → 401; `delete_quarantined` pointed at two inbox ids
+deletes 0 and says so; an empty id list is refused; and a token created through
+the page appears exactly once there and zero times on the next load.
+
+## Open
+
+- **`/mcp` has no OAuth resource metadata**, so no `WWW-Authenticate`
+  parameters are emitted on a 401. Static bearer tokens are what "use it with
+  any client" means here, and the SDK's `ProtectedResourceMetadataHandler` needs
+  an authorization server dsforms does not have. Clients that insist on the full
+  OAuth discovery flow will not connect.
+- **Submission IPs are returned by the read tools.** That is the operator's own
+  data and it is what an IP block rule is written from, but it is worth a second
+  look if tokens are ever shared more widely than one person.
+- **`MCP_TOKEN_TTL_DAYS` does not apply to CLI-minted tokens**, which are always
+  non-expiring. The CLI deliberately does not load config — it would then need
+  `SECRET_KEY`, making it useless on a fresh install, which is when it is most
+  wanted. Documented in `docs/mcp.md` rather than hidden.
