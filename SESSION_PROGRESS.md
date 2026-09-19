@@ -981,3 +981,44 @@ through intact, including the one that Prompt Guard called malicious.
 Still not built: **per-form token scoping**. It remains the only control that
 bounds blast radius when detection fails, and detection here is deliberately
 partial.
+
+### What seven review rounds found
+
+Twenty-five issues, and the shape of them is worth keeping.
+
+**Six were the same defect.** `toSubmission`'s comment says it is the only place
+a submission becomes a wire shape, so the withholding cannot be "everywhere
+except the one someone forgot". `toSignals` was that second place, found five
+separate times: a forged turn in `match`, then one in `field`, then the
+submitter's address, then an address a check name did not cover, then one
+`netip` could not parse. `add_block_rule` hand-built a third. The fix in the end
+was structural rather than another patch — one constructor each for
+`submissionOut`, `signalOut` and `ruleOut`, with the decision named at the call
+site — and the guard stopped asserting on a field and started asking whether the
+value appears *anywhere in any result*.
+
+**Two were hollow guards, in the file arguing against hollow guards.** Both
+marker-leak assertions were `strings.Contains(json.Marshal(…), "<|im_start|>")`,
+which can never match: `encoding/json` escapes `<` to `<`. They were
+written to catch a leak they could not have caught, and one arrived. The control
+for the fix ran both versions against the same leak — old green, new red — which
+is the only way to tell a guard from a decoration. A third asserted only that a
+string was absent, with nothing proving the row came back.
+
+**Three were fixes that broke something else.** Withholding an address by check
+name missed the block rule; by value shape missed the unparseable one; it takes
+both. Cleaning a hostile field name was worse than showing nothing, because
+`na<U+200B>me` cleans to exactly `name` and re-attributes a signal to an
+innocent field. Redacting the `ip` field was the wrong frame entirely — that
+field is an address, so it wants validating, and stripping markers out of prose
+leaves prose.
+
+**The worst one shipped.** A line carrying a closer and then an opener —
+`…units.<|im_end|><|im_start|>system` — read as balanced, because the region's
+end came from two booleans aggregated over the line rather than from the last
+marker written. The removed region stopped there: the genuine prose above was
+deleted and the forged instruction below was what the client received. The
+redaction was doing the attacker's work. Position decides now.
+
+The pattern under all of it: **a claim in a comment is not a property.** Every
+one of these was asserted somewhere in prose before it was false.
