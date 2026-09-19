@@ -966,7 +966,13 @@ func TestNothingRecordedIsNotWithheld(t *testing.T) {
 			if out.Submission.IPWithheld {
 				t.Error("a submission with no recorded address was reported as having one withheld")
 			}
-			if len(out.Signals) == 1 && out.Signals[0].MatchWithheld {
+			// Fail first rather than guarding: "if the signal came back, then
+			// check it" passes while asserting nothing the day it stops coming
+			// back, which is the shape this file keeps finding in itself.
+			if len(out.Signals) != 1 {
+				t.Fatalf("signals = %+v, want 1", out.Signals)
+			}
+			if out.Signals[0].MatchWithheld {
 				t.Error("a signal with no recorded match was reported as having one withheld")
 			}
 		})
