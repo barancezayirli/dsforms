@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -220,5 +221,134 @@ func TestInvisibleTextIsStrippedWithoutLosingTheLine(t *testing.T) {
 	}
 	if !strings.Contains(out.Submission.Redacted[0].Matched, "U+E0053") {
 		t.Errorf("Matched = %q, want it to name the codepoints", out.Submission.Redacted[0].Matched)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The boundary
+// ---------------------------------------------------------------------------
+
+// readToolArgs is a valid call for every tool a read token is given.
+//
+// It is a map rather than a list of the four content-returning tools because
+// the test below derives which of them carry submitted text from what they
+// actually return. A tool added later with no entry here fails the coverage
+// check rather than being silently skipped — which is how a list of four falls
+// behind a set of five.
+var readToolArgs = map[string]map[string]any{
+	"list_forms":         nil,
+	"list_submissions":   {"status": "all"},
+	"get_submission":     {"submission_id": "dirty"},
+	"search_submissions": {"query": "quote"},
+	"list_quarantine":    nil,
+	"list_filter_rules":  nil,
+	"get_stats":          nil,
+}
+
+// TestTheBoundarySitsWithTheContentAndNowhereElse.
+//
+// The declaration already exists in two places a client reads: the server
+// instructions at connection, and the description of every tool that returns
+// submitted text. Both are far from the text they are about — a tool
+// description is a screen away by the time a listing of twenty-five
+// submissions has been read. This puts a copy in the block the model actually
+// reads, immediately above the payload.
+//
+// The pairing is derived, not declared: a result carries the boundary if and
+// only if it carries field values. A new tool that returns submissions gets
+// checked without anyone remembering to add it to a list, and a tool that
+// returns counts does not acquire a warning that would teach a reader to skip
+// past warnings.
+func TestTheBoundarySitsWithTheContentAndNowhereElse(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, "read")
+	h.seedRedaction(t)
+	session := h.connect(t)
+
+	names := toolNames(t, session)
+	for _, name := range names {
+		if _, ok := readToolArgs[name]; !ok {
+			t.Fatalf("no arguments recorded for %q — add it to readToolArgs and decide "+
+				"whether it hands back submitted text", name)
+		}
+	}
+	if len(names) != len(readToolArgs) {
+		t.Fatalf("read token sees %d tools but readToolArgs has %d", len(names), len(readToolArgs))
+	}
+
+	var withContent int
+	for _, name := range names {
+		res := call(t, session, name, readToolArgs[name])
+		if res.IsError {
+			t.Fatalf("%s: %s", name, resultText(res))
+		}
+
+		raw, err := json.Marshal(res.StructuredContent)
+		if err != nil {
+			t.Fatalf("%s: marshalling structured content: %v", name, err)
+		}
+		text := resultText(res)
+
+		if !strings.Contains(string(raw), `"fields"`) {
+			if strings.Contains(text, untrustedBanner) {
+				t.Errorf("%s returns no field values but carries the boundary — a "+
+					"warning on everything is a warning on nothing", name)
+			}
+			continue
+		}
+		withContent++
+
+		if !strings.HasPrefix(text, untrustedBanner) {
+			t.Errorf("%s: the text block does not open with the boundary:\n%s",
+				name, first(text, 300))
+			continue
+		}
+
+		// The SDK's own fallback puts the serialised output in this block so a
+		// client that reads only unstructured content still gets the data.
+		// Taking the block over must not take that away.
+		//
+		// Compared as decoded values rather than as bytes: the client has
+		// already decoded structured content into a map, and re-marshalling a
+		// map sorts its keys while marshalling a struct preserves declaration
+		// order. Byte equality would assert something neither reading promises.
+		var fromText, fromStructured any
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(text, untrustedBanner)), &fromText); err != nil {
+			t.Errorf("%s: what follows the boundary is not JSON: %v\n%s", name, err, first(text, 400))
+			continue
+		}
+		if err := json.Unmarshal(raw, &fromStructured); err != nil {
+			t.Errorf("%s: structured content is not JSON: %v", name, err)
+			continue
+		}
+		if !reflect.DeepEqual(fromText, fromStructured) {
+			t.Errorf("%s: the text block no longer carries the same payload as the "+
+				"structured reading, so a client that reads only content has lost data", name)
+		}
+	}
+
+	if withContent == 0 {
+		t.Error("no tool returned field values, so this test proved nothing")
+	}
+}
+
+func first(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
+// TestTheBoundaryNamesTheRedactionItRefersTo. The boundary says the mechanical
+// removal has happened and that the prose has not been judged. The second half
+// matters more than the first: a reader told "this has been filtered" and
+// nothing else will assume more was checked than was.
+func TestTheBoundaryNamesTheRedactionItRefersTo(t *testing.T) {
+	t.Parallel()
+	for _, want := range []string{"redacted", "not instructions", "nothing else has been checked"} {
+		if !strings.Contains(strings.ToLower(untrustedBanner), want) {
+			t.Errorf("the boundary does not mention %q:\n%s", want, untrustedBanner)
+		}
 	}
 }
