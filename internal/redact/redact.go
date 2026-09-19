@@ -164,30 +164,6 @@ func Any(data map[string]string) bool {
 	return false
 }
 
-// Lines returns, per field, the 1-based line numbers that Fields would remove
-// or alter. Fields with nothing to report are absent rather than present and
-// empty.
-//
-// The admin uses this to mark the original without modifying it.
-func Lines(data map[string]string) map[string][]int {
-	out := make(map[string][]int)
-	for k, v := range data {
-		_, hits := value(k, v)
-		var nums []int
-		for _, h := range hits {
-			for n := h.Line; n <= h.Through; n++ {
-				nums = append(nums, n)
-			}
-		}
-		if len(nums) == 0 {
-			continue
-		}
-		slices.Sort(nums)
-		out[k] = slices.Compact(nums)
-	}
-	return out
-}
-
 // value is the whole decision, for one field.
 //
 // The order of the two passes is load-bearing. Invisible characters come out
@@ -260,10 +236,20 @@ func capHits(hits []Hit) []Hit {
 //   - Alpaca-style "### Instruction:". A person writing "### Instructions for
 //     our team are attached" produces it, and one such message is a worse
 //     outcome than every attack this line would have caught.
-//   - "Human:" or "Assistant:" with text after the colon. That is what a pasted
-//     chat transcript looks like, and what "Assistant: Jane Doe, Office
-//     Manager" looks like in a signature. Only the bare label on its own line —
-//     the actual turn delimiter — is matched.
+//
+//   - "Human:", "Assistant:" or "System:" on a line of their own. These were
+//     matched until review pointed out that a bare "system:" line is ordinary
+//     YAML: a support message pasting a compose file lost everything from
+//     "system:" to the end of the message, phone number and signature
+//     included. The same shape appears in pasted chat transcripts and in
+//     "Assistant: Jane Doe, Office Manager" signatures.
+//
+//     There is no version of this pattern that both catches the attack and
+//     leaves that message alone, and the attack it catches is the legacy
+//     prompt-concatenation one — an MCP client passes tool output as
+//     structured messages, where a line of text cannot start a turn. Zero
+//     false positives is the property this package is built on, so the family
+//     is gone rather than narrowed.
 var (
 	// angleToken matches the <|name|> family generically rather than from a
 	// list of known names, because the syntax is the tell and the list goes
@@ -274,9 +260,6 @@ var (
 
 	// bracketToken is the Llama 2 / Mistral family.
 	bracketToken = regexp.MustCompile(`(?i)\[\s*/?\s*INST\s*\]|<<\s*/?\s*SYS\s*>>`)
-
-	// bareTurnLabel is a turn delimiter alone on its line, and nothing else.
-	bareTurnLabel = regexp.MustCompile(`(?i)^[ \t]*(?:human|assistant|system)[ \t]*:[ \t]*\r?$`)
 )
 
 // openers name a turn. A line carrying one with no closer after it is the
@@ -312,10 +295,6 @@ func lineMarkers(line string) (found []string, opens, closes bool) {
 		} else {
 			opens = true
 		}
-	}
-	if bareTurnLabel.MatchString(line) {
-		found = append(found, strings.TrimSpace(line))
-		opens = true
 	}
 	return found, opens, closes
 }
@@ -380,16 +359,22 @@ func stripForgedTurn(field, text string) (string, *Hit) {
 func summarise(items []string) string {
 	const max = 6
 	var out []string
-	for _, it := range items {
+	truncated := false
+	for i, it := range items {
 		if !slices.Contains(out, it) {
 			out = append(out, it)
 		}
-		if len(out) == max {
+		if len(out) == max && i < len(items)-1 {
+			// Only when something is genuinely left unlisted. Comparing counts
+			// instead — which is what this did until review — appended "..." to
+			// any line carrying the same marker twice, claiming omitted markers
+			// that do not exist.
+			truncated = true
 			break
 		}
 	}
 	s := strings.Join(out, " ")
-	if len(items) > len(out) {
+	if truncated {
 		s += " ..."
 	}
 	return s
@@ -524,31 +509,42 @@ func stripInvisible(field, text string) (string, []Hit) {
 // start of s, which begins with ESC.
 //
 // CSI (ESC [) runs to a byte in 0x40-0x7E; OSC (ESC ]) runs to BEL or ST;
-// anything else is ESC plus one byte. An unterminated sequence consumes the
-// rest of the string, which is the right answer: there is nothing after it that
-// a terminal would have shown.
+// anything else is ESC plus one byte.
+//
+// Every scan stops at a newline, and an unterminated sequence consumes only the
+// rest of its own line. Review found the alternative: running to the end of the
+// string swallowed visible text on later lines ("hello\n\x1b[\nworld" became
+// "hello\norld") and, worse, deleted the newlines with it — which shifted every
+// line number after the escape, so the report no longer indexed the original
+// value and the admin quoted innocent prose under "Hidden instructions in this
+// message" while leaving the real marker out. A terminal escape does not span
+// lines anyway.
 func escapeLen(s string) int {
-	if len(s) < 2 {
-		return len(s)
+	end := strings.IndexByte(s, '\n')
+	if end < 0 {
+		end = len(s)
+	}
+	if end < 2 {
+		return end
 	}
 	switch s[1] {
 	case '[':
-		for i := 2; i < len(s); i++ {
+		for i := 2; i < end; i++ {
 			if s[i] >= 0x40 && s[i] <= 0x7E {
 				return i + 1
 			}
 		}
-		return len(s)
+		return end
 	case ']':
-		for i := 2; i < len(s); i++ {
+		for i := 2; i < end; i++ {
 			if s[i] == 0x07 {
 				return i + 1
 			}
-			if s[i] == 0x1B && i+1 < len(s) && s[i+1] == '\\' {
+			if s[i] == 0x1B && i+1 < end && s[i+1] == '\\' {
 				return i + 2
 			}
 		}
-		return len(s)
+		return end
 	default:
 		return 2
 	}

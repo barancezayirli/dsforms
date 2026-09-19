@@ -189,6 +189,15 @@ are deliberately left alone — they shape Persian and Arabic script and build
 emoji sequences, and a filter that ate them would mangle a correctly spelled
 name.
 
+A bare `Human:` or `System:` line is **not** matched, though it is a turn
+delimiter in the legacy prompt-concatenation format. A bare `system:` line is
+also ordinary YAML, and matching it took the rest of a support message — phone
+number and signature — along with a pasted compose file. There is no narrowing
+that keeps both, because the attack and the compose file are the same
+characters, and an MCP client passes tool output as structured messages where a
+line of text cannot start a turn. Zero false positives is the property this is
+built on.
+
 Each submission that was touched carries a `redacted` list saying what went,
 which field, and which lines. **Nothing is changed in the database.** The admin
 shows the message exactly as it was sent, with a panel naming the lines a client

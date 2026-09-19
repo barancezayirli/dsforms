@@ -197,10 +197,26 @@ func (s *Server) toSubmission(sub store.Submission, formName string) submissionO
 	}
 }
 
+// toSignals renders a submission's spam breakdown, redacting the matched text.
+//
+// Match is a slice of the field that tripped the check — CheckURLInName records
+// up to 200 runes of the raw name — so it is submitted text wearing a different
+// key, and it went out unredacted until review found it. A submitter could put
+// a forged turn in "name" and have the marker delivered verbatim in
+// signals[].match while the identical marker was stripped from fields. That was
+// the second path toSubmission's comment claimed did not exist.
+//
+// The hits are discarded rather than reported: Match is derived from a field,
+// so whatever was removed here is already named in that submission's own
+// redacted list, and reporting it twice would describe one payload as two.
 func toSignals(sigs []store.SpamSignal) []signalOut {
 	out := make([]signalOut, 0, len(sigs))
 	for _, s := range sigs {
-		out = append(out, signalOut{Check: string(s.Check), Field: s.Field, Match: s.Match, Weight: s.Weight})
+		clean, _ := redact.Fields(map[string]string{"match": s.Match})
+		out = append(out, signalOut{
+			Check: string(s.Check), Field: s.Field,
+			Match: clean["match"], Weight: s.Weight,
+		})
 	}
 	return out
 }
@@ -757,7 +773,8 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 		Description: "Move an accepted submission into spam quarantine. " +
 			"It is not deleted: it can be restored from the dsforms admin, which " +
 			"is also the only place that can restore it. The submission keeps the " +
-			"spam score it was originally given, and a record is kept of who marked it.",
+			"spam score it was originally given, and a record is kept of who marked it." +
+			untrustedNote,
 		Annotations: mutating(),
 	}, func(_ context.Context, req *mcp.CallToolRequest, in markSpamIn) (*mcp.CallToolResult, markSpamOut, error) {
 		if err := requireScope(req, ScopeWrite); err != nil {
@@ -779,11 +796,11 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 		if err != nil {
 			return nil, markSpamOut{}, err
 		}
-		return nil, markSpamOut{
+		return guarded(markSpamOut{
 			OK:         true,
 			Message:    "Moved to quarantine. Restore it from the dsforms admin if this was wrong.",
 			Submission: s.toSubmission(sub, names[sub.FormID]),
-		}, nil
+		})
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{

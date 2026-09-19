@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/store"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // The payload is the shape that was actually planted against a live client on
@@ -228,14 +230,17 @@ func TestInvisibleTextIsStrippedWithoutLosingTheLine(t *testing.T) {
 // The boundary
 // ---------------------------------------------------------------------------
 
-// readToolArgs is a valid call for every tool a read token is given.
+// toolArgs is a valid call for every tool the server has, at every scope.
 //
-// It is a map rather than a list of the four content-returning tools because
-// the test below derives which of them carry submitted text from what they
-// actually return. A tool added later with no entry here fails the coverage
-// check rather than being silently skipped — which is how a list of four falls
-// behind a set of five.
-var readToolArgs = map[string]map[string]any{
+// It covers write and delete as well as read, and that is the point: mark_spam
+// returns a full submission and had neither the boundary nor the note on its
+// description, and nothing caught it because this test used to walk read-scope
+// tools only. A guard that inspects part of the surface reports on part of the
+// surface.
+//
+// Each mutating tool gets its own target so the calls cannot interfere in
+// whatever order the listing comes back in.
+var toolArgs = map[string]map[string]any{
 	"list_forms":         nil,
 	"list_submissions":   {"status": "all"},
 	"get_submission":     {"submission_id": "dirty"},
@@ -243,6 +248,42 @@ var readToolArgs = map[string]map[string]any{
 	"list_quarantine":    nil,
 	"list_filter_rules":  nil,
 	"get_stats":          nil,
+	"mark_read":          {"submission_id": "clean"},
+	"mark_all_read":      {"form_id": "contact"},
+	"mark_spam":          {"submission_id": "spamvictim"},
+	"add_block_rule":     {"type": "email", "value": "blocked@example.invalid"},
+	"delete_submission":  {"submission_id": "delvictim"},
+	"delete_quarantined": {"submission_ids": []any{"heldvictim"}},
+}
+
+// seedBoundary gives every tool something to return, with the payload in every
+// submission so any result carrying field values is required to carry the
+// boundary too.
+func (h *harness) seedBoundary(t *testing.T) {
+	t.Helper()
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	raw, err := json.Marshal(map[string]string{"name": "Ada", "email": "ada@example.com", "message": payloadText})
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, id := range []string{"clean", "dirty", "spamvictim", "delvictim"} {
+		if err := h.store.CreateSubmission(store.Submission{
+			ID: id, FormID: "contact", RawData: string(raw), CreatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateSubmission(%s): %v", id, err)
+		}
+	}
+	for _, id := range []string{"dirtyheld", "heldvictim"} {
+		if err := h.store.CreateHeldSubmission(
+			store.Submission{ID: id, FormID: "contact", RawData: string(raw), CreatedAt: now},
+			9, 6, []store.SpamSignal{{Check: "markup", Field: "message", Match: "x", Weight: 9}},
+		); err != nil {
+			t.Fatalf("CreateHeldSubmission(%s): %v", id, err)
+		}
+	}
 }
 
 // TestTheBoundarySitsWithTheContentAndNowhereElse.
@@ -262,26 +303,27 @@ var readToolArgs = map[string]map[string]any{
 func TestTheBoundarySitsWithTheContentAndNowhereElse(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t, "read")
-	h.seedRedaction(t)
+	h := newHarness(t, "read", "write", "delete")
+	h.seedBoundary(t)
 	session := h.connect(t)
 
 	names := toolNames(t, session)
 	for _, name := range names {
-		if _, ok := readToolArgs[name]; !ok {
-			t.Fatalf("no arguments recorded for %q — add it to readToolArgs and decide "+
+		if _, ok := toolArgs[name]; !ok {
+			t.Fatalf("no arguments recorded for %q — add it to toolArgs and decide "+
 				"whether it hands back submitted text", name)
 		}
 	}
-	if len(names) != len(readToolArgs) {
-		t.Fatalf("read token sees %d tools but readToolArgs has %d", len(names), len(readToolArgs))
+	if len(names) != len(toolArgs) {
+		t.Fatalf("an all-scopes token sees %d tools but toolArgs has %d", len(names), len(toolArgs))
 	}
 
-	var withContent int
+	var withContent []string
 	for _, name := range names {
-		res := call(t, session, name, readToolArgs[name])
+		res := call(t, session, name, toolArgs[name])
 		if res.IsError {
-			t.Fatalf("%s: %s", name, resultText(res))
+			t.Errorf("%s: %s", name, resultText(res))
+			continue
 		}
 
 		raw, err := json.Marshal(res.StructuredContent)
@@ -297,12 +339,18 @@ func TestTheBoundarySitsWithTheContentAndNowhereElse(t *testing.T) {
 			}
 			continue
 		}
-		withContent++
+		withContent = append(withContent, name)
 
 		if !strings.HasPrefix(text, untrustedBanner) {
 			t.Errorf("%s: the text block does not open with the boundary:\n%s",
 				name, first(text, 300))
 			continue
+		}
+		// A tool that hands back submitted text also says so on its description,
+		// which is the copy a client reads while deciding whether to call it.
+		if !strings.Contains(strings.ToLower(toolDescription(t, session, name)), "not instructions") {
+			t.Errorf("%s returns submitted text but its description does not say it is "+
+				"data rather than instructions", name)
 		}
 
 		// The SDK's own fallback puts the serialised output in this block so a
@@ -328,9 +376,29 @@ func TestTheBoundarySitsWithTheContentAndNowhereElse(t *testing.T) {
 		}
 	}
 
-	if withContent == 0 {
-		t.Error("no tool returned field values, so this test proved nothing")
+	// Named rather than counted: mark_spam is the one that was missing, and a
+	// bare count would go on passing if it dropped out of the set again.
+	for _, want := range []string{"list_submissions", "get_submission", "search_submissions",
+		"list_quarantine", "mark_spam"} {
+		if !slices.Contains(withContent, want) {
+			t.Errorf("%s did not return field values, so the boundary was never checked on it", want)
+		}
 	}
+}
+
+func toolDescription(t *testing.T, session *mcp.ClientSession, name string) string {
+	t.Helper()
+	res, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tool := range res.Tools {
+		if tool.Name == name {
+			return tool.Description
+		}
+	}
+	t.Fatalf("no tool named %q", name)
+	return ""
 }
 
 func first(s string, n int) string {
@@ -349,6 +417,56 @@ func TestTheBoundaryNamesTheRedactionItRefersTo(t *testing.T) {
 	for _, want := range []string{"redacted", "not instructions", "nothing else has been checked"} {
 		if !strings.Contains(strings.ToLower(untrustedBanner), want) {
 			t.Errorf("the boundary does not mention %q:\n%s", want, untrustedBanner)
+		}
+	}
+}
+
+// TestSignalMatchesAreRedactedToo. Found in review, and it is the exact defect
+// toSubmission's comment claimed could not exist: a second path that builds a
+// wire shape out of submitted text without going through redact.
+//
+// A spam signal's match is a slice of the field that tripped it — CheckURLInName
+// records up to 200 runes of the raw name — so a submitter who puts a forged
+// turn in "name" gets it delivered verbatim in signals[].match while the
+// identical marker is stripped from fields.
+func TestSignalMatchesAreRedactedToo(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, "read")
+	if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	raw, err := json.Marshal(map[string]string{"name": payloadText, "message": "hi"})
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	if err := h.store.CreateHeldSubmission(
+		store.Submission{ID: "held", FormID: "contact", RawData: string(raw), CreatedAt: time.Now().UTC()},
+		9, 6,
+		[]store.SpamSignal{{Check: "url_in_name", Field: "name", Match: payloadText, Weight: 9}},
+	); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	session := h.connect(t)
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"get_submission", map[string]any{"submission_id": "held"}},
+		{"list_quarantine", nil},
+	} {
+		res := call(t, session, tc.tool, tc.args)
+		raw, err := json.Marshal(res.StructuredContent)
+		if err != nil {
+			t.Fatalf("%s: marshalling: %v", tc.tool, err)
+		}
+		if strings.Contains(string(raw), payloadSecret) {
+			t.Errorf("%s: the payload reached the client through a signal match:\n%s", tc.tool, raw)
+		}
+		if strings.Contains(string(raw), payloadOpener) {
+			t.Errorf("%s: the marker reached the client through a signal match:\n%s", tc.tool, raw)
 		}
 	}
 }
