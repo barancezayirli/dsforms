@@ -816,11 +816,15 @@ func TestAnIPFieldThatIsNotAnAddressIsWithheld(t *testing.T) {
 			if err := h.store.CreateForm(store.Form{ID: "contact", Name: "Contact", EmailTo: "me@example.com"}); err != nil {
 				t.Fatalf("CreateForm: %v", err)
 			}
-			if err := h.store.CreateSubmission(store.Submission{
-				ID: "s", FormID: "contact", RawData: `{"message":"hi"}`,
-				IP: tc.stored, CreatedAt: time.Now().UTC(),
-			}); err != nil {
-				t.Fatalf("CreateSubmission: %v", err)
+			// Held, with a repeat_ip signal carrying the same recorded value:
+			// the header leaves by two routes and both must answer the same.
+			if err := h.store.CreateHeldSubmission(
+				store.Submission{ID: "s", FormID: "contact", RawData: `{"message":"hi"}`,
+					IP: tc.stored, CreatedAt: time.Now().UTC()},
+				9, 6,
+				[]store.SpamSignal{{Check: "repeat_ip", Match: tc.stored, Weight: 6}},
+			); err != nil {
+				t.Fatalf("CreateHeldSubmission: %v", err)
 			}
 
 			session := h.connect(t)
@@ -843,6 +847,19 @@ func TestAnIPFieldThatIsNotAnAddressIsWithheld(t *testing.T) {
 				if h.Field == "ip" {
 					t.Errorf("a redaction was reported against %q, which is not a submitted field", h.Field)
 				}
+			}
+
+			// The other route. A response cannot report ip_withheld and then
+			// hand the identical text back two keys later.
+			if len(out.Signals) != 1 {
+				t.Fatalf("signals = %+v, want the seeded repeat_ip", out.Signals)
+			}
+			if out.Signals[0].Match != tc.wantIP {
+				t.Errorf("signal match = %q, want %q — the same header, so the same answer",
+					out.Signals[0].Match, tc.wantIP)
+			}
+			if out.Signals[0].MatchWithheld != tc.withheld {
+				t.Errorf("signal match_withheld = %v, want %v", out.Signals[0].MatchWithheld, tc.withheld)
 			}
 		})
 	}

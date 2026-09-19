@@ -148,13 +148,6 @@ type hitOut struct {
 	Matched string `json:"matched" jsonschema:"what was removed, as printable ASCII — never the surrounding prose"`
 }
 
-// looksLikeAddress reports whether text is an IP address or a CIDR network.
-//
-// Used to decide whether a spam signal's match is the sort of thing
-// MCP_INCLUDE_IPS exists to withhold. A false positive here — an operator's
-// keyword rule that happens to be "192.168.1.1" — costs one withheld match on
-// an instance that has already said it does not want addresses sent, which is
-// the harmless direction.
 // sanitiseIP returns the recorded value if it is an address, and reports
 // whether it was withheld for not being one.
 //
@@ -175,6 +168,13 @@ func sanitiseIP(stored string) (string, bool) {
 	return "", true
 }
 
+// looksLikeAddress reports whether text is an IP address or a CIDR network.
+//
+// Used to decide whether a spam signal's match is the sort of thing
+// MCP_INCLUDE_IPS exists to withhold. A false positive here — an operator's
+// keyword rule that happens to be "192.168.1.1" — costs one withheld match on
+// an instance that has already said it does not want addresses sent, which is
+// the harmless direction.
 func looksLikeAddress(text string) bool {
 	if _, err := netip.ParseAddr(text); err == nil {
 		return true
@@ -323,18 +323,25 @@ func (s *Server) toSignals(sigs []store.SpamSignal) []signalOut {
 			field, withheld = "", true
 		}
 
-		// Two tests, and it takes both.
-		//
-		// The check name alone was the first fix and missed the block rule:
-		// screen stamps a matched rule's value as the match, so an ip rule's
-		// match is the submitter's address and a cidr rule's is the network
-		// containing it. The value's shape alone was the second and missed the
-		// case the first had covered: ExtractIP stores whatever the proxy
-		// header said, unvalidated, so a stored "203.0.113.9:41234" is an
-		// address that netip cannot parse. Either test alone is a regression
-		// against the other.
 		match, matchWithheld := clean["match"], false
-		if !s.opts.IncludeIPs && (sig.Check == screen.CheckRepeatIP || looksLikeAddress(match)) {
+		switch {
+		case sig.Check == screen.CheckRepeatIP:
+			// This match is the same recorded header as the submission's ip
+			// field, so it gets the same treatment: validated, not redacted.
+			// Leaving it on redaction alone meant a response could report
+			// ip_withheld while handing the identical prose back two keys
+			// later, which is the frame this was supposed to have fixed.
+			addr, notAnAddress := sanitiseIP(sig.Match)
+			if notAnAddress || !s.opts.IncludeIPs {
+				match, matchWithheld = "", true
+			} else {
+				match = addr
+			}
+
+		case !s.opts.IncludeIPs && looksLikeAddress(match):
+			// Any other check that happens to have recorded an address —
+			// a matched ip or cidr block rule stamps the rule's value, which
+			// for those types is the submitter's address or its network.
 			match, matchWithheld = "", true
 		}
 
