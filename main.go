@@ -511,7 +511,19 @@ func verifyMCPToken(st *store.Store, guard *ratelimit.LoginGuard) mcpauth.TokenV
 			// cannot tell two of someone's clients apart — which is exactly the
 			// question asked when one of them misbehaves. The key is owned by
 			// mcpserver, the only reader.
-			Extra: map[string]any{mcpserver.TokenNameKey: tok.Name},
+			//
+			// The forms it may reach travel the same way. A token with none
+			// recorded reaches every form — see store.ParseFormScope, which
+			// owns that reading — so an upgrade does not revoke what is already
+			// issued, while mcpserver's zero FormAccess still denies, because
+			// the one thing this must not do is grant on a wiring mistake.
+			Extra: map[string]any{
+				mcpserver.TokenNameKey: tok.Name,
+				mcpserver.FormsKey: mcpserver.FormAccess{
+					All: tok.Scope().All(),
+					IDs: tok.FormIDs,
+				},
+			},
 			// Left zero for a token that never expires, which is why the
 			// middleware is configured with AllowMissingExpiration. GetAPIToken
 			// has already refused an expired one.

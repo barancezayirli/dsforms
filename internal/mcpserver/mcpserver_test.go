@@ -62,7 +62,18 @@ func newHarnessNamed(t *testing.T, tokenName string, scopes ...string) *harness 
 	return newHarnessOpts(t, Options{}, tokenName, scopes...)
 }
 
+// newHarnessScoped stands the endpoint up with a token bounded to these forms.
+func newHarnessScoped(t *testing.T, formIDs []string, scopes ...string) *harness {
+	t.Helper()
+	return newHarnessFull(t, Options{}, "test-token", FormAccess{IDs: formIDs}, scopes...)
+}
+
 func newHarnessOpts(t *testing.T, opts Options, tokenName string, scopes ...string) *harness {
+	t.Helper()
+	return newHarnessFull(t, opts, tokenName, FormAccess{All: true}, scopes...)
+}
+
+func newHarnessFull(t *testing.T, opts Options, tokenName string, forms FormAccess, scopes ...string) *harness {
 	t.Helper()
 
 	st, err := store.New(":memory:")
@@ -82,7 +93,7 @@ func newHarnessOpts(t *testing.T, opts Options, tokenName string, scopes ...stri
 		}
 		return &auth.TokenInfo{
 			Scopes: scopes, UserID: admin.ID,
-			Extra: map[string]any{TokenNameKey: tokenName},
+			Extra: map[string]any{TokenNameKey: tokenName, FormsKey: forms},
 		}, nil
 	}
 	// AllowMissingExpiration mirrors the production wiring: dsforms tokens may
@@ -374,18 +385,21 @@ func TestEveryScopeSubsetHasAServer(t *testing.T) {
 	t.Parallel()
 	s := New(nil, "test", Options{})
 
-	want := 1
+	// One per scope subset, twice: whether a token is bounded to particular
+	// forms decides which tools it is offered as much as its scopes do.
+	want := 2
 	for range AllScopes {
 		want *= 2
 	}
 	if len(s.byScope) != want {
-		t.Errorf("built %d servers for %d scopes, want %d (one per subset)", len(s.byScope), len(AllScopes), want)
+		t.Errorf("built %d servers for %d scopes, want %d (one per subset, bounded and not)",
+			len(s.byScope), len(AllScopes), want)
 	}
-	// Spot-check the two ends, since those are the ones a subset generator that
+	// Spot-check the corners, since those are the ones a subset generator that
 	// silently drops a case is most likely to lose.
-	for _, key := range []string{"", "read,write,delete"} {
+	for _, key := range []string{"", "read,write,delete", "|forms", "read,write,delete|forms"} {
 		if _, ok := s.byScope[key]; !ok {
-			t.Errorf("no server built for the scope set %q", key)
+			t.Errorf("no server built for the key %q", key)
 		}
 	}
 }

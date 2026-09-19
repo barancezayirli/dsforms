@@ -362,13 +362,47 @@ func (s *Server) toSignals(sigs []store.SpamSignal) []signalOut {
 	return out
 }
 
+// noSuchSubmission is the answer for an id that does not exist *and* for one
+// that exists in a form this token cannot reach.
+//
+// Deliberately the same sentence. "Forbidden" would confirm that the id is real
+// and belongs to a form the caller cannot see, which turns every scoped token
+// into an oracle for the existence of everyone else's submissions — the same
+// distinction the endpoint's 401s refuse to draw between an unknown, a revoked
+// and an expired token.
+func noSuchSubmission(id string) error {
+	return fmt.Errorf("no submission with id %q", id)
+}
+
+// inScope reads a submission and refuses it unless this token's forms cover it.
+//
+// The one place that rule lives, so the four tools that act on a single
+// submission cannot answer it four slightly different ways. Checking after the
+// read rather than filtering in SQL is correct here precisely because there is
+// no page to get wrong: it is one row, and the question is only "is this mine".
+func (s *Server) inScope(req *mcp.CallToolRequest, id string) (store.Submission, error) {
+	sub, err := s.store.GetSubmission(id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return store.Submission{}, noSuchSubmission(id)
+		}
+		return store.Submission{}, fmt.Errorf("reading submission: %w", err)
+	}
+	if !tokenForms(req).Allows(sub.FormID) {
+		return store.Submission{}, noSuchSubmission(id)
+	}
+	return sub, nil
+}
+
 // formNames maps form ids to display names for the listings that span forms.
 //
 // A failure is returned rather than swallowed: every row's form name degrades at
 // once, and a listing that silently prints ids where it printed names reads as a
 // different database rather than as a failed lookup.
-func (s *Server) formNames() (map[string]string, error) {
-	forms, err := s.store.ListForms(store.AllForms())
+// It takes the scope rather than reading every form, so a listing cannot name a
+// form the caller is not allowed to know exists.
+func (s *Server) formNames(scope store.FormScope) (map[string]string, error) {
+	forms, err := s.store.ListForms(scope)
 	if err != nil {
 		return nil, fmt.Errorf("reading forms: %w", err)
 	}
@@ -388,9 +422,12 @@ func (s *Server) formNames() (map[string]string, error) {
 // Every tool is registered under exactly one scope, and the handler for each
 // re-checks that same scope through requireScope. The two together are the
 // belt and braces described on the Server type.
-func (s *Server) registerTools(srv *mcp.Server, scopes Scopes) {
+func (s *Server) registerTools(srv *mcp.Server, scopes Scopes, formBound bool) {
 	if scopes.Has(ScopeRead) {
 		s.registerReadTools(srv)
+	}
+	if !formBound {
+		s.registerInstanceWideTools(srv, scopes)
 	}
 	if scopes.Has(ScopeWrite) {
 		s.registerWriteTools(srv)
@@ -489,16 +526,22 @@ type statsIn struct {
 }
 
 type statsOut struct {
-	Unread          int              `json:"unread"`
-	Quarantined     int              `json:"quarantined"`
-	WaitlistEntries int              `json:"waitlist_entries"`
-	TotalAccepted   int              `json:"total_accepted_submissions"`
-	Days            int              `json:"days"`
-	HeldInWindow    int              `json:"held_in_window"`
-	TotalInWindow   int              `json:"total_in_window"`
-	PerForm         []formStatsOut   `json:"per_form"`
-	PerDay          []dayCountsOut   `json:"per_day"`
-	TopSpamSignals  []signalTallyOut `json:"top_spam_signals"`
+	Unread      int `json:"unread"`
+	Quarantined int `json:"quarantined"`
+
+	WaitlistEntries int `json:"waitlist_entries,omitempty"`
+	// WaitlistWithheld says the figure above is not being reported because this
+	// token is limited to particular forms and a waitlist entry belongs to no
+	// form. Said rather than reported as zero: a number from a query that could
+	// not answer is the manufactured figure this codebase keeps taking back out.
+	WaitlistWithheld bool             `json:"waitlist_withheld,omitempty" jsonschema:"the waitlist is not per-form, so a token limited to forms is not given this count"`
+	TotalAccepted    int              `json:"total_accepted_submissions"`
+	Days             int              `json:"days"`
+	HeldInWindow     int              `json:"held_in_window"`
+	TotalInWindow    int              `json:"total_in_window"`
+	PerForm          []formStatsOut   `json:"per_form"`
+	PerDay           []dayCountsOut   `json:"per_day"`
+	TopSpamSignals   []signalTallyOut `json:"top_spam_signals"`
 }
 
 type formStatsOut struct {
@@ -532,13 +575,13 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		if err := requireScope(req, ScopeRead); err != nil {
 			return nil, listFormsOut{}, err
 		}
-		forms, err := s.store.ListForms(store.AllForms())
+		forms, err := s.store.ListForms(tokenForms(req))
 		if err != nil {
 			return nil, listFormsOut{}, fmt.Errorf("listing forms: %w", err)
 		}
 		// Per-form received/held come from the aggregate the overview already
 		// uses, rather than a second count per form in a loop.
-		stats, err := s.store.PerFormStats(store.AllForms())
+		stats, err := s.store.PerFormStats(tokenForms(req))
 		if err != nil {
 			return nil, listFormsOut{}, fmt.Errorf("reading form statistics: %w", err)
 		}
@@ -600,11 +643,11 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		}
 
 		limit, offset := clampLimit(in.Limit), clampOffset(in.Offset)
-		subs, err := s.store.ListSubmissionsFiltered(in.FormID, filter, store.AllForms(), limit, offset)
+		subs, err := s.store.ListSubmissionsFiltered(in.FormID, filter, tokenForms(req), limit, offset)
 		if err != nil {
 			return nil, listSubmissionsOut{}, fmt.Errorf("listing submissions: %w", err)
 		}
-		names, err := s.formNames()
+		names, err := s.formNames(tokenForms(req))
 		if err != nil {
 			return nil, listSubmissionsOut{}, err
 		}
@@ -627,14 +670,11 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		if err := requireScope(req, ScopeRead); err != nil {
 			return nil, getSubmissionOut{}, err
 		}
-		sub, err := s.store.GetSubmission(in.SubmissionID)
+		sub, err := s.inScope(req, in.SubmissionID)
 		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return nil, getSubmissionOut{}, fmt.Errorf("no submission with id %q", in.SubmissionID)
-			}
-			return nil, getSubmissionOut{}, fmt.Errorf("reading submission: %w", err)
+			return nil, getSubmissionOut{}, err
 		}
-		names, err := s.formNames()
+		names, err := s.formNames(tokenForms(req))
 		if err != nil {
 			return nil, getSubmissionOut{}, err
 		}
@@ -661,7 +701,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		if strings.TrimSpace(in.Query) == "" {
 			return nil, listSubmissionsOut{}, fmt.Errorf("query must not be empty")
 		}
-		results, err := s.store.SearchSubmissions(in.Query, store.AllForms(), clampLimit(in.Limit))
+		results, err := s.store.SearchSubmissions(in.Query, tokenForms(req), clampLimit(in.Limit))
 		if err != nil {
 			return nil, listSubmissionsOut{}, fmt.Errorf("searching: %w", err)
 		}
@@ -683,15 +723,15 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		if err := requireScope(req, ScopeRead); err != nil {
 			return nil, listQuarantineOut{}, err
 		}
-		subs, err := s.store.HeldSubmissions(store.AllForms(), clampLimit(in.Limit), clampOffset(in.Offset))
+		subs, err := s.store.HeldSubmissions(tokenForms(req), clampLimit(in.Limit), clampOffset(in.Offset))
 		if err != nil {
 			return nil, listQuarantineOut{}, fmt.Errorf("listing quarantine: %w", err)
 		}
-		counts, err := s.store.NavCounts(store.AllForms())
+		counts, err := s.store.NavCounts(tokenForms(req))
 		if err != nil {
 			return nil, listQuarantineOut{}, fmt.Errorf("counting quarantine: %w", err)
 		}
-		names, err := s.formNames()
+		names, err := s.formNames(tokenForms(req))
 		if err != nil {
 			return nil, listQuarantineOut{}, err
 		}
@@ -715,26 +755,6 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "list_filter_rules",
-		Title:       "List filter rules",
-		Description: "List the operator's allow and block rules, with how often each has fired.",
-		Annotations: readOnly(),
-	}, func(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, listRulesOut, error) {
-		if err := requireScope(req, ScopeRead); err != nil {
-			return nil, listRulesOut{}, err
-		}
-		rules, err := s.store.ListFilterRules()
-		if err != nil {
-			return nil, listRulesOut{}, fmt.Errorf("listing filter rules: %w", err)
-		}
-		out := listRulesOut{Rules: make([]ruleOut, 0, len(rules))}
-		for _, r := range rules {
-			out.Rules = append(out.Rules, s.toRule(r, false))
-		}
-		return nil, out, nil
-	})
-
-	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "get_stats",
 		Title: "Database statistics",
 		Description: "Overall counts for this dsforms instance: unread, quarantined, " +
@@ -751,42 +771,43 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 		// overview can log-and-continue because it renders a banner saying it
 		// did; a tool result has nowhere to put that caveat, and a statistics
 		// call that answers 0 is indistinguishable from a fresh install.
-		counts, err := s.store.NavCounts(store.AllForms())
+		counts, err := s.store.NavCounts(tokenForms(req))
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading counts: %w", err)
 		}
-		total, err := s.store.CountAllSubmissions(store.AllForms())
+		total, err := s.store.CountAllSubmissions(tokenForms(req))
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("counting submissions: %w", err)
 		}
-		held, totalInWindow, err := s.store.HeldSince(days, store.AllForms())
+		held, totalInWindow, err := s.store.HeldSince(days, tokenForms(req))
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading the quarantine rate: %w", err)
 		}
-		perForm, err := s.store.PerFormStats(store.AllForms())
+		perForm, err := s.store.PerFormStats(tokenForms(req))
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading per-form statistics: %w", err)
 		}
-		perDay, err := s.store.SubmissionsPerDay(days, store.AllForms())
+		perDay, err := s.store.SubmissionsPerDay(days, tokenForms(req))
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading per-day statistics: %w", err)
 		}
-		tallies, err := s.store.TopSpamSignals(days, store.AllForms())
+		tallies, err := s.store.TopSpamSignals(days, tokenForms(req))
 		if err != nil {
 			return nil, statsOut{}, fmt.Errorf("reading spam signal tallies: %w", err)
 		}
 
 		out := statsOut{
-			Unread:          counts.Unread,
-			Quarantined:     counts.Held,
-			WaitlistEntries: counts.Waitlist,
-			TotalAccepted:   total,
-			Days:            days,
-			HeldInWindow:    held,
-			TotalInWindow:   totalInWindow,
-			PerForm:         make([]formStatsOut, 0, len(perForm)),
-			PerDay:          make([]dayCountsOut, 0, len(perDay)),
-			TopSpamSignals:  make([]signalTallyOut, 0, len(tallies)),
+			Unread:           counts.Unread,
+			Quarantined:      counts.Held,
+			WaitlistEntries:  counts.Waitlist,
+			WaitlistWithheld: !counts.WaitlistKnown,
+			TotalAccepted:    total,
+			Days:             days,
+			HeldInWindow:     held,
+			TotalInWindow:    totalInWindow,
+			PerForm:          make([]formStatsOut, 0, len(perForm)),
+			PerDay:           make([]dayCountsOut, 0, len(perDay)),
+			TopSpamSignals:   make([]signalTallyOut, 0, len(tallies)),
 		}
 		for _, f := range perForm {
 			out.PerForm = append(out.PerForm, formStatsOut{
@@ -864,11 +885,8 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 
 		// Read first, so "no such submission" is a clear answer rather than an
 		// UPDATE that matches nothing and reports success.
-		if _, err := s.store.GetSubmission(in.SubmissionID); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return nil, okOut{}, fmt.Errorf("no submission with id %q", in.SubmissionID)
-			}
-			return nil, okOut{}, fmt.Errorf("reading submission: %w", err)
+		if _, err := s.inScope(req, in.SubmissionID); err != nil {
+			return nil, okOut{}, err
 		}
 
 		var err error
@@ -898,7 +916,7 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 			// more likely a mistake than a request to clear the whole instance.
 			return nil, okOut{}, fmt.Errorf("form_id is required")
 		}
-		names, err := s.formNames()
+		names, err := s.formNames(tokenForms(req))
 		if err != nil {
 			return nil, okOut{}, err
 		}
@@ -925,10 +943,15 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 		if err := requireScope(req, ScopeWrite); err != nil {
 			return nil, markSpamOut{}, err
 		}
+		// Read first, so an id in another form is refused before anything moves
+		// and with the same answer a missing one gets.
+		if _, err := s.inScope(req, in.SubmissionID); err != nil {
+			return nil, markSpamOut{}, err
+		}
 		sub, err := s.store.MarkSpam(in.SubmissionID, s.actor(req))
 		switch {
 		case errors.Is(err, store.ErrSubmissionGone):
-			return nil, markSpamOut{}, fmt.Errorf("no submission with id %q; it was deleted or aged out of quarantine", in.SubmissionID)
+			return nil, markSpamOut{}, noSuchSubmission(in.SubmissionID)
 		case errors.Is(err, store.ErrNotFound):
 			// Idempotent, and said as such: a retried call is not a failure, and
 			// telling a model otherwise invites it to try something destructive.
@@ -937,7 +960,7 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 			return nil, markSpamOut{}, fmt.Errorf("marking as spam: %w", err)
 		}
 
-		names, err := s.formNames()
+		names, err := s.formNames(tokenForms(req))
 		if err != nil {
 			return nil, markSpamOut{}, err
 		}
@@ -948,35 +971,6 @@ func (s *Server) registerWriteTools(srv *mcp.Server) {
 		})
 	})
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:  "add_block_rule",
-		Title: "Add a block rule",
-		Description: "Add a rule that holds matching submissions on arrival. " +
-			"Only block rules can be added here; allow rules are deliberately not " +
-			"available over this API because an allow rule skips scoring entirely.",
-		Annotations: mutating(),
-	}, func(_ context.Context, req *mcp.CallToolRequest, in addBlockRuleIn) (*mcp.CallToolResult, addBlockRuleOut, error) {
-		if err := requireScope(req, ScopeWrite); err != nil {
-			return nil, addBlockRuleOut{}, err
-		}
-		// screen.KindBlock is passed as a constant, never taken from the input.
-		// An allow rule matching an IP or CIDR turns one forgeable header into a
-		// bypass of the block list and all scoring — see AGENT.md §6 — so the
-		// permissive kind is not reachable from here at all, rather than
-		// reachable and validated.
-		rule, err := s.store.AddFilterRule(screen.KindBlock, strings.TrimSpace(in.Type), in.Value, in.Note)
-		if err != nil {
-			// Validation messages from the store name the actual problem (an
-			// unknown type, a malformed CIDR, a duplicate), which is exactly
-			// what a client needs to correct itself.
-			return nil, addBlockRuleOut{}, err
-		}
-		return nil, addBlockRuleOut{
-			OK:      true,
-			Message: "Block rule added. Submissions matching it will be held on arrival.",
-			Rule:    s.toRule(rule, true),
-		}, nil
-	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1012,11 +1006,8 @@ func (s *Server) registerDeleteTools(srv *mcp.Server) {
 		// Read first so a delete that matched nothing is reported as "no such
 		// submission" rather than as a success. DeleteSubmission reports no
 		// count, so without this the caller cannot tell the two apart.
-		if _, err := s.store.GetSubmission(in.SubmissionID); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return nil, okOut{}, fmt.Errorf("no submission with id %q", in.SubmissionID)
-			}
-			return nil, okOut{}, fmt.Errorf("reading submission: %w", err)
+		if _, err := s.inScope(req, in.SubmissionID); err != nil {
+			return nil, okOut{}, err
 		}
 		if err := s.store.DeleteSubmission(in.SubmissionID); err != nil {
 			return nil, okOut{}, fmt.Errorf("deleting submission: %w", err)
@@ -1044,7 +1035,7 @@ func (s *Server) registerDeleteTools(srv *mcp.Server) {
 		if len(in.SubmissionIDs) > maxLimit {
 			return nil, deleteCountOut{}, fmt.Errorf("at most %d ids per call, got %d", maxLimit, len(in.SubmissionIDs))
 		}
-		n, err := s.store.DeleteHeld(in.SubmissionIDs, store.AllForms())
+		n, err := s.store.DeleteHeld(in.SubmissionIDs, tokenForms(req))
 		if err != nil {
 			return nil, deleteCountOut{}, fmt.Errorf("deleting quarantined submissions: %w", err)
 		}
@@ -1057,4 +1048,73 @@ func (s *Server) registerDeleteTools(srv *mcp.Server) {
 		}
 		return nil, deleteCountOut{OK: true, Deleted: n, Message: msg}, nil
 	})
+}
+
+// registerInstanceWideTools adds the two tools that reach state no form owns.
+//
+// They are registered only for a token that is not bounded to particular forms.
+// A block rule added by a one-form token applies to every form, and the rule
+// list is the operator's own configuration — both are the bound escaping
+// sideways, through the config rather than through the data, which is the one
+// thing scoping a token is for. Both handlers call requireAllForms as well:
+// the listing is a hint, the handler is the gate.
+func (s *Server) registerInstanceWideTools(srv *mcp.Server, scopes Scopes) {
+	if scopes.Has(ScopeRead) {
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "list_filter_rules",
+			Title:       "List filter rules",
+			Description: "List the operator's allow and block rules, with how often each has fired.",
+			Annotations: readOnly(),
+		}, func(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, listRulesOut, error) {
+			if err := requireScope(req, ScopeRead); err != nil {
+				return nil, listRulesOut{}, err
+			}
+			if err := requireAllForms(req); err != nil {
+				return nil, listRulesOut{}, err
+			}
+			rules, err := s.store.ListFilterRules()
+			if err != nil {
+				return nil, listRulesOut{}, fmt.Errorf("listing filter rules: %w", err)
+			}
+			out := listRulesOut{Rules: make([]ruleOut, 0, len(rules))}
+			for _, r := range rules {
+				out.Rules = append(out.Rules, s.toRule(r, false))
+			}
+			return nil, out, nil
+		})
+	}
+	if scopes.Has(ScopeWrite) {
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:  "add_block_rule",
+			Title: "Add a block rule",
+			Description: "Add a rule that holds matching submissions on arrival. " +
+				"Only block rules can be added here; allow rules are deliberately not " +
+				"available over this API because an allow rule skips scoring entirely.",
+			Annotations: mutating(),
+		}, func(_ context.Context, req *mcp.CallToolRequest, in addBlockRuleIn) (*mcp.CallToolResult, addBlockRuleOut, error) {
+			if err := requireScope(req, ScopeWrite); err != nil {
+				return nil, addBlockRuleOut{}, err
+			}
+			if err := requireAllForms(req); err != nil {
+				return nil, addBlockRuleOut{}, err
+			}
+			// screen.KindBlock is passed as a constant, never taken from the input.
+			// An allow rule matching an IP or CIDR turns one forgeable header into a
+			// bypass of the block list and all scoring — see AGENT.md §6 — so the
+			// permissive kind is not reachable from here at all, rather than
+			// reachable and validated.
+			rule, err := s.store.AddFilterRule(screen.KindBlock, strings.TrimSpace(in.Type), in.Value, in.Note)
+			if err != nil {
+				// Validation messages from the store name the actual problem (an
+				// unknown type, a malformed CIDR, a duplicate), which is exactly
+				// what a client needs to correct itself.
+				return nil, addBlockRuleOut{}, err
+			}
+			return nil, addBlockRuleOut{
+				OK:      true,
+				Message: "Block rule added. Submissions matching it will be held on arrival.",
+				Rule:    s.toRule(rule, true),
+			}, nil
+		})
+	}
 }
