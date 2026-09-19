@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,35 @@ func setupTokens(t *testing.T) (*store.Store, *chi.Mux) {
 		r.Post("/admin/tokens/{id}/delete", th.Delete)
 	})
 	return s, r
+}
+
+// setupTokensRealForm is setupTokens with the shipped token_new.html in place
+// of the stub, for the assertions that are about the page an operator sees
+// rather than about what the handler put in a struct.
+func setupTokensRealForm(t *testing.T) (*store.Store, *chi.Mux) {
+	t.Helper()
+	s2, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	th := &TokensHandler{
+		Store: s2, TTLDays: 0,
+		Base: Base{
+			Nav: s2, SecretKey: testSecretKey, BaseURL: "https://example.com",
+			Templates: map[string]*template.Template{
+				"tokens.html":    realTemplates(t)["tokens.html"],
+				"token_new.html": realTemplates(t)["token_new.html"],
+			},
+		},
+	}
+	mux := chi.NewRouter()
+	mux.Group(func(rt chi.Router) {
+		rt.Use(auth.RequireAuth(s2))
+		rt.Get("/admin/tokens", th.Page)
+		rt.Get("/admin/tokens/new", th.NewPage)
+		rt.Post("/admin/tokens", th.Create)
+	})
+	return s2, mux
 }
 
 func doTokenRequest(t *testing.T, s *store.Store, r *chi.Mux, method, path, body string) *httptest.ResponseRecorder {
@@ -429,5 +459,104 @@ func TestRefusedCreationComesBackOnTheForm(t *testing.T) {
 	}
 	if !strings.Contains(body, `value="laptop"`) {
 		t.Errorf("the typed name was lost on the way back: %.300q", body)
+	}
+}
+
+// TestANewTokenFormStartsAtReadOnly. The scope set is the only control that
+// bounds what a compromised or careless client can do, and a form that starts
+// with nothing ticked makes "tick all three" the path of least resistance.
+func TestANewTokenFormStartsAtReadOnly(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/tokens/new", nil)
+	req.AddCookie(loginCookie(t, s))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /admin/tokens/new = %d, want 200", rec.Code)
+	}
+
+	ticked := tickedScopes(t, rec.Body.String())
+	if !ticked["read"] {
+		t.Error("read is not ticked on a fresh form")
+	}
+	for _, sc := range mcpserver.AllScopes {
+		if sc == mcpserver.ScopeRead {
+			continue
+		}
+		if ticked[string(sc)] {
+			t.Errorf("%s is ticked on a fresh form — the default must be the least a "+
+				"client can be given, not the most", sc)
+		}
+	}
+}
+
+// TestARejectedFormKeepsWhatWasActuallyTicked. The default applies to a form
+// nobody has filled in. Once an operator has chosen, re-rendering their choice
+// as the default would silently re-tick a box they cleared.
+func TestARejectedFormKeepsWhatWasActuallyTicked(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensRealForm(t)
+
+	form := url.Values{"name": {""}, "scopes": {"delete"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/tokens", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(loginCookie(t, s))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	ticked := tickedScopes(t, rec.Body.String())
+	if ticked["read"] {
+		t.Error("read was re-ticked on a rejected form the operator had left unticked")
+	}
+	if !ticked["delete"] {
+		t.Error("the operator's own choice was lost")
+	}
+}
+
+// tickedScopes reads the rendered form rather than the struct behind it. What
+// an operator gets is the checkbox, and a Ticked map that never reaches a
+// checked attribute is a default nobody receives.
+var checkboxRE = regexp.MustCompile(`(?s)<input type="checkbox" name="scopes" value="([a-z]+)"(.*?)>`)
+
+func tickedScopes(t *testing.T, body string) map[string]bool {
+	t.Helper()
+	matches := checkboxRE.FindAllStringSubmatch(body, -1)
+	if len(matches) != len(mcpserver.AllScopes) {
+		t.Fatalf("found %d scope checkboxes, want %d — the form is not what this test thinks",
+			len(matches), len(mcpserver.AllScopes))
+	}
+	out := map[string]bool{}
+	for _, m := range matches {
+		out[m[1]] = strings.Contains(m[2], "checked")
+	}
+	return out
+}
+
+// TestTokenFormStatesWhatEachScopeRisks renders the shipped template, for the
+// reason TestTokenFormOffersEveryScope gives: a stub agrees with the handler by
+// construction.
+func TestTokenFormStatesWhatEachScopeRisks(t *testing.T) {
+	t.Parallel()
+
+	tmpl := realTemplates(t)["token_new.html"]
+	data := tokenFormData{
+		PageData: PageData{Title: "New API token", Active: "tokens"},
+		Scopes:   scopeOptions(),
+		Ticked:   map[string]bool{"read": true},
+	}
+
+	for _, block := range []string{"base", "drawer"} {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, block, data); err != nil {
+			t.Fatalf("executing %s: %v", block, err)
+		}
+		body := buf.String()
+		for _, scope := range mcpserver.AllScopes {
+			if !strings.Contains(body, template.HTMLEscapeString(scope.Caution())) {
+				t.Errorf("%s: scope %q is offered without saying what it risks", block, scope)
+			}
+		}
 	}
 }

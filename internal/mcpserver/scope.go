@@ -66,6 +66,33 @@ func (s Scope) Describe() string {
 	}
 }
 
+// Caution is what this scope costs when the client holding it is not the one
+// the operator meant — a compromised client, a careless one, or one acting on
+// text a stranger wrote into a form.
+//
+// Separate from Describe because the two answer different questions and an
+// operator ticking boxes needs both. Describe says what the scope lets a client
+// do, which reads as a feature list; Caution says what it loses, which is the
+// half that changes a decision.
+//
+// Read's wording is the one that matters. It is the scope handed out most
+// freely and the only one that can lose everything ever collected, permanently,
+// because a model that has been told to forward an inbox needs no write access
+// to do it — it needs the inbox. Presenting read as the harmless option is the
+// mistake this text exists to prevent, so it never calls it safe.
+func (s Scope) Caution() string {
+	switch s {
+	case ScopeRead:
+		return "This is every submission you have ever collected. A client that is talked into forwarding them needs nothing else."
+	case ScopeWrite:
+		return "A client acting on a submission's instructions could file real messages as spam or add block rules. All of it is reversible from the admin."
+	case ScopeDelete:
+		return "Nothing undoes this. Withhold it unless a client genuinely needs it — deleting from the admin costs you nothing."
+	default:
+		return ""
+	}
+}
+
 // Scopes is a set of scopes, already filtered to the ones this build understands.
 type Scopes []Scope
 

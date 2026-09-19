@@ -29,13 +29,25 @@
 
   <div class="field">
     <span>Scopes</span>
+    <!-- The sentence an operator most needs and is least likely to guess. read
+         is pre-ticked because it is the least a client can be given, not
+         because it is harmless: it is the scope an exfiltration attempt wants,
+         and the one people hand out without thinking. -->
+    <span class="form-hint" style="margin-top:2px">
+      Give a client only what it needs. <strong>read</strong> is not the harmless
+      option &mdash; it is your whole inbox, and it is the one an attack wants.
+    </span>
     {{range .Scopes}}
-    <label style="display:flex;gap:9px;align-items:flex-start;margin-top:9px;font-size:13px">
+    <label style="display:flex;gap:9px;align-items:flex-start;margin-top:11px;font-size:13px">
       <input type="checkbox" name="scopes" value="{{.Value}}" style="margin-top:3px"
              {{if index $.Ticked .Value}}checked{{end}}>
       <span>
         <strong>{{.Value}}</strong>
         <span class="dim" style="display:block;font-size:12px;line-height:1.45">{{.Description}}</span>
+        <span style="display:flex;gap:5px;align-items:flex-start;font-size:12px;line-height:1.45;margin-top:3px">
+          <svg class="i i-accent" style="font-size:13px;flex:none;margin-top:2px"><use href="#ph-warning"/></svg>
+          <span>{{.Caution}}</span>
+        </span>
       </span>
     </label>
     {{end}}

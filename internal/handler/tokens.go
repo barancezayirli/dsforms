@@ -57,6 +57,11 @@ type tokenRow struct {
 type scopeOption struct {
 	Value       string
 	Description string
+
+	// Caution is what the scope costs if the client holding it is not the one
+	// you meant. Rendered beneath Description, in the warning style, because
+	// the decision an operator is making at this checkbox is a risk one.
+	Caution string
 }
 
 // tokensData is the list page. It deliberately carries no form state: the
@@ -106,7 +111,9 @@ type tokenFormData struct {
 func scopeOptions() []scopeOption {
 	out := make([]scopeOption, 0, len(mcpserver.AllScopes))
 	for _, s := range mcpserver.AllScopes {
-		out = append(out, scopeOption{Value: string(s), Description: s.Describe()})
+		out = append(out, scopeOption{
+			Value: string(s), Description: s.Describe(), Caution: s.Caution(),
+		})
 	}
 	return out
 }
@@ -123,8 +130,15 @@ func (h *TokensHandler) Page(w http.ResponseWriter, r *http.Request) {
 // shared, the identical form renders as an ordinary page. This is the mechanism
 // the submission reader already uses — the overlay is an enhancement over markup
 // that works without it, never the only way in.
+// A fresh form starts at read and nothing else. The scope set is the only
+// control that bounds what a client can do with a token, and a form that opens
+// with nothing ticked makes "tick all three" the path of least resistance —
+// which is how delete ends up on a token that only ever needed to list an
+// inbox. It applies to the untouched form only: once an operator has chosen,
+// the rejected-form path below re-renders their actual choice, because
+// re-ticking a box they cleared would be the handler overruling them.
 func (h *TokensHandler) NewPage(w http.ResponseWriter, r *http.Request) {
-	h.renderForm(w, r, "", "", nil)
+	h.renderForm(w, r, "", "", []string{string(mcpserver.ScopeRead)})
 }
 
 // renderForm draws the create form, as a fragment when the drawer asked for it

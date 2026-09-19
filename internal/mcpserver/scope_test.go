@@ -232,3 +232,42 @@ func keys(m map[string]bool) []string {
 	slices.Sort(out)
 	return out
 }
+
+// TestEveryScopeStatesItsRisk. Describe says what a scope lets a client do;
+// Caution says what it costs when that client is not the one you meant. The
+// second is the one an operator ticking three boxes needs and the first does
+// not supply.
+func TestEveryScopeStatesItsRisk(t *testing.T) {
+	t.Parallel()
+	for _, s := range AllScopes {
+		if strings.TrimSpace(s.Caution()) == "" {
+			t.Errorf("scope %q offers no statement of what it risks", s)
+		}
+		if s.Caution() == s.Describe() {
+			t.Errorf("scope %q restates its description as its risk, which tells an "+
+				"operator nothing they did not already read", s)
+		}
+	}
+	if got := Scope("wat").Caution(); got != "" {
+		t.Errorf("an unknown scope cautioned %q", got)
+	}
+}
+
+// TestReadIsNotSoldAsTheHarmlessScope. read is the one an operator hands out
+// most freely and the one that can lose everything ever collected — it is the
+// scope an exfiltration attempt wants. Its caution has to say so rather than
+// reading as reassurance.
+func TestReadIsNotSoldAsTheHarmlessScope(t *testing.T) {
+	t.Parallel()
+	got := strings.ToLower(ScopeRead.Caution())
+	for _, want := range []string{"every"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("read's caution does not mention %q:\n%s", want, ScopeRead.Caution())
+		}
+	}
+	for _, unwanted := range []string{"safe", "harmless", "read-only is fine"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("read's caution calls it %q:\n%s", unwanted, ScopeRead.Caution())
+		}
+	}
+}
