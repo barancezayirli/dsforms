@@ -42,6 +42,17 @@ const (
 	CheckExtraLinks Check = "extra_links"
 	CheckRepeatIP   Check = "repeat_ip"
 	CheckBlocked    Check = "rule"
+
+	// CheckManual is an operator saying so, rather than any check firing. It is
+	// the only value here that no scorer can produce: it is written when a
+	// submission that was already accepted is marked as spam by hand.
+	//
+	// It is declared with the rest because a signal row's rule column has one
+	// value set whatever wrote the row, and the quarantine breakdown renders
+	// them all through the same lookup. A held submission with no signal at all
+	// reads as "held for no recorded reason", which is exactly the unexplained
+	// hold the signals table exists to prevent.
+	CheckManual Check = "manual"
 )
 
 // AllChecks is every declared Check.
@@ -60,6 +71,7 @@ var AllChecks = []Check{
 	CheckExtraLinks,
 	CheckRepeatIP,
 	CheckBlocked,
+	CheckManual,
 }
 
 // Signal is one rule hit that contributed to a submission's score.

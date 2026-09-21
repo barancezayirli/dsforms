@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -254,7 +255,7 @@ func TestListFormsWithUnreadCount(t *testing.T) {
 	_ = s.CreateSubmission(Submission{ID: "sub-2", FormID: "form-1", RawData: `{"name":"Bob"}`})
 	_ = s.MarkRead("sub-1")
 
-	forms, err := s.ListForms()
+	forms, err := s.ListForms(AllForms())
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -542,7 +543,7 @@ func TestCountAllSubmissions(t *testing.T) {
 	_ = s.CreateForm(Form{ID: "f1", Name: "C", EmailTo: "a@b.com"})
 	_ = s.CreateSubmission(Submission{ID: "s1", FormID: "f1", RawData: `{}`})
 	_ = s.CreateSubmission(Submission{ID: "s2", FormID: "f1", RawData: `{}`})
-	count, err := s.CountAllSubmissions()
+	count, err := s.CountAllSubmissions(AllForms())
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -813,7 +814,7 @@ func TestReopen(t *testing.T) {
 		t.Fatalf("Reopen error: %v", err)
 	}
 
-	forms, _ := sA.ListForms()
+	forms, _ := sA.ListForms(AllForms())
 	if len(forms) != 0 {
 		t.Errorf("forms = %d after reopen to fresh DB, want 0", len(forms))
 	}
@@ -1455,4 +1456,254 @@ func TestCreateSubmissionStoresTheScoreOnEveryReadPath(t *testing.T) {
 	if len(signals) != 0 {
 		t.Errorf("SubmissionSignals returned %d rows for an accepted submission, want 0", len(signals))
 	}
+}
+
+// subFixture is an accepted submission for the listing tests below.
+func subFixture(id, formID string, at time.Time) Submission {
+	return Submission{
+		ID:        id,
+		FormID:    formID,
+		Data:      map[string]string{"message": id},
+		RawData:   `{"message":"` + id + `"}`,
+		CreatedAt: at,
+	}
+}
+
+// TestMarkUnreadIsTheInverseOfMarkRead. Without it the MCP surface can only ever
+// move a message one way, and "mark it back, I hadn't dealt with it" is the
+// obvious next request.
+func TestMarkUnreadIsTheInverseOfMarkRead(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := s.CreateSubmission(subFixture("s1", "f1", time.Now())); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if err := s.MarkRead("s1"); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+
+	if err := s.MarkUnread("s1"); err != nil {
+		t.Fatalf("MarkUnread: %v", err)
+	}
+	got, err := s.GetSubmission("s1")
+	if err != nil {
+		t.Fatalf("GetSubmission: %v", err)
+	}
+	if got.Read {
+		t.Error("Read = true after MarkUnread")
+	}
+
+	n, err := s.UnreadCount("f1")
+	if err != nil {
+		t.Fatalf("UnreadCount: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("UnreadCount = %d, want 1 — the badge must agree with the row", n)
+	}
+}
+
+// TestListSubmissionsFiltered covers the cross-form unread listing the MCP
+// client asks for, which no existing method provides: ListSubmissionsPaged is
+// scoped to one form and does not filter on read.
+func TestListSubmissionsFiltered(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	for _, id := range []string{"f1", "f2"} {
+		if err := s.CreateForm(Form{ID: id, Name: id}); err != nil {
+			t.Fatalf("CreateForm(%s): %v", id, err)
+		}
+	}
+	base := time.Now().UTC().Truncate(time.Second)
+	// Deliberately out of insertion order, so an ORDER BY that does nothing
+	// would be visible.
+	for i, sub := range []Submission{
+		subFixture("a", "f1", base.Add(-3*time.Hour)),
+		subFixture("b", "f1", base.Add(-1*time.Hour)),
+		subFixture("c", "f2", base.Add(-2*time.Hour)),
+	} {
+		if err := s.CreateSubmission(sub); err != nil {
+			t.Fatalf("CreateSubmission #%d: %v", i, err)
+		}
+	}
+	if err := s.MarkRead("b"); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+	// A held submission must never appear: quarantine is not the inbox.
+	if err := s.CreateHeldSubmission(
+		Submission{ID: "held", FormID: "f1", RawData: `{}`, CreatedAt: base}, 9, 6, nil,
+	); err != nil {
+		t.Fatalf("CreateHeldSubmission: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		formID        string
+		read          ReadFilter
+		limit, offset int
+		want          []string
+	}{
+		{"every form, newest first", "", ReadAny, 10, 0, []string{"b", "c", "a"}},
+		{"unread across every form", "", ReadUnread, 10, 0, []string{"c", "a"}},
+		{"read across every form", "", ReadRead, 10, 0, []string{"b"}},
+		{"one form", "f1", ReadAny, 10, 0, []string{"b", "a"}},
+		{"one form, unread only", "f1", ReadUnread, 10, 0, []string{"a"}},
+		{"one form, read only", "f1", ReadRead, 10, 0, []string{"b"}},
+		{"paged", "", ReadAny, 2, 0, []string{"b", "c"}},
+		{"paged, second page", "", ReadAny, 2, 2, []string{"a"}},
+		{"past the end", "", ReadAny, 10, 99, nil},
+		{"unknown form", "nope", ReadAny, 10, 0, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := s.ListSubmissionsFiltered(tt.formID, tt.read, AllForms(), tt.limit, tt.offset)
+			if err != nil {
+				t.Fatalf("ListSubmissionsFiltered: %v", err)
+			}
+			if !slices.Equal(subIDs(got), tt.want) {
+				t.Errorf("ids = %v, want %v", subIDs(got), tt.want)
+			}
+			for _, sub := range got {
+				if sub.IsHeld {
+					t.Errorf("submission %s is held; quarantine must not leak into the inbox listing", sub.ID)
+				}
+			}
+		})
+	}
+}
+
+// TestListSubmissionsFilteredPopulatesTheWholeStruct. AGENT.md §5: a query
+// selecting a subset of the columns returns a value whose other fields are
+// silently zero, which shipped a screen reading score 0 beside a breakdown
+// summing to 11.
+func TestListSubmissionsFilteredPopulatesTheWholeStruct(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	sub := subFixture("s1", "f1", time.Now())
+	sub.IP = "203.0.113.9"
+	sub.SpamScore = 4
+	sub.HeldThreshold = 6
+	if err := s.CreateSubmission(sub); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	got, err := s.ListSubmissionsFiltered("f1", ReadAny, AllForms(), 10, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsFiltered: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d submissions, want 1", len(got))
+	}
+	switch {
+	case got[0].IP != "203.0.113.9":
+		t.Errorf("IP = %q, want the stored value", got[0].IP)
+	case got[0].SpamScore != 4:
+		t.Errorf("SpamScore = %d, want 4", got[0].SpamScore)
+	case got[0].HeldThreshold != 6:
+		t.Errorf("HeldThreshold = %d, want 6", got[0].HeldThreshold)
+	case !got[0].Notified:
+		t.Error("Notified = false; an accepted submission defaults to notified")
+	case got[0].Data["message"] != "s1":
+		t.Errorf("Data = %v, want the decoded JSON", got[0].Data)
+	case got[0].CreatedAt.IsZero():
+		t.Error("CreatedAt is zero")
+	}
+}
+
+// TestListSubmissionsFilteredAppliesReadInSQL is the regression test for a bug
+// the review found: the read filter used to be applied by the caller, to the
+// page LIMIT and OFFSET had already chosen.
+//
+// The shape that breaks is an inbox where every read submission sorts behind a
+// full page of unread ones. Filtering afterwards then thins that page to
+// nothing and reports "you have no read messages" — while a later offset
+// returns them. Only pushing the filter into the query gets this right, and a
+// single-page fixture would pass either way.
+func TestListSubmissionsFilteredAppliesReadInSQL(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+
+	base := time.Now().UTC().Truncate(time.Second)
+	// One old read submission, then thirty newer unread ones on top of it.
+	if err := s.CreateSubmission(subFixture("old-read", "f1", base.Add(-100*time.Hour))); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if err := s.MarkRead("old-read"); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+	for i := range 30 {
+		id := fmt.Sprintf("unread-%02d", i)
+		if err := s.CreateSubmission(subFixture(id, "f1", base.Add(-time.Duration(i)*time.Minute))); err != nil {
+			t.Fatalf("CreateSubmission(%s): %v", id, err)
+		}
+	}
+
+	// The default page size, which is what a client actually asks for.
+	got, err := s.ListSubmissionsFiltered("f1", ReadRead, AllForms(), 25, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsFiltered: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "old-read" {
+		t.Fatalf("read listing returned %d rows %v, want exactly old-read.\n"+
+			"The read filter is being applied to a page that LIMIT already chose, "+
+			"so a read submission behind a screenful of unread ones is invisible.",
+			len(got), subIDs(got))
+	}
+
+	// And the complement still holds: the unread listing is unaffected by it.
+	unread, err := s.ListSubmissionsFiltered("f1", ReadUnread, AllForms(), 25, 0)
+	if err != nil {
+		t.Fatalf("ListSubmissionsFiltered: %v", err)
+	}
+	if len(unread) != 25 {
+		t.Errorf("unread listing returned %d rows, want a full page of 25", len(unread))
+	}
+	for _, sub := range unread {
+		if sub.Read {
+			t.Errorf("submission %s is read but appeared in the unread listing", sub.ID)
+		}
+	}
+}
+
+// TestListSubmissionsFilteredRefusesAnUnknownFilter. The default branch must
+// deny rather than widen: silently returning the whole inbox to a caller that
+// asked for a subset is the failure this type exists to prevent.
+func TestListSubmissionsFilteredRefusesAnUnknownFilter(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	if err := s.CreateForm(Form{ID: "f1", Name: "Contact"}); err != nil {
+		t.Fatalf("CreateForm: %v", err)
+	}
+	if err := s.CreateSubmission(subFixture("s1", "f1", time.Now())); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	for _, bad := range []ReadFilter{"", "READ", "unread ", "anything"} {
+		got, err := s.ListSubmissionsFiltered("f1", bad, AllForms(), 10, 0)
+		if err == nil {
+			t.Errorf("ReadFilter(%q) was accepted and returned %d rows", bad, len(got))
+		}
+		if got != nil {
+			t.Errorf("ReadFilter(%q) returned rows alongside an error", bad)
+		}
+	}
+}
+
+// subIDs is a helper shared by the listing tests. Named apart from search_test's
+// ids, which does the same job for SearchResult.
+func subIDs(subs []Submission) []string {
+	out := make([]string, 0, len(subs))
+	for _, s := range subs {
+		out = append(out, s.ID)
+	}
+	return out
 }

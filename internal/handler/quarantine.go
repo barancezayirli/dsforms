@@ -26,14 +26,14 @@ type QuarantineStore interface {
 	AddFilterRule(kind, ruleType, value, note string) (screen.Rule, error)
 	DeleteAllHeld() (int, error)
 	DeleteFilterRule(id string) (bool, error)
-	DeleteHeld(ids []string) (int, error)
+	DeleteHeld(ids []string, forms store.FormScope) (int, error)
 	GetForm(id string) (store.Form, error)
 	GetHeldSubmission(id string) (store.Submission, error)
 	HeldCount() (int, error)
-	HeldSince(days int) (held, total int, err error)
-	HeldSubmissions(limit, offset int) ([]store.Submission, error)
+	HeldSince(days int, forms store.FormScope) (held, total int, err error)
+	HeldSubmissions(forms store.FormScope, limit, offset int) ([]store.Submission, error)
 	ListFilterRules() ([]screen.Rule, error)
-	ListForms() ([]store.FormSummary, error)
+	ListForms(forms store.FormScope) ([]store.FormSummary, error)
 	MarkNotified(id string) error
 	RestoreSubmission(id string) (store.Submission, error)
 	SubmissionSignals(submissionID string) ([]store.SpamSignal, error)
@@ -125,7 +125,7 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 	}
 	pager := PaginationFrom(r, total)
 
-	held, err := h.Store.HeldSubmissions(pager.PageSize, pager.Offset())
+	held, err := h.Store.HeldSubmissions(store.AllForms(), pager.PageSize, pager.Offset())
 	if err != nil {
 		log.Printf("quarantine: list: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -176,7 +176,7 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 
 	// On the screen dedicated to spam volume, a failed query rendering "0 held ·
 	// 0% of traffic" reads as "the filter caught nothing in 30 days".
-	heldRecent, trafficRecent, sinceErr := h.Store.HeldSince(30)
+	heldRecent, trafficRecent, sinceErr := h.Store.HeldSince(30, store.AllForms())
 	if sinceErr != nil {
 		log.Printf("quarantine: held since: %v", sinceErr)
 	}
@@ -333,7 +333,7 @@ func (h *QuarantineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// retention sweep already purged or another admin already deleted; those
 	// match nothing, and counting the request instead of the result overstates
 	// it — the same defect Empty was rewritten to fix.
-	n, err := h.Store.DeleteHeld(ids)
+	n, err := h.Store.DeleteHeld(ids, store.AllForms())
 	switch {
 	case err != nil && n > 0:
 		// A partial delete is not a failure to report as "nothing happened":
@@ -417,7 +417,7 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 // the raw form id: every row's Form column degrades at once, which is the
 // "page reads like a fresh install" shape the Degraded banner exists for.
 func (h *QuarantineHandler) formNames() (map[string]string, bool) {
-	forms, err := h.Store.ListForms()
+	forms, err := h.Store.ListForms(store.AllForms())
 	if err != nil {
 		log.Printf("quarantine: list forms: %v", err)
 		return nil, true

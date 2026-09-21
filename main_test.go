@@ -1293,3 +1293,51 @@ func TestCarriedClassesDistinguishesAppliedFromMentioned(t *testing.T) {
 		}
 	}
 }
+
+// TestParseTokenExpiry pins the CLI's expiry argument.
+//
+// The argument exists because MCP_TOKEN_TTL_DAYS is read by the server from the
+// environment, and the CLI deliberately does not load config — doing so would
+// demand SECRET_KEY and make the command useless on a fresh install, which is
+// exactly when it is wanted. Left open, that meant a CLI token could never
+// expire. Now it takes the days itself.
+func TestParseTokenExpiry(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"omitted means no expiry", "", 0, false},
+		{"an explicit zero means no expiry", "0", 0, false},
+		{"ninety days", "90", 90 * 24 * time.Hour, false},
+		{"one day", "1", 24 * time.Hour, false},
+		// Refused rather than clamped: a negative expiry would mint a token that
+		// is already dead, and silently turning it into "never expires" grants
+		// more than was asked for.
+		{"negative is refused", "-1", 0, true},
+		{"not a number is refused", "ninety", 0, true},
+		{"a float is refused", "1.5", 0, true},
+		{"whitespace is refused", " 90", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseTokenExpiry(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseTokenExpiry(%q) = %v, want an error", tt.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseTokenExpiry(%q) error = %v", tt.in, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseTokenExpiry(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}

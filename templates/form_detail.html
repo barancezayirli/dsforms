@@ -114,6 +114,10 @@
           <td>
             {{if not .Read}}<span class="tag tag-accent tag-sm">new</span>
             {{else}}<span class="tag tag-neutral tag-sm">read</span>{{end}}
+            <!-- An operator will not open every message, so a mark that exists
+                 only on the reader is a mark nobody finds. -->
+            {{if hasHidden .Data}}<span class="tag tag-outline tag-sm nowrap"
+                  title="Carries hidden instructions, removed before any MCP client sees it">hidden text</span>{{end}}
           </td>
           <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "Jan 2, 15:04"}}</td>
           <td>

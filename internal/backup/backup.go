@@ -7,12 +7,40 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite"
 )
 
-// Export creates a snapshot of the DB using VACUUM INTO.
+// credentialTables are the tables a snapshot is stripped of before it leaves
+// the instance.
+//
+// api_tokens holds long-lived MCP credentials. They were in every snapshot
+// until it was noticed that restoring one *resurrects tokens revoked since it
+// was taken* — and revocation is a security action, so a restore silently
+// undoing it is the wrong direction to fail in, the more so because whoever was
+// revoked may still be holding the string. A backup is also a file that gets
+// copied to laptops and object stores, and it had no business carrying
+// credential material it does not need.
+//
+// sessions are here for the same reason, and were left out of the first version
+// of this on reasoning that did not survive being tested. The claim was that
+// dropping them would sign every operator out of a restored instance. Both
+// halves were wrong: a restore signs out whoever performs it regardless, since
+// their session postdates the snapshot, and keeping them brings back sessions
+// that were deliberately destroyed — a logout, a password change, the cascade
+// from a deleted user. internal/handler/auth.go calls that last one a guarantee
+// the product makes, and a restore was quietly breaking it.
+//
+// The cost is real and documented: a restore no longer brings live tokens back
+// either, so they are re-minted after a recovery, and everyone signs in again.
+// Clients and people visibly stopping is the better failure than a revoked
+// credential quietly working again.
+var credentialTables = []string{"api_tokens", "sessions"}
+
+// Export creates a snapshot of the DB using VACUUM INTO, with the credential
+// tables emptied.
 // Returns the path to the temp file. Caller must delete it.
 func Export(db *sql.DB) (string, error) {
 	tmpFile, err := os.CreateTemp("", "dsforms-backup-*.db")
@@ -32,7 +60,150 @@ func Export(db *sql.DB) (string, error) {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("export: vacuum into: %w", err)
 	}
+
+	// Stripped from the copy rather than excluded from the VACUUM, because
+	// VACUUM INTO takes the whole database or nothing. The live one is never
+	// touched: an operator taking a backup must not thereby revoke their own
+	// tokens.
+	if err := stripCredentials(tmpPath); err != nil {
+		os.Remove(tmpPath)
+		return "", err
+	}
 	return tmpPath, nil
+}
+
+// stripCredentials empties the credential tables in a snapshot and rewrites the
+// file so the rows are gone rather than merely unlinked.
+//
+// The VACUUM is the load-bearing half. SQLite frees a deleted row's page
+// instead of rewriting it, so without it the digests stay in the file and a
+// grep finds them — this function would have looked like it worked while
+// shipping exactly what it was written to remove. Pinned by
+// TestDeleteAloneLeavesTheBytesInTheFile.
+func stripCredentials(path string) (err error) {
+	db, openErr := sql.Open("sqlite", path)
+	if openErr != nil {
+		return fmt.Errorf("stripping credentials: open %s: %w", path, openErr)
+	}
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("stripping credentials: closing %s: %w", path, closeErr)
+		}
+	}()
+
+	// Out of WAL mode before anything is written.
+	//
+	// An uploaded file may be a raw copy of a live database, and those are in
+	// WAL mode — so the DELETE and the VACUUM would live in a sidecar until
+	// Close checkpointed them into the main file, which is the only file Import
+	// renames into place. Relying on that was the first version of this, and
+	// SQLite does not report a failed checkpoint as an error: Close returns nil
+	// and the unstripped main file gets renamed, a restore reporting success
+	// while resurrecting every revoked token and logged-out session. Import's
+	// own wal_checkpoint handling records the same lesson one screen below.
+	//
+	// Switching the journal mode removes the failure instead of detecting it.
+	// There is then no sidecar to checkpoint, nothing can be left outside the
+	// file that is renamed, and no -wal is left beside a staged upload. It
+	// lasts only for the strip: store.New opens with journal_mode(WAL), so a
+	// restored database is back in WAL on the next open.
+	//
+	// The result row is what has to be checked, not the error: PRAGMA
+	// journal_mode answers with the mode it ended up in, so a switch that did
+	// not happen is reported in the row rather than as a failure.
+	//
+	// Every way this has been made to fail — a reader holding a snapshot, a
+	// writer holding the file, an exclusive lock, an open transaction, a
+	// read-only file — came back as a coded error caught just below, and the
+	// silent case has not been reproduced with this driver. The guard stays
+	// because the PRAGMA's contract allows it and the cost of being wrong is a
+	// restore that reports success while resurrecting every credential it was
+	// supposed to remove. Unproven, though, not proven safe.
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
+		return fmt.Errorf("stripping credentials: taking %s out of WAL mode: %w", path, err)
+	}
+	if !strings.EqualFold(mode, "delete") {
+		// No result code, because there was no error to carry one. So machineFault
+		// cannot sort it and it defaults to the file, as Validate's own codeless
+		// refusals do. Saying "not your file" on a guess is the claim that sends
+		// an operator hunting something that is not there.
+		return fmt.Errorf("stripping credentials: %s is still in %q journal mode, so the "+
+			"cleared rows would not be written to the file that gets restored", path, mode)
+	}
+
+	for _, table := range credentialTables {
+		// Skipped when absent rather than failing.
+		//
+		// A database from before these tables existed is exactly the file this
+		// is here to clean, and an unguarded DELETE against it refuses the whole
+		// restore — closing the recovery path for every older backup and for the
+		// raw database copy operations.md invites. The names are this package's
+		// own constants, never input.
+		// NOCASE, because the DELETE below resolves table names
+		// case-insensitively while sqlite_master compares with BINARY. A schema
+		// declaring API_Tokens was read as absent and left intact.
+		var present string
+		switch err := db.QueryRow(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name = ? COLLATE NOCASE", table,
+		).Scan(&present); {
+		case errors.Is(err, sql.ErrNoRows):
+			continue
+		case err != nil:
+			return fmt.Errorf("stripping credentials: looking for %s: %w", table, err)
+		}
+		// The name as the schema spells it, not as this package spells it.
+		if _, err := db.Exec("DELETE FROM " + present); err != nil {
+			return fmt.Errorf("stripping credentials: clearing %s: %w", present, err)
+		}
+	}
+	if _, err := db.Exec("VACUUM"); err != nil {
+		return fmt.Errorf("stripping credentials: rewriting %s: %w", path, err)
+	}
+	return nil
+}
+
+// rejected wraps a refusal that came before the live database was touched, and
+// adds ErrNotAttempted where SQLite says the failure was not the upload's.
+//
+// One function for every step that still reads the staged file, so the two
+// cannot drift into disagreeing about the same error.
+func rejected(err error) error {
+	if machineFault(err) {
+		return fmt.Errorf("%w: %w: %w", ErrRejected, ErrNotAttempted, err)
+	}
+	return fmt.Errorf("%w: %w", ErrRejected, err)
+}
+
+// machineFault reports whether an error is the machine's rather than the
+// uploaded file's, by the result code SQLite itself assigned it.
+//
+// Unrecognised is the file's, and so is an error carrying no code at all. The
+// caller uses this to decide whether to tell an operator their file is fine,
+// which is a claim, and a claim nobody has established is not one to make — the
+// same direction the zero value takes everywhere else here. Getting it wrong in
+// this direction costs a re-upload; wrong in the other sends someone hunting a
+// server problem that does not exist.
+func machineFault(err error) bool {
+	// The driver's error type, declared here rather than imported, so this does
+	// not turn a blank driver import into a real dependency.
+	var coded interface{ Code() int }
+	if !errors.As(err, &coded) {
+		return false
+	}
+	// SQLite's primary result code; the high bits are the extended reason, which
+	// only ever refines one of these.
+	switch coded.Code() & 0xff {
+	case 5, // SQLITE_BUSY: something else holds the file
+		6,  // SQLITE_LOCKED
+		7,  // SQLITE_NOMEM
+		8,  // SQLITE_READONLY: the staging directory, which dsforms chose
+		10, // SQLITE_IOERR
+		13, // SQLITE_FULL: no room for the VACUUM's second copy
+		14: // SQLITE_CANTOPEN
+		return true
+	}
+	return false
 }
 
 // Validate checks that a file is a valid DSForms SQLite database.
@@ -52,17 +223,36 @@ func Validate(path string) error {
 		return fmt.Errorf("validate: integrity check failed: %s", result)
 	}
 
-	// Required tables must all be present
-	for _, table := range []string{"users", "forms", "submissions"} {
+	return requireTables(db, "users", "forms", "submissions")
+}
+
+// rowQueryer is the part of *sql.DB that requireTables uses.
+type rowQueryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// requireTables refuses a schema that does not declare every one of tables, and
+// says which one it is missing.
+//
+// A schema it could not read is a different answer and gets a different error.
+// Collapsing the two told an admin their backup was missing "users" when the
+// read had simply failed, and sent them to re-export a file that was fine.
+//
+// NOCASE for the reason stripCredentials gives: every query that then uses
+// these tables resolves their names case-insensitively, so a database declaring
+// Users works and must not be refused as missing it.
+func requireTables(db rowQueryer, tables ...string) error {
+	for _, table := range tables {
 		var name string
-		err := db.QueryRow(
-			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", table,
-		).Scan(&name)
-		if err != nil {
+		switch err := db.QueryRow(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name = ? COLLATE NOCASE", table,
+		).Scan(&name); {
+		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("validate: missing required table %q", table)
+		case err != nil:
+			return fmt.Errorf("validate: looking for table %q: %w", table, err)
 		}
 	}
-
 	return nil
 }
 
@@ -90,6 +280,24 @@ const (
 var (
 	// ErrRejected: refused before the live database was touched.
 	ErrRejected = errors.New("backup: restore rejected")
+	// ErrNotAttempted: refused, and not because of the uploaded file — this
+	// instance was not in a state to accept it. A leftover parked database, a
+	// write-ahead log another request is pinning, a disk that would not take the
+	// write.
+	//
+	// Passing Validate is not the line, and neither is reaching it. Both it and
+	// stripCredentials read the staged upload, so both fail either way, and both
+	// are sorted by machineFault through rejected. This sentinel claims the
+	// operator's file is fine, so it belongs only where that is known.
+	//
+	// Wrapped alongside ErrRejected rather than instead of it, because the
+	// guarantee an operator needs first — nothing was touched, your database is
+	// as it was — is the same one, and a caller asking only that must not have to
+	// learn a second name for it. This says whose fault it was, which is what
+	// decides whether re-exporting the file could possibly help. It could not:
+	// telling them it was rejected sends them to redo the one thing that was
+	// already fine.
+	ErrNotAttempted = errors.New("backup: restore not attempted")
 	// ErrRolledBack: the swap failed and the previous database is back in service.
 	ErrRolledBack = errors.New("backup: restore rolled back")
 	// ErrUnavailable: the swap failed and so did the recovery. The process has no
@@ -100,6 +308,19 @@ var (
 // StagedUploadPattern matches the temp files the handler stages beside the
 // database while a restore is in flight.
 const StagedUploadPattern = "dsforms-import-*.db"
+
+// stagedUploadSidecars matches the WAL and journal files SQLite writes beside a
+// staged upload while it is being stripped.
+//
+// A raw copy of a live database arrives in WAL mode, so opening it to clear the
+// credential tables creates these. Without them in the sweep, a crash mid-strip
+// leaks a file up to the size of the database, forever, on the volume the sweep
+// exists to keep from filling.
+var stagedUploadSidecars = []string{
+	StagedUploadPattern + "-wal",
+	StagedUploadPattern + "-shm",
+	StagedUploadPattern + "-journal",
+}
 
 // SweepStagedUploads removes leftover restore uploads from dir.
 //
@@ -116,9 +337,13 @@ const StagedUploadPattern = "dsforms-import-*.db"
 // Returns the number removed. A failure to remove one is not fatal — a leftover
 // file wastes space, and refusing to boot over it would be the worse trade.
 func SweepStagedUploads(dir string) (int, error) {
-	matches, err := filepath.Glob(filepath.Join(dir, StagedUploadPattern))
-	if err != nil {
-		return 0, fmt.Errorf("sweep staged uploads: %w", err)
+	var matches []string
+	for _, pattern := range append([]string{StagedUploadPattern}, stagedUploadSidecars...) {
+		found, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err != nil {
+			return 0, fmt.Errorf("sweep staged uploads: %w", err)
+		}
+		matches = append(matches, found...)
 	}
 	var removed int
 	for _, m := range matches {
@@ -174,8 +399,31 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	importMu.Lock()
 	defer importMu.Unlock()
 
+	// Through rejected, not a bare wrap: integrity_check reads the same staged
+	// file, so a flaky volume or a memory-capped container fails it for reasons
+	// the upload had nothing to do with.
 	if err := Validate(uploadedPath); err != nil {
-		return fmt.Errorf("%w: %w", ErrRejected, err)
+		return rejected(err)
+	}
+
+	// Stripped again on the way in, not only on the way out.
+	//
+	// Export is the wrong place for this to live alone: a snapshot taken before
+	// that existed still carries credentials, and operations.md explicitly tells
+	// people they can drop in a raw copy of the database file. Either would walk
+	// a revoked token or a logged-out session straight back into a live
+	// instance, past a defence that only ever ran on files this build wrote.
+	//
+	// It is the uploaded file being modified, before anything is swapped, so a
+	// rejected restore leaves the live database untouched as before.
+	//
+	// The one step that can fail either way, so it is the one step that asks.
+	// It runs after Validate but still works on the upload, and the file can be
+	// what stops it — a trigger on api_tokens, a schema that will not leave WAL
+	// mode. The machine can be too: the VACUUM writes a second copy of the whole
+	// database, which is the most space-hungry moment in a restore.
+	if err := stripCredentials(uploadedPath); err != nil {
+		return rejected(err)
 	}
 
 	// Refuse if a previous restore left its parked database behind.
@@ -191,13 +439,13 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	// Nothing else in the codebase looks at this file, so refusing here is what
 	// makes it survivable.
 	if _, err := os.Stat(dbPath + rollbackSuffix); err == nil {
-		return fmt.Errorf("%w: %s already exists, which means a previous restore did "+
-			"not finish. That file may be your database — move it somewhere safe (or "+
-			"back to %s) before restoring again",
-			ErrRejected, dbPath+rollbackSuffix, dbPath)
+		return fmt.Errorf("%w: %w: %s already exists, which means a previous restore "+
+			"did not finish. That file may be your database — move it somewhere safe "+
+			"(or back to %s) before restoring again",
+			ErrRejected, ErrNotAttempted, dbPath+rollbackSuffix, dbPath)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("%w: cannot check for a leftover %s: %w",
-			ErrRejected, dbPath+rollbackSuffix, err)
+		return fmt.Errorf("%w: %w: cannot check for a leftover %s: %w",
+			ErrRejected, ErrNotAttempted, dbPath+rollbackSuffix, err)
 	}
 
 	// Flush the write-ahead log into the main database before anything is
@@ -217,15 +465,16 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	var busy, walFrames, flushed sql.NullInt64
 	if err := s.DB().QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
 		Scan(&busy, &walFrames, &flushed); err != nil {
-		return fmt.Errorf("%w: cannot flush the current database to disk, so it "+
-			"cannot be safely set aside: %w", ErrRejected, err)
+		return fmt.Errorf("%w: %w: cannot flush the current database to disk, so it "+
+			"cannot be safely set aside: %w", ErrRejected, ErrNotAttempted, err)
 	}
 	// A database not in WAL mode reports -1 for both counts: nothing to flush.
 	if walFrames.Int64 > 0 && flushed.Int64 < walFrames.Int64 {
-		return fmt.Errorf("%w: %d of %d write-ahead frames could not be written to "+
-			"the database file, most likely because another request is holding a read "+
-			"snapshot. Removing the log now would discard those writes; retry the "+
-			"restore", ErrRejected, walFrames.Int64-flushed.Int64, walFrames.Int64)
+		return fmt.Errorf("%w: %w: %d of %d write-ahead frames could not be written "+
+			"to the database file, most likely because another request is holding a "+
+			"read snapshot. Removing the log now would discard those writes; retry "+
+			"the restore", ErrRejected, ErrNotAttempted,
+			walFrames.Int64-flushed.Int64, walFrames.Int64)
 	}
 
 	// Close before any filesystem operation so no write races the rename.

@@ -44,7 +44,7 @@ func TestCreateHeldSubmissionStoresScoreAndSignals(t *testing.T) {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestRestoreSubmission(t *testing.T) {
 		t.Error("a restored submission must land unread — it has never been seen")
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestDeleteHeldCascadesSignals(t *testing.T) {
 		}
 	}
 
-	n, err := s.DeleteHeld([]string{"a", "b"})
+	n, err := s.DeleteHeld([]string{"a", "b"}, AllForms())
 	if err != nil {
 		t.Fatalf("DeleteHeld: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestDeleteHeldCascadesSignals(t *testing.T) {
 		t.Errorf("DeleteHeld reported %d rows, want 2", n)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestDeleteHeldIgnoresAcceptedSubmissions(t *testing.T) {
 	// The reported count is now the direct evidence the is_held guard held: an
 	// accepted submission's id matches nothing, so nothing is deleted and
 	// nothing is claimed.
-	n, err := s.DeleteHeld([]string{"clean"})
+	n, err := s.DeleteHeld([]string{"clean"}, AllForms())
 	if err != nil {
 		t.Fatalf("DeleteHeld: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestDeleteHeldIgnoresAcceptedSubmissions(t *testing.T) {
 func TestDeleteHeldEmptyIsNoOp(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	n, err := s.DeleteHeld(nil)
+	n, err := s.DeleteHeld(nil, AllForms())
 	if err != nil {
 		t.Errorf("DeleteHeld(nil) = %v, want nil", err)
 	}
@@ -281,7 +281,7 @@ func TestPurgeHeldOlderThan(t *testing.T) {
 		t.Errorf("purged %d, want 1", n)
 	}
 
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestNavCounts(t *testing.T) {
 		t.Fatalf("CreateEntry: %v", err)
 	}
 
-	nav, err := s.NavCounts()
+	nav, err := s.NavCounts(AllForms())
 	if err != nil {
 		t.Fatalf("NavCounts: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestUpgradeFromPreQuarantineSchema(t *testing.T) {
 		[]SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}}); err != nil {
 		t.Fatalf("CreateHeldSubmission after upgrade: %v", err)
 	}
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions after upgrade: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestDeleteHeldExceedsSQLiteVariableLimit(t *testing.T) {
 		ids = append(ids, fmt.Sprintf("absent%06d", i))
 	}
 
-	n, err := s.DeleteHeld(ids)
+	n, err := s.DeleteHeld(ids, AllForms())
 	if err != nil {
 		t.Fatalf("DeleteHeld with %d ids: %v", len(ids), err)
 	}
@@ -684,7 +684,7 @@ func TestDeleteAllHeld(t *testing.T) {
 		t.Errorf("reported %d deleted, want 3 — the flash message shows this number", n)
 	}
 
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(AllForms(), 10, 0)
 	if len(held) != 0 {
 		t.Errorf("%d held rows survived", len(held))
 	}
@@ -841,7 +841,7 @@ func TestAcceptedReadsCarryEveryColumn(t *testing.T) {
 	})
 
 	t.Run("SearchSubmissions", func(t *testing.T) {
-		hits, err := s.SearchSubmissions("Bot", 25)
+		hits, err := s.SearchSubmissions("Bot", AllForms(), 25)
 		if err != nil {
 			t.Fatalf("SearchSubmissions: %v", err)
 		}
@@ -947,7 +947,7 @@ func TestGetHeldSubmission(t *testing.T) {
 		// Scoped to this subtest's own row. DeleteAllHeld would take h1 with it
 		// and break the sibling below — these subtests share one store, so a
 		// global mutation here is a landmine for whoever adds the next one.
-		if _, err := s.DeleteHeld([]string{"purged"}); err != nil {
+		if _, err := s.DeleteHeld([]string{"purged"}, AllForms()); err != nil {
 			t.Fatalf("DeleteHeld: %v", err)
 		}
 		if _, err := s.GetHeldSubmission("purged"); !errors.Is(err, ErrSubmissionGone) {
@@ -995,5 +995,247 @@ func TestHeldCountForForm(t *testing.T) {
 	// Scoped per form, not global — the stat sits on one form's page.
 	if n, err := s.HeldCountForForm("f2"); err != nil || n != 0 {
 		t.Errorf("f2 held = %d (%v), want 0", n, err)
+	}
+}
+
+// acceptedFixture is a submission that passed screening: notified, with a real
+// sub-threshold score. That combination is what the MarkSpam tests below are
+// about, so it is spelled out rather than defaulted.
+func acceptedFixture(id, formID string, score, threshold int) Submission {
+	return Submission{
+		ID:            id,
+		FormID:        formID,
+		Data:          map[string]string{"name": "Real Person", "message": "hello"},
+		RawData:       `{"name":"Real Person","message":"hello"}`,
+		IP:            "198.51.100.4",
+		CreatedAt:     time.Now().UTC().Truncate(time.Second),
+		SpamScore:     score,
+		HeldThreshold: threshold,
+	}
+}
+
+// TestMarkSpamMovesAnAcceptedSubmissionIntoQuarantine is the basic shape: the
+// row leaves the inbox and joins the review queue, rather than being destroyed.
+func TestMarkSpamMovesAnAcceptedSubmissionIntoQuarantine(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	if err := s.CreateSubmission(acceptedFixture("s1", "f1", 3, 6)); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	got, err := s.MarkSpam("s1", "admin")
+	if err != nil {
+		t.Fatalf("MarkSpam: %v", err)
+	}
+	if !got.IsHeld {
+		t.Error("returned submission IsHeld = false, want true")
+	}
+
+	// Assert the behaviour, not its absence: gone from the inbox could equally
+	// mean deleted, which is the opposite of what this is for.
+	inbox, err := s.ListSubmissions("f1")
+	if err != nil {
+		t.Fatalf("ListSubmissions: %v", err)
+	}
+	if len(inbox) != 0 {
+		t.Errorf("inbox still holds %d submissions, want 0", len(inbox))
+	}
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
+	if err != nil {
+		t.Fatalf("HeldSubmissions: %v", err)
+	}
+	if len(held) != 1 || held[0].ID != "s1" {
+		t.Fatalf("quarantine holds %+v, want exactly s1 — it was destroyed, not quarantined", held)
+	}
+}
+
+// TestMarkSpamPreservesNotified is the one that matters most, and the one an
+// "is it held?" assertion would sail straight past.
+//
+// An accepted submission has already had its email and webhook sent. The restore
+// path re-sends whatever the hold withheld, gated on notified — so resetting
+// that column here would make every restore deliver a second copy of a
+// notification the recipient already has. Asserted on the column, because the
+// only other way to see it is to drive the whole handler.
+func TestMarkSpamPreservesNotified(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	if err := s.CreateSubmission(acceptedFixture("s1", "f1", 3, 6)); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	got, err := s.MarkSpam("s1", "admin")
+	if err != nil {
+		t.Fatalf("MarkSpam: %v", err)
+	}
+	if !got.Notified {
+		t.Error("returned Notified = false; restoring this would re-send a notification already delivered")
+	}
+
+	held, err := s.GetHeldSubmission("s1")
+	if err != nil {
+		t.Fatalf("GetHeldSubmission: %v", err)
+	}
+	if !held.Notified {
+		t.Error("stored notified = 0; restoring this would re-send a notification already delivered")
+	}
+}
+
+// TestMarkSpamPreservesTheOriginalScore. The score is the record of what the
+// filter actually thought. Overwriting it with the threshold — or with zero —
+// would make the quarantine meter state a number this submission never had, which
+// is the same defect as the partial reads that shipped once already.
+func TestMarkSpamPreservesTheOriginalScore(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	if err := s.CreateSubmission(acceptedFixture("s1", "f1", 3, 6)); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+
+	got, err := s.MarkSpam("s1", "admin")
+	if err != nil {
+		t.Fatalf("MarkSpam: %v", err)
+	}
+	if got.SpamScore != 3 {
+		t.Errorf("SpamScore = %d, want 3 — the score the filter actually gave it", got.SpamScore)
+	}
+	if got.HeldThreshold != 6 {
+		t.Errorf("HeldThreshold = %d, want 6 — the bar it was actually judged against", got.HeldThreshold)
+	}
+}
+
+// TestMarkSpamRecordsWhoDidIt. A held submission with no signal rows reads as
+// "held for no recorded reason" in the quarantine breakdown, and — worse — the
+// reader uses the presence of signals to tell a held-then-restored submission
+// from one that simply passed.
+func TestMarkSpamRecordsWhoDidIt(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	if err := s.CreateSubmission(acceptedFixture("s1", "f1", 3, 6)); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if _, err := s.MarkSpam("s1", "baran"); err != nil {
+		t.Fatalf("MarkSpam: %v", err)
+	}
+
+	signals, err := s.SubmissionSignals("s1")
+	if err != nil {
+		t.Fatalf("SubmissionSignals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Fatalf("got %d signals, want exactly 1", len(signals))
+	}
+	if signals[0].Check != "manual" {
+		t.Errorf("Check = %q, want %q", signals[0].Check, "manual")
+	}
+	if signals[0].Match != "baran" {
+		t.Errorf("Match = %q, want the actor %q", signals[0].Match, "baran")
+	}
+	// Weight zero, because no rule fired and the score is unchanged. A non-zero
+	// weight here would make the breakdown sum to more than the stored score.
+	if signals[0].Weight != 0 {
+		t.Errorf("Weight = %d, want 0 — the score is unchanged, so the breakdown must still sum to it", signals[0].Weight)
+	}
+}
+
+// TestMarkSpamIsIdempotent. A double-submitted POST or a retried tool call must
+// not write a second signal row, and must be distinguishable from a submission
+// that no longer exists at all.
+func TestMarkSpamIsIdempotent(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	if err := s.CreateSubmission(acceptedFixture("s1", "f1", 3, 6)); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if _, err := s.MarkSpam("s1", "admin"); err != nil {
+		t.Fatalf("first MarkSpam: %v", err)
+	}
+
+	_, err := s.MarkSpam("s1", "admin")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second MarkSpam error = %v, want ErrNotFound (already held)", err)
+	}
+	if errors.Is(err, ErrSubmissionGone) {
+		t.Error("second MarkSpam reported the submission as gone; it is held, and the two need different messages")
+	}
+
+	signals, err := s.SubmissionSignals("s1")
+	if err != nil {
+		t.Fatalf("SubmissionSignals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Errorf("got %d signals after two MarkSpam calls, want 1", len(signals))
+	}
+}
+
+// TestMarkSpamOnAMissingSubmissionSaysGone — the other side of the same
+// classification. Reporting "already held" for a row that was deleted sends an
+// operator to search a queue it is not in.
+func TestMarkSpamOnAMissingSubmissionSaysGone(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+
+	_, err := s.MarkSpam("nope", "admin")
+	if !errors.Is(err, ErrSubmissionGone) {
+		t.Fatalf("MarkSpam on a missing submission error = %v, want ErrSubmissionGone", err)
+	}
+}
+
+// TestMarkSpamIsRestorable closes the loop the MCP surface depends on: marking
+// as spam is reversible, so a mistaken call is recoverable from the admin.
+func TestMarkSpamIsRestorable(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	if err := s.CreateSubmission(acceptedFixture("s1", "f1", 3, 6)); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if _, err := s.MarkSpam("s1", "admin"); err != nil {
+		t.Fatalf("MarkSpam: %v", err)
+	}
+
+	restored, err := s.RestoreSubmission("s1")
+	if err != nil {
+		t.Fatalf("RestoreSubmission: %v", err)
+	}
+	if restored.IsHeld {
+		t.Error("IsHeld = true after restore")
+	}
+	if !restored.Notified {
+		t.Error("Notified = false after restore; the handler would now send a duplicate notification")
+	}
+	inbox, err := s.ListSubmissions("f1")
+	if err != nil {
+		t.Fatalf("ListSubmissions: %v", err)
+	}
+	if len(inbox) != 1 {
+		t.Errorf("inbox holds %d submissions after restore, want 1", len(inbox))
+	}
+}
+
+// TestMarkSpamMarksUnread. A submission pulled out of the inbox for review
+// should not come back silently read if it is restored.
+func TestMarkSpamMarksUnread(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	if err := s.CreateSubmission(acceptedFixture("s1", "f1", 3, 6)); err != nil {
+		t.Fatalf("CreateSubmission: %v", err)
+	}
+	if err := s.MarkRead("s1"); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+	got, err := s.MarkSpam("s1", "admin")
+	if err != nil {
+		t.Fatalf("MarkSpam: %v", err)
+	}
+	if got.Read {
+		t.Error("Read = true; a quarantined submission has not been read by anyone")
 	}
 }

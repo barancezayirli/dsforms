@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -229,5 +230,62 @@ func TestPingFailsOnAClosedHandle(t *testing.T) {
 	if !errors.Is(err, sql.ErrConnDone) && err.Error() != "sql: database is closed" {
 		t.Logf("closed-handle ping returned %v (not the expected sentinel, but it "+
 			"does fail, which is what /healthz needs)", err)
+	}
+}
+
+// TestDeleteAloneLeavesTheBytesInTheFile is the assumption Export's credential
+// stripping rests on, written down because getting it wrong would look like the
+// job was done.
+//
+// SQLite frees a deleted row's page rather than rewriting it, so the bytes stay
+// in the file and a grep finds them. Anything that removes credentials from a
+// snapshot has to VACUUM afterwards, or it has unlinked the rows and shipped
+// the secrets.
+func TestDeleteAloneLeavesTheBytesInTheFile(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "leftovers.db")
+
+	const secret = "b7e2f1a09c4d5e6f8a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071"
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE secrets (v TEXT); INSERT INTO secrets (v) VALUES (?)`, secret); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM secrets`); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(secret)) {
+		t.Skip("this SQLite build already reclaims the page on delete; the VACUUM in " +
+			"Export is then belt and braces rather than load-bearing")
+	}
+
+	// And that VACUUM is what actually removes them.
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if _, err := db.Exec(`VACUUM`); err != nil {
+		t.Fatalf("vacuum: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after vacuum: %v", err)
+	}
+	if bytes.Contains(raw, []byte(secret)) {
+		t.Error("VACUUM did not remove the deleted row's bytes, so stripping a " +
+			"snapshot this way does not work at all")
 	}
 }

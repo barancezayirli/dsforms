@@ -43,7 +43,11 @@ delete. No per-submission fee, no vendor, no Redis, no Postgres.
 - **Backups that fail safely** — download or restore a snapshot from the UI; a
   failed restore puts the original back rather than leaving you with nothing.
 - **Honeypot, rate limiting and login lockout** built in. No CAPTCHA.
-- **CLI** for user management and snapshots from inside the container.
+- **MCP endpoint** (optional) — point an MCP client at your instance to list
+  unread messages, read one, mark it as spam, or ask what is in the database.
+  Revocable bearer tokens, scoped by permission and limitable to particular
+  forms; off unless you turn it on.
+- **CLI** for user management, API tokens and snapshots from inside the container.
 - **~20MB image**, health check included.
 
 ![The quarantine queue, showing why a submission was held](docs/screenshots/quarantine.png)
@@ -119,6 +123,7 @@ curl -X POST https://your-server.com/f/FORM_ID \
 | **[Operations](docs/operations.md)** | Users, backups, and what happens when a restore fails |
 | **[Waitlists](docs/waitlists.md)** | Signups, positions, confirmations, broadcasts |
 | **[Development](docs/development.md)** | Building, testing, project layout |
+| **[MCP](docs/mcp.md)** | Connecting an MCP client, tokens, scopes, the tools |
 
 ## Security
 
@@ -128,7 +133,23 @@ curl -X POST https://your-server.com/f/FORM_ID \
 - HMAC-SHA256 signed flash cookies; `HttpOnly`, `SameSite=Lax`, conditional `Secure`
 - Per-IP rate limiting on submissions, and a 5-attempt / 15-minute login lockout
 - `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and a CSP
-- 64KB request body limit (100MB for backup import only)
+- 64KB request body limit (100MB for backup import, 1MB for MCP)
+- API tokens stored as SHA-256 hashes, shown once, scoped and individually
+  revocable; deleting a user revokes theirs in the same statement
+- API tokens and sessions are stripped from a snapshot on the way out *and* on
+  the way in, so a restore through the admin walks no revoked token or ended
+  session back in. Nothing else is removed, so a snapshot is as sensitive as the
+  database it copies, and a restore returns everything else to that point
+- dsforms refuses to start with the MCP endpoint enabled over plain http, since
+  a bearer token would cross the network in the clear on every request
+- Chat-template control tokens and invisible Unicode are removed from submission
+  content before an MCP client sees it, and reported to the client. The
+  recognised marker families are a list, so the client is told that an empty
+  report is not a clean bill of health. The stored message is never changed, and
+  the admin marks what was withheld
+- An API token can be limited to particular forms, and then cannot read, change
+  or delete anything in the others — enforced in SQL on every query, not by
+  filtering rows afterwards
 
 Found something? Please report it privately — see **[SECURITY.md](SECURITY.md)**.
 

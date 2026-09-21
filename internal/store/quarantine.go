@@ -29,6 +29,13 @@ type NavCounts struct {
 	Unread   int
 	Held     int
 	Waitlist int
+
+	// WaitlistKnown is false when the counts were taken under a form scope.
+	// Waitlist entries do not belong to a form, so a scoped call cannot answer
+	// that question — and a zero it did not measure is the manufactured number
+	// this codebase keeps having to take back out, the same reason
+	// PositionKnown exists on the reader.
+	WaitlistKnown bool
 }
 
 // ErrSubmissionGone means there is no such submission at all — deleted, purged
@@ -215,10 +222,13 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 }
 
 // HeldSubmissions returns a page of the quarantine queue, newest first.
-func (s *Store) HeldSubmissions(limit, offset int) ([]Submission, error) {
+func (s *Store) HeldSubmissions(forms FormScope, limit, offset int) ([]Submission, error) {
+	scopeClause, scopeArgs := forms.clause("form_id")
+	args := append(scopeArgs, limit, offset)
 	return s.querySubmissions("held submissions",
-		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1 ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
-		limit, offset)
+		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1"+scopeClause+
+			" ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+		args...)
 }
 
 // GetHeldSubmission returns one held submission by id.
@@ -303,6 +313,99 @@ func (s *Store) RestoreSubmission(id string) (Submission, error) {
 	return sub, nil
 }
 
+// MarkSpam moves an already-accepted submission into quarantine because an
+// operator said so, and returns it.
+//
+// It is the inverse of RestoreSubmission and is built the same way, for the same
+// reasons: one UPDATE … RETURNING rather than update-then-read, so there is no
+// window in which the row is held but the caller is told it failed; and an
+// `AND is_held = 0` guard, which is what makes a double-clicked mark affect no
+// rows instead of writing a second signal.
+//
+// Three columns are deliberately left alone, and each has a failure behind it:
+//
+//   - notified. This submission was accepted, so its email and webhook already
+//     went. RestoreSubmission's caller re-sends whatever the hold withheld,
+//     gated on notified — so clearing it here would make every later restore
+//     deliver a second copy of a notification the recipient already has.
+//
+//   - spam_score and held_threshold. They record what the filter actually
+//     thought and what bar it applied. Overwriting them would make the
+//     quarantine meter state a number this submission never had, which is the
+//     defect a partial read shipped once already. A manually held submission
+//     therefore shows a score *below* its threshold, which is the truth: no
+//     check fired, a person decided.
+//
+// read is set to 0 on purpose: a submission pulled out for review has not been
+// read by anyone, and a restore should return it to the inbox as unread.
+//
+// The signal row is what stops this from being an unexplained hold. The
+// quarantine breakdown renders signals, and the reader distinguishes "was held,
+// then restored" from "simply passed" by whether any exist — so a held row with
+// none reads as held for no recorded reason. Weight is zero because no rule
+// fired and the score is unchanged; a non-zero weight would make the breakdown
+// sum to more than the score beside it.
+func (s *Store) MarkSpam(id, actor string) (Submission, error) {
+	tx, err := s.conn().Begin()
+	if err != nil {
+		return Submission{}, fmt.Errorf("mark spam: begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once Commit succeeds
+
+	sub, err := scanHeld(tx.QueryRow(
+		"UPDATE submissions SET is_held = 1, read = 0, held_at = ? WHERE id = ? AND is_held = 0 "+
+			"RETURNING "+heldColumns,
+		sqliteTimestamp(time.Now()), id,
+	))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// Same two questions as the restore path, opposite way round: the
+			// row is already held, or it does not exist at all.
+			//
+			// Classified through tx, not through s.conn(). An in-memory store
+			// caps the pool at one connection, so asking the Store for a second
+			// one while this transaction still holds the first deadlocks the
+			// call outright — it does not fail, it hangs, which is how this was
+			// found. Using the open transaction is also the more correct read:
+			// it sees the same snapshot the UPDATE just failed against.
+			return Submission{}, classifyMarkSpamMiss(tx, id)
+		}
+		return Submission{}, fmt.Errorf("mark spam: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		"INSERT INTO spam_signals (submission_id, rule, field, match_text, weight) VALUES (?, ?, '', ?, 0)",
+		id, string(screen.CheckManual), actor,
+	); err != nil {
+		return Submission{}, fmt.Errorf("mark spam: signal: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Submission{}, fmt.Errorf("mark spam: commit: %w", err)
+	}
+	return sub, nil
+}
+
+// classifyMarkSpamMiss turns a mark that affected no rows into the specific
+// reason. It is classifyMissingHeld's mirror: there, a present row means
+// "already restored"; here, a present row means "already held".
+//
+// It takes the querier rather than hanging off *Store precisely so its one
+// caller can hand it the open transaction — see the note at that call site.
+func classifyMarkSpamMiss(q execQuerier, id string) error {
+	var isHeld int
+	switch err := q.QueryRow("SELECT is_held FROM submissions WHERE id = ?", id).Scan(&isHeld); {
+	case errors.Is(err, ErrNotFound):
+		return fmt.Errorf("submission %s: %w", id, ErrSubmissionGone)
+	case err != nil:
+		return fmt.Errorf("submission %s: classifying a failed mark: %w", id, err)
+	default:
+		// The row exists and is already held, which is what a second mark looks
+		// like. ErrNotFound stays the sentinel for "nothing to do here".
+		return fmt.Errorf("submission %s: already held: %w", id, ErrNotFound)
+	}
+}
+
 // MarkNotified records that a restored submission's withheld notification has
 // been sent, so a second restore cannot send it twice.
 func (s *Store) MarkNotified(id string) error {
@@ -322,7 +425,10 @@ func (s *Store) MarkNotified(id string) error {
 // len(ids) a different number: ids the retention sweep already purged, or that
 // another admin acted on, match nothing. Reporting the length of the request
 // tells the operator "20 deleted" when 12 went.
-func (s *Store) DeleteHeld(ids []string) (int, error) {
+// forms bounds the delete: an id outside the scope matches nothing, and the
+// returned count is what actually went rather than what was asked for, which
+// the caller already relies on.
+func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 	// Batched because SQLite caps bound parameters at 32766 (SQLITE_MAX_VARIABLE_NUMBER).
 	// One IN (?,?,…) over an unbounded list fails outright with "too many SQL
 	// variables" — which is how "Empty quarantine" used to break on exactly the
@@ -346,7 +452,10 @@ func (s *Store) DeleteHeld(ids []string) (int, error) {
 			placeholders[i] = "?"
 			args = append(args, id)
 		}
-		query := "DELETE FROM submissions WHERE is_held = 1 AND id IN (" + strings.Join(placeholders, ",") + ")"
+		scopeClause, scopeArgs := forms.clause("form_id")
+		args = append(args, scopeArgs...)
+		query := "DELETE FROM submissions WHERE is_held = 1 AND id IN (" +
+			strings.Join(placeholders, ",") + ")" + scopeClause
 		// The running total is returned *with* the error, not discarded. Each
 		// batch autocommits on its own, so a failure in batch three leaves the
 		// first two permanently deleted — and returning 0 there tells the
@@ -399,17 +508,38 @@ func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
 	return int(n), nil
 }
 
-// NavCounts returns the three sidebar badge numbers in one round trip. It runs
-// on every admin page render, so it is deliberately three indexed COUNTs and
+// NavCounts returns the sidebar badge numbers in one round trip. It runs on
+// every admin page render, so it is deliberately a few indexed COUNTs and
 // nothing more.
-func (s *Store) NavCounts() (NavCounts, error) {
-	var n NavCounts
-	if err := s.conn().QueryRow(`
+//
+// Under a form scope it returns two of them: a waitlist entry belongs to no
+// form, so that count is left unmeasured and WaitlistKnown says so rather than
+// reporting a zero nothing looked for.
+func (s *Store) NavCounts(forms FormScope) (NavCounts, error) {
+	scopeClause, scopeArgs := forms.clause("form_id")
+	args := append(append([]any{}, scopeArgs...), scopeArgs...)
+
+	n := NavCounts{WaitlistKnown: forms.All()}
+	query := `
 		SELECT
-			(SELECT COUNT(*) FROM submissions WHERE read = 0 AND is_held = 0),
-			(SELECT COUNT(*) FROM submissions WHERE is_held = 1),
-			(SELECT COUNT(*) FROM waitlist_entries)
-	`).Scan(&n.Unread, &n.Held, &n.Waitlist); err != nil {
+			(SELECT COUNT(*) FROM submissions WHERE read = 0 AND is_held = 0` + scopeClause + `),
+			(SELECT COUNT(*) FROM submissions WHERE is_held = 1` + scopeClause + `)`
+	// Still one statement on the path the admin takes. The waitlist subquery is
+	// added rather than run separately, so scoping did not quietly turn every
+	// page render into two round trips.
+	if n.WaitlistKnown {
+		query += `,
+			(SELECT COUNT(*) FROM waitlist_entries)`
+	}
+
+	row := s.conn().QueryRow(query, args...)
+	var err error
+	if n.WaitlistKnown {
+		err = row.Scan(&n.Unread, &n.Held, &n.Waitlist)
+	} else {
+		err = row.Scan(&n.Unread, &n.Held)
+	}
+	if err != nil {
 		return NavCounts{}, fmt.Errorf("nav counts: %w", err)
 	}
 	return n, nil

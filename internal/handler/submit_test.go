@@ -113,7 +113,7 @@ func TestSubmitHoneypotIgnored(t *testing.T) {
 	// only an empty inbox would pass just as happily if it started quarantining
 	// instead — which would bury the review queue under the highest-volume bot
 	// traffic on the instance.
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -545,7 +545,7 @@ func TestSubmitSpamHeld(t *testing.T) {
 	}
 	// Asserting the inbox is empty is not enough on its own: that would also
 	// hold if quarantine were reverted to a silent drop.
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestSubmitSpamHeldJSON(t *testing.T) {
 	}
 	// As with the non-JSON twin: an empty inbox alone would also hold if
 	// quarantine were reverted to a silent drop.
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -664,7 +664,7 @@ func TestSubmitThirdSameIPHeld(t *testing.T) {
 	if len(subs) != 2 {
 		t.Errorf("submissions = %d, want 2 (1st and 2nd accepted, 3rd held)", len(subs))
 	}
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -705,7 +705,7 @@ func TestSubmitContentSpamStillCountsTowardIPRepeat(t *testing.T) {
 	if len(subs) != 0 {
 		t.Errorf("submissions = %d, want 0 (2 spam held, 3rd held as IP repeat)", len(subs))
 	}
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}

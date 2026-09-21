@@ -170,6 +170,7 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
     <a class="link" href="#webhooks">Webhooks</a>
     <a class="link" href="#waitlist">Waitlist</a>
     <a class="link" href="#admin">Admin</a>
+    <a class="link" href="#mcp">MCP</a>
     <div style="margin-left:auto;display:flex;gap:9px;flex-wrap:wrap">
       <a class="btn btn-secondary" href="https://github.com/barancezayirli/dsforms">
         <svg class="i" style="font-size:15px"><use href="#ph-star"/></svg>Star
@@ -504,6 +505,77 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
   </div>
 </section>
 
+<!-- MCP -->
+<section id="mcp">
+  <div class="wrap">
+    <div class="kick"><span></span><span>MCP</span></div>
+    <h2>Let an agent work your inbox, on a leash.</h2>
+    <p class="lede">Point an MCP client at <span class="mono">/mcp</span> and it
+       can list what you have not read, read one, file spam, or ask what is in
+       the database. Off until you turn it on.</p>
+
+    <div class="row" style="margin-top:32px;align-items:flex-start">
+      <div class="codecard">
+        <header>
+          <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-brackets-curly"/></svg>
+          <span class="name">client config</span>
+          <button class="btn btn-ghost" data-copy>
+            <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span>Copy</span>
+          </button>
+        </header>
+<pre>{
+  <span class="an">"mcpServers"</span>: {
+    <span class="an">"dsforms"</span>: {
+      <span class="an">"type"</span>: <span class="av">"http"</span>,
+      <span class="an">"url"</span>: <span class="av">"https://forms.you.dev/mcp"</span>,
+      <span class="an">"headers"</span>: {
+        <span class="an">"Authorization"</span>: <span class="av">"Bearer dsf_…"</span>
+      }
+    }
+  }
+}</pre>
+      </div>
+
+      <div style="flex:1 1 320px;min-width:0;display:grid;gap:14px">
+        <div class="card">
+          <div style="font-weight:500">Tokens you can take back</div>
+          <p class="muted" style="font-size:13.5px;margin-top:4px">
+            Shown once, stored as a hash, revocable one at a time. Scoped to read,
+            write or delete — delete is its own scope, because a client that files
+            spam should not also be able to erase it.
+          </p>
+        </div>
+        <div class="card">
+          <div style="font-weight:500">Bound to the forms you pick</div>
+          <p class="muted" style="font-size:13.5px;margin-top:4px">
+            A bound token does not see the others at all — not refused, absent.
+            Every listing is filtered in the query itself, and an id from another
+            form answers exactly as an id that does not exist.
+          </p>
+        </div>
+        <div class="card">
+          <div style="font-weight:500">Messages are not instructions</div>
+          <p class="muted" style="font-size:13.5px;margin-top:4px">
+            Chat-template markers and invisible Unicode are stripped from a
+            submission before a client sees it, and the client is told what went
+            — and told that the list of recognised markers is not exhaustive.
+            What is stored never changes, and the admin flags it.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <p class="muted" style="font-size:13px;margin-top:22px">
+      Refuses to start over plain http, since a bearer token rides every
+      request — override it for localhost or a private network and it warns on
+      every boot instead.
+      Full setup, the tool list and what each scope costs:
+      <a href="https://github.com/barancezayirli/dsforms/blob/main/docs/mcp.md"
+         style="color:var(--accent);text-decoration:underline;text-underline-offset:3px">docs/mcp.md</a>.
+    </p>
+  </div>
+</section>
+
 <!-- What you get -->
 <section>
   <div class="wrap">
@@ -552,7 +624,7 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         <div class="card">
           <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-cloud-arrow-up"/></svg></span>
           <div style="font-size:14.5px;font-weight:500;margin-top:10px">Backup and restore</div>
-          <p class="muted" style="font-size:12.5px;margin-top:4px">A consistent snapshot while the server keeps running.</p>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">A consistent snapshot while the server keeps running. API tokens and sessions are stripped both ways.</p>
           <div class="mono dim" style="font-size:10.5px;margin-top:6px">/admin/backups</div>
         </div>
         <div class="card">
@@ -595,6 +667,12 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
           <div style="font-size:14.5px;font-weight:500;margin-top:10px">Multiple users</div>
           <p class="muted" style="font-size:12.5px;margin-top:4px">bcrypt at cost 12, managed from the admin or the CLI.</p>
           <div class="mono dim" style="font-size:10.5px;margin-top:6px">dsforms user add</div>
+        </div>
+        <div class="card">
+          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-brackets-curly"/></svg></span>
+          <div style="font-size:14.5px;font-weight:500;margin-top:10px">MCP endpoint</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Scoped bearer tokens, limitable to single forms. Off unless you enable it.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">MCP_ENABLED</div>
         </div>
       </div>
     </div>

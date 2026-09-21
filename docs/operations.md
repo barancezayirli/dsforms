@@ -46,7 +46,80 @@ smaller than the figure the Backups page reports, which is the on-disk footprint
 including the write-ahead log.
 
 You can open it with any SQLite client, or drop it in as a direct replacement
-for the live database.
+for the live database. Stop the server, then move the old database **and its
+`-wal` and `-shm` files** aside before putting the new one in place: SQLite
+replays a leftover `-wal` over whatever file it finds, which would write the old
+database's last transactions into your replacement. Move rather than delete —
+that `-wal` may hold writes the old database never checkpointed, and dsforms
+installs no signal handler, so a container stop leaves them there.
+
+Move all three into a directory together, keeping their names. SQLite finds a
+log only at `<database>-wal`, so renaming them apart — `dsforms.db.old` beside
+`dsforms.db-wal.old` — detaches the log and the writes in it stop being visible.
+They are still in the file: name it for the database it belongs to, here
+`dsforms.db.old-wal`, and it is found again, as long as nothing has opened that
+database for writing in the meantime. Not `dsforms.db-wal` — that name now
+belongs to the database you restored, and SQLite would replay these frames over
+it.
+
+Restoring through the Backups page is the safer route and does none of this by
+hand: it checkpoints the running database first and refuses outright if the log
+cannot be flushed, then parks the old file until the replacement has opened.
+That park is not an undo — it is deleted once the new database answers, so a
+restore that succeeds on the wrong snapshot has nothing to go back to. Take
+your own copy first.
+
+**API tokens and login sessions are not in a snapshot.** They are cleared from
+the copy, and the copy is rewritten so the hashes are gone from the file rather
+than merely unlinked. Two reasons: a backup gets copied to laptops and object
+stores and had no business carrying credential material, and — the sharper one —
+restoring a snapshot used to undo revocation. A token you revoked, a session you
+logged out of, a session cascaded away with a deleted user: all of them came
+back and worked again.
+
+They are stripped on the way in as well as on the way out, so restoring through
+the Backups page cleans a snapshot taken by an older build, or a raw copy of a
+database file, before anything is swapped.
+
+**Whether a file is cleaned depends on how it gets there.** The stripping lives
+in export and restore; starting the server on a database file does not clean it.
+A snapshot from the Backups page was stripped when it was made, so copying it
+into place is fine on this count — but a file you copied yourself from a live
+database, or one from a build before any of this existed, still carries its
+tokens and sessions, and putting it at `DB_PATH` by hand makes them work again.
+Restore that kind of file through the Backups page instead, which strips it on
+the way in. The upload is capped at 100MB and must be a SQLite database rather
+than an archive — there is no decompression on that path.
+
+One thing to know about where such a file came from: **`cp` is not a way to copy
+a running SQLite database.** It takes the main file without the `-wal` beside
+it, so what you get is whatever the last checkpoint left: internally consistent,
+opening cleanly, passing the integrity check, and missing every write since.
+That is the dangerous outcome, because nothing downstream can tell. The read is
+not atomic either, so the copy can come out torn instead — usually the louder
+failure, since a torn file tends to refuse to open or fail the integrity check,
+though one torn mid-checkpoint can be structurally valid and pass. Use the
+Backups page, `dsforms backup create`, or `VACUUM INTO` against the live
+database itself.
+
+**A snapshot is still sensitive.** Nothing but those two tables is stripped, so
+the file holds every submission, every waitlist entry with its email and IP,
+every user's bcrypt password hash, and every form's webhook URL — which is
+itself a credential for the Slack or Discord channel it posts to. Treat a
+snapshot as you would the live database, not as something safe to pass around.
+
+**And a restore is a whole-database replacement.** Everything the stripping does
+not remove comes back as the snapshot had it: an account you deleted since
+returns with its password hash, and a password you changed reverts to the old
+one. Clearing tokens and sessions keeps those two out; it does not make a
+restore safe to run without looking at what the snapshot predates.
+
+The cost is the other side of that. **After restoring, your API tokens are gone
+and everyone is signed out, including you.** MCP clients stop working until you
+mint new tokens. That is deliberate: a client or a person visibly stopping is a
+better failure than a revoked credential quietly working again — and the
+operator performing a restore was always signed out by it anyway, since their
+own session postdates the snapshot.
 
 ## What happens if a restore fails
 
@@ -59,6 +132,16 @@ A restore replaces the live database, so it is written to fail safely:
 - You are told which of those happened. *"That file was rejected"* means your
   database is untouched; *"your existing database is unchanged and still in
   use"* means the swap failed and was undone.
+- A restore can also be refused because this instance was not in a state to
+  accept it — a parked database from a restore that did not finish, a
+  write-ahead log another request is holding open, a disk with no room. Your
+  database is untouched here too, and the message says the file is not the
+  problem, because the obvious next step otherwise is to re-export and re-upload
+  the one thing that was already fine. The server log names the obstacle.
+  Where a failure could be either — the disk filling up while the upload is
+  being read or cleaned, say — dsforms goes by the reason SQLite gives. When
+  that reason does not say, it reports the file as rejected rather than guess:
+  so if re-uploading fails the same way, the server log is the place to look.
 - In the one case where neither works, the message names the file your data is
   in (`<DB_PATH>.rollback`) and says not to restart before moving it back —
   starting with no database there creates an empty one.

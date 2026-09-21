@@ -74,8 +74,9 @@ type Check = score.Check
 type Signal = score.Signal
 
 // The complete set of checks. CheckRepeatIP and CheckBlocked are stamped by the
-// screener rather than the content scorer, but are declared with the rest so one
-// list is the whole truth.
+// screener rather than the content scorer, and CheckManual by an operator marking
+// an accepted submission as spam, but all are declared with the rest so one list
+// is the whole truth.
 const (
 	CheckMarkup     = score.CheckMarkup
 	CheckSQL        = score.CheckSQL
@@ -85,6 +86,7 @@ const (
 	CheckExtraLinks = score.CheckExtraLinks
 	CheckRepeatIP   = score.CheckRepeatIP
 	CheckBlocked    = score.CheckBlocked
+	CheckManual     = score.CheckManual
 )
 
 // AllChecks is every declared Check. Anything walking the set ranges this rather

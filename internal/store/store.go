@@ -288,6 +288,38 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 
+-- api_tokens are the credentials an MCP client presents. One row is one
+-- long-lived bearer token belonging to one user.
+--
+-- Only the hash is stored, exactly as for sessions: the raw token is returned
+-- once at creation and is unrecoverable afterwards, so a database read is not a
+-- set of live credentials.
+--
+-- The ON DELETE CASCADE is the point of binding a token to a user rather than to
+-- the instance. Removing someone's account removes their access in the same
+-- statement; an instance-wide token would outlive its owner with nobody to
+-- answer for what it did.
+--
+-- expires_at is '' for a token that never expires, matching held_at above rather
+-- than introducing the schema's first nullable column. Read the warning on
+-- GetAPIToken before writing any comparison against it.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL DEFAULT '',
+    token_hash   TEXT NOT NULL UNIQUE,
+    scopes       TEXT NOT NULL DEFAULT '',
+    -- form_ids bounds the token to a set of forms, comma-separated. Empty means
+    -- every form: that is what the column holds for tokens minted before this
+    -- existed, and an upgrade must not silently revoke live credentials. Read
+    -- it through APIToken.Scope, which is the one place that reading is made.
+    form_ids     TEXT NOT NULL DEFAULT '',
+    created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+    last_used_at DATETIME NOT NULL DEFAULT '',
+    expires_at   DATETIME NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
+
 CREATE TABLE IF NOT EXISTS waitlists (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
@@ -360,6 +392,8 @@ func runAlterMigrations(db *sql.DB) error {
 		"ALTER TABLE submissions ADD COLUMN held_threshold INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE submissions ADD COLUMN held_at DATETIME NOT NULL DEFAULT ''",
 		"ALTER TABLE submissions ADD COLUMN notified INTEGER NOT NULL DEFAULT 1",
+		// Empty is every form, so existing tokens keep the access they have.
+		"ALTER TABLE api_tokens ADD COLUMN form_ids TEXT NOT NULL DEFAULT ''",
 	}
 	for _, q := range alters {
 		_, err := db.Exec(q)
@@ -731,16 +765,22 @@ func (s *Store) GetForm(id string) (Form, error) {
 	return f, nil
 }
 
-// ListForms returns all forms with unread counts.
-func (s *Store) ListForms() ([]FormSummary, error) {
+// ListForms returns the forms in scope, with unread counts.
+//
+// The scope filters forms themselves, not just their submissions: a token
+// bounded to one form has no business learning that the others exist, and their
+// names are often the customer's.
+func (s *Store) ListForms(scope FormScope) ([]FormSummary, error) {
+	scopeClause, scopeArgs := scope.clause("f.id")
 	rows, err := s.conn().Query(`
 		SELECT f.id, f.name, f.email_to, f.redirect, f.webhook_url, f.webhook_format, f.created_at, f.spam_threshold,
 		       COUNT(CASE WHEN s.read = 0 AND s.is_held = 0 THEN 1 END) as unread_count
 		FROM forms f
 		LEFT JOIN submissions s ON s.form_id = f.id
+		WHERE 1 = 1`+scopeClause+`
 		GROUP BY f.id
 		ORDER BY f.created_at DESC
-	`)
+	`, scopeArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list forms: %w", err)
 	}
@@ -857,10 +897,110 @@ func (s *Store) MarkRead(submissionID string) error {
 	return nil
 }
 
-// CountAllSubmissions returns the total count of all submissions across all forms.
-func (s *Store) CountAllSubmissions() (int, error) {
+// MarkUnread puts a submission back in the unread state.
+//
+// The inverse of MarkRead, and it exists because a client that can only ever
+// mark things read can never undo a misclick. The unread badge counts this
+// column, so the two stay in step by construction.
+func (s *Store) MarkUnread(submissionID string) error {
+	_, err := s.conn().Exec("UPDATE submissions SET read = 0 WHERE id = ?", submissionID)
+	if err != nil {
+		return fmt.Errorf("mark unread: %w", err)
+	}
+	return nil
+}
+
+// ReadFilter selects which of an inbox's submissions a listing returns.
+//
+// A defined type rather than a bool, because the question has three answers and
+// a bool can only carry two. It arrived as `unreadOnly bool`, and the third case
+// was then handled by filtering the returned page in the caller — which thins a
+// page that LIMIT and OFFSET have already chosen, so a form whose read
+// submissions all sit behind a screenful of unread ones reports having none.
+type ReadFilter string
+
+const (
+	// ReadAny returns read and unread alike.
+	ReadAny ReadFilter = "all"
+	// ReadUnread returns only what nobody has opened.
+	ReadUnread ReadFilter = "unread"
+	// ReadRead returns only what somebody has.
+	ReadRead ReadFilter = "read"
+)
+
+// clause returns the SQL this filter adds, and whether it is a filter this build
+// understands.
+//
+// Every case is named and the default refuses rather than widening to "all":
+// a value we cannot interpret must not quietly return more rows than the caller
+// asked for, which for an unrecognised status would mean handing back the whole
+// inbox to someone who asked for a subset of it.
+func (f ReadFilter) clause() (string, bool) {
+	switch f {
+	case ReadAny:
+		return "", true
+	case ReadUnread:
+		return " AND read = 0", true
+	case ReadRead:
+		return " AND read = 1", true
+	default:
+		return "", false
+	}
+}
+
+// ListSubmissionsFiltered returns a page of accepted submissions, optionally
+// narrowed to one form and to a read state.
+//
+// It exists because neither existing listing answers "what have I not read?"
+// across forms: ListSubmissions and ListSubmissionsPaged are both scoped to a
+// single form and neither filters on read. An empty formID means every form.
+//
+// Held submissions are excluded, like every other inbox read — quarantine is
+// reviewed on its own screen, and a message awaiting a spam decision is not
+// something anyone has failed to read.
+//
+// The read state is applied here rather than by the caller, and that is the
+// whole point of the type: filtering a returned page is filtering rows that
+// LIMIT and OFFSET already chose, so the answer depends on how many rows of the
+// other kind happened to sort ahead of them.
+//
+// The query is built by appending fixed clause strings and binding every value,
+// never by interpolating one: the only input that reaches the SQL text is a
+// constant chosen by the switch above.
+func (s *Store) ListSubmissionsFiltered(formID string, read ReadFilter, forms FormScope, limit, offset int) ([]Submission, error) {
+	readClause, ok := read.clause()
+	if !ok {
+		return nil, fmt.Errorf("list submissions filtered: unknown read filter %q", read)
+	}
+
+	query := "SELECT " + heldColumns + " FROM submissions WHERE is_held = 0"
+	var args []any
+	if formID != "" {
+		query += " AND form_id = ?"
+		args = append(args, formID)
+	}
+	// In the statement, not applied to the page it returns. Thinning rows that
+	// LIMIT and OFFSET have already chosen is the bug this method's own comment
+	// above records for the read filter, and here it would read as "the form you
+	// are scoped to is empty" — the most convincing wrong answer available.
+	scopeClause, scopeArgs := forms.clause("form_id")
+	query += scopeClause
+	args = append(args, scopeArgs...)
+	query += readClause
+	// Tie-broken by id: created_at alone is not stable, and submissions arriving
+	// in the same second would let a LIMIT/OFFSET page repeat or skip a row.
+	query += " ORDER BY created_at DESC, id LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	return s.querySubmissions("list submissions filtered", query, args...)
+}
+
+// CountAllSubmissions returns the total count of accepted submissions in scope.
+func (s *Store) CountAllSubmissions(forms FormScope) (int, error) {
+	scopeClause, scopeArgs := forms.clause("form_id")
 	var count int
-	err := s.conn().QueryRow("SELECT COUNT(*) FROM submissions WHERE is_held = 0").Scan(&count)
+	err := s.conn().QueryRow(
+		"SELECT COUNT(*) FROM submissions WHERE is_held = 0"+scopeClause, scopeArgs...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count all submissions: %w", err)
 	}

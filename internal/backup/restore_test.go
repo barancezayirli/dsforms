@@ -1,8 +1,10 @@
 package backup
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,7 +180,7 @@ func seedBackupFile(t *testing.T, path string, formName ...string) {
 // being served after Import returns.
 func formNames(t *testing.T, s *store.Store) []string {
 	t.Helper()
-	forms, err := s.ListForms()
+	forms, err := s.ListForms(store.AllForms())
 	if err != nil {
 		t.Fatalf("the store is not serving after Import returned: %v", err)
 	}
@@ -630,4 +632,265 @@ func TestImportSerializesConcurrentRestores(t *testing.T) {
 			"[Restored] or [SecondRestore]", got)
 	}
 	assertNoRollbackFile(t, dbPath)
+}
+
+// TestARefusalAfterValidateIsNotTheFilesFault pins the boundary the two
+// sentinels draw.
+//
+// Once the upload has been validated and stripped, nothing Import can still
+// refuse for is about the file — a leftover parked database, a write-ahead log
+// another request is pinning on the live side. Reported as a plain rejection
+// they all told the operator their file was bad, and the obvious next step,
+// re-export and re-upload, redoes the one thing that was already fine.
+//
+// The two steps that touch the upload, Validate and stripCredentials, go either
+// way, and are sorted by the result code SQLite puts on the failure. A refusal
+// carrying no code — a failed integrity check, a missing table, a journal mode
+// that did not change — is the file's, along with every code machineFault does
+// not recognise. Its table is TestMachineFaultClaimsNothingItDoesNotKnow; the
+// tests below cover the two steps themselves.
+//
+// Both sentinels, deliberately: nothing was touched is still true, and a caller
+// that only wants to know whether its data survived must not have to learn a
+// second name for it.
+func TestARefusalAfterValidateIsNotTheFilesFault(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	if err := os.WriteFile(dbPath+rollbackSuffix, []byte("the operator's only database"), 0o644); err != nil {
+		t.Fatalf("writing leftover: %v", err)
+	}
+
+	err := Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, want it to carry ErrNotAttempted: the "+
+			"uploaded file passed Validate, so it is not what stopped the restore", err)
+	}
+	if !errors.Is(err, ErrRejected) {
+		t.Errorf("Import returned %v, want it to carry ErrRejected too: nothing "+
+			"was touched, and that is what a caller asks first", err)
+	}
+}
+
+// And the other side of the boundary: a file that cannot be validated is the
+// file's fault, and must not claim otherwise.
+func TestARefusedFileIsTheFilesFault(t *testing.T) {
+	t.Parallel()
+	live, dbPath, _ := restoreFixture(t)
+
+	bad := filepath.Join(t.TempDir(), "not-a-database.db")
+	if err := os.WriteFile(bad, []byte("this is not a database"), 0o644); err != nil {
+		t.Fatalf("writing the bad upload: %v", err)
+	}
+
+	err := Import(live, bad, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, but this one really is the uploaded file — "+
+			"telling the operator otherwise sends them looking at the wrong thing", err)
+	}
+}
+
+// TestStrippingFailuresStayTheFilesFault is where the boundary between the two
+// sentinels actually lies, which is one step earlier than it first looks.
+//
+// stripCredentials runs after Validate has passed, so it seems to belong with
+// the refusals that are about this instance. It does not: it is the last step
+// that still operates on the uploaded file, and the file can be what stops it —
+// a trigger on api_tokens, a schema that will not come out of WAL mode.
+// ErrNotAttempted asserts something positive, that the operator's file is fine,
+// so it may only be used where that has been established. Here it has not, and
+// claiming it sends them looking for a server-side obstacle that is not there.
+func TestStrippingFailuresStayTheFilesFault(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// A database that passes Validate and then refuses to be stripped.
+	upload, err := sql.Open("sqlite", uploadPath)
+	if err != nil {
+		t.Fatalf("opening the upload: %v", err)
+	}
+	if _, err := upload.Exec(
+		`CREATE TRIGGER no_delete BEFORE DELETE ON api_tokens
+		 BEGIN SELECT RAISE(ABORT, 'nope'); END`,
+	); err != nil {
+		t.Fatalf("arming the upload: %v", err)
+	}
+	if _, err := upload.Exec(
+		`INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, created_at)
+		 VALUES ('t1', 'u1', 'laptop', 'deadbeef', 'read', CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("seeding a token to strip: %v", err)
+	}
+	if err := upload.Close(); err != nil {
+		t.Fatalf("closing the upload: %v", err)
+	}
+
+	// It really does get past Validate, or this proves nothing about the step
+	// after it.
+	if err := Validate(uploadPath); err != nil {
+		t.Fatalf("the fixture does not reach stripCredentials: %v", err)
+	}
+
+	err = Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, but the uploaded file is exactly what "+
+			"stopped the restore — telling the operator to go looking at the "+
+			"server sends them after an obstacle that is not there", err)
+	}
+	if got := formNames(t, live); len(got) != 1 || got[0] != "Original" {
+		t.Errorf("after a refused restore the live store holds %v, want [Original]", got)
+	}
+}
+
+// TestStrippingFailuresAreSortedByWhoseFaultTheyAre is the other half of
+// TestStrippingFailuresStayTheFilesFault.
+//
+// stripCredentials is the one step that can fail either way, so it is the one
+// step that asks. Its VACUUM writes a second copy of the whole database, which
+// is where a full disk lands, and reporting that as "that file was rejected"
+// sends the operator to re-upload a file that was never the problem — while
+// reporting a trigger in their schema as a server obstacle sends them looking
+// for something that does not exist.
+func TestStrippingFailuresAreSortedByWhoseFaultTheyAre(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// Something else holding the staged file. Not the file's contents, so the
+	// operator's copy is fine and re-uploading it cannot help.
+	holder, err := sql.Open("sqlite", uploadPath)
+	if err != nil {
+		t.Fatalf("opening a second connection: %v", err)
+	}
+	defer holder.Close()
+	tx, err := holder.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO forms (id, name, email_to) VALUES ('pin', 'Pin', 'p@q.com')`,
+	); err != nil {
+		t.Fatalf("taking the write lock: %v", err)
+	}
+	defer tx.Rollback()
+
+	err = Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if !errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, want it to carry ErrNotAttempted: the file "+
+			"is locked, not malformed, so re-exporting and re-uploading it is the "+
+			"one thing that cannot help", err)
+	}
+}
+
+// machineFault decides a claim, so what it does with an answer it does not
+// recognise is the whole of it.
+func TestMachineFaultClaimsNothingItDoesNotKnow(t *testing.T) {
+	t.Parallel()
+
+	coded := func(code int) error {
+		return fmt.Errorf("wrapped: %w", &codedError{code: code})
+	}
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"busy is the machine", coded(5), true},
+		{"disk full is the machine", coded(13), true},
+		{"io error is the machine", coded(10), true},
+		// The extended codes SQLite actually returns, not the bare primaries.
+		{"an extended io error is still the machine", coded(10 | 12<<8), true},
+		{"an extended full is still the machine", coded(13 | 2<<8), true},
+		{"a constraint is the file", coded(19), false},
+		{"corruption is the file", coded(11), false},
+		{"not a database is the file", coded(26), false},
+		{"a code nobody listed is the file", coded(99), false},
+		{"an error with no code at all is the file", errors.New("something"), false},
+		{"and nil claims nothing", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := machineFault(tc.err); got != tc.want {
+				t.Errorf("machineFault(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// codedError carries a SQLite result code the way the driver's own error does.
+type codedError struct{ code int }
+
+func (e *codedError) Error() string { return fmt.Sprintf("sqlite error (%d)", e.code) }
+func (e *codedError) Code() int     { return e.code }
+
+// TestValidationFailuresAreSortedToo closes the mechanism rather than the
+// instance.
+//
+// Validate reads the same staged file stripCredentials does — integrity_check
+// walks every page of it — so it fails for the same two kinds of reason, and
+// sorting one step while leaving the other to blame the upload leaves the same
+// wrong answer one line higher.
+func TestValidationFailuresAreSortedToo(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// Out of WAL mode, so a writer blocks the reader integrity_check is. In WAL
+	// mode it would read the snapshot happily and this would prove nothing.
+	prep, err := sql.Open("sqlite", uploadPath)
+	if err != nil {
+		t.Fatalf("opening the upload: %v", err)
+	}
+	var mode string
+	if err := prep.QueryRow("PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
+		t.Fatalf("switching journal mode: %v", err)
+	}
+	if !strings.EqualFold(mode, "delete") {
+		t.Fatalf("upload is in %q mode, want delete", mode)
+	}
+	if err := prep.Close(); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+
+	// EXCLUSIVE, not the RESERVED a plain write takes: a reserved lock still lets
+	// readers in, and integrity_check is a reader. An earlier version of this
+	// test used a plain transaction and Validate sailed straight through it.
+	holder, err := sql.Open("sqlite", uploadPath)
+	if err != nil {
+		t.Fatalf("opening a second connection: %v", err)
+	}
+	defer holder.Close()
+	conn, err := holder.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("taking a connection: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), "BEGIN EXCLUSIVE"); err != nil {
+		t.Fatalf("taking the exclusive lock: %v", err)
+	}
+	defer conn.ExecContext(context.Background(), "ROLLBACK")
+
+	// It really is Validate that refuses, not a later step.
+	if err := Validate(uploadPath); err == nil {
+		t.Fatal("the fixture does not make Validate fail, so it proves nothing")
+	}
+
+	err = Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if !errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, want it to carry ErrNotAttempted: the file "+
+			"could not be read, which is not the same as it being a bad file, and "+
+			"re-uploading the same bytes hits the same wall", err)
+	}
 }

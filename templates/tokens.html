@@ -1,0 +1,80 @@
+{{template "base" .}}
+
+{{define "header-actions"}}
+<a class="btn btn-primary btn-34" data-drawer href="/admin/tokens/new">
+  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>New token
+</a>
+{{end}}
+
+{{define "content"}}
+<div class="page-head">
+  <h4>API tokens</h4>
+  <span class="muted" style="font-size:13px">Credentials for MCP clients. Each one belongs to you and can be revoked on its own.</span>
+</div>
+
+{{if not .Enabled}}
+<div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>
+  The MCP endpoint is switched off, so tokens created here will be refused.
+  Set <code>MCP_ENABLED=true</code> to turn it on.
+</span></div>
+{{end}}
+
+{{if .NewToken}}
+<div class="card elev-sm" style="margin-bottom:16px;border-color:var(--accent)">
+  <span class="card-title">
+    <svg class="i" style="font-size:15px"><use href="#ph-check-circle"/></svg>Copy this token now
+  </span>
+  <p class="card-body" style="flex:none">
+    This is the only time it is shown. Only a hash is stored, so it cannot be
+    recovered — if you lose it, revoke it and make another.
+  </p>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="code" id="new-token" style="flex:1;min-width:0;word-break:break-all;user-select:all">{{.NewToken}}</div>
+    <button class="btn btn-ghost" type="button" data-copy="#new-token">
+      <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">Copy</span>
+    </button>
+  </div>
+  <div class="card-meta" style="margin-top:10px">Point a client at this endpoint</div>
+  <div class="code" id="mcp-endpoint" style="font-size:11.5px;user-select:all">{{.BaseURL}}/mcp</div>
+  <div class="form-hint" style="margin-top:6px">
+    Send it as <code>Authorization: Bearer &lt;token&gt;</code> over Streamable HTTP.
+  </div>
+</div>
+{{end}}
+
+{{if .Tokens}}
+<div class="card elev-sm">
+  <div class="table-wrap">
+    <table class="table" style="min-width:660px">
+      <thead><tr><th>Name</th><th>Scopes</th><th>Reach</th><th>Last used</th><th>Expires</th><th style="width:90px"></th></tr></thead>
+      <tbody>
+        {{range .Tokens}}
+        <tr>
+          <td style="font-size:13.5px">{{.Name}}</td>
+          <td class="dim nowrap" style="font-size:12px">{{.ScopeList}}</td>
+          <td class="dim truncate" style="font-size:12px;max-width:180px" title="{{.Reach}}">{{.Reach}}</td>
+          <td class="dim nowrap" style="font-size:12px">{{.LastUsed}}</td>
+          <td class="dim nowrap" style="font-size:12px">{{.Expires}}</td>
+          <td style="text-align:right">
+            <form method="POST" action="/admin/tokens/{{.ID}}/delete"
+                  data-confirm="Revoke {{.Name}}? Any client using it stops working immediately.">
+              <button class="btn btn-quiet" type="submit">Revoke</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{else}}
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-lock-key"/></svg></span>
+  <h3>No tokens yet</h3>
+  <p>Create one to connect an MCP client. It gets only the scopes you tick, and you can revoke it on its own.</p>
+  <a class="btn btn-primary" data-drawer href="/admin/tokens/new">
+    <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>New token
+  </a>
+</div>
+{{end}}
+{{end}}

@@ -152,6 +152,18 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, backup.ErrRolledBack):
 			flash.Set(w, h.SecretKey, "error",
 				"Restore failed. Your existing database is unchanged and still in use.")
+		case errors.Is(err, backup.ErrNotAttempted):
+			// Before ErrRejected, which this also is: nothing was touched. But
+			// the obstacle is on this side — the live database's own state, a
+			// parked database from a restore that did not finish or a
+			// write-ahead log that will not flush, or else a failure reading or
+			// rewriting the upload that SQLite attributed to the machine. So
+			// "that file was rejected" would send the operator to re-export and
+			// re-upload the one thing that was not the problem.
+			flash.Set(w, h.SecretKey, "error",
+				"The restore could not be started, and not because of the file you "+
+					"uploaded. Your database is unchanged. Check the server log for "+
+					"what is in the way, then try again.")
 		case errors.Is(err, backup.ErrRejected):
 			flash.Set(w, h.SecretKey, "error",
 				"That file was rejected. Your database is unchanged.")

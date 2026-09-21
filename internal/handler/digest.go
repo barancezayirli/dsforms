@@ -24,7 +24,7 @@ type DigestMailer interface {
 // to look.
 type DigestStore interface {
 	HeldCount() (int, error)
-	HeldSubmissions(limit, offset int) ([]store.Submission, error)
+	HeldSubmissions(forms store.FormScope, limit, offset int) ([]store.Submission, error)
 	SubmissionSignals(submissionID string) ([]store.SpamSignal, error)
 }
 
@@ -52,7 +52,7 @@ func (d *Digest) Run() (bool, error) {
 		return false, nil
 	}
 
-	held, err := d.Store.HeldSubmissions(50, 0)
+	held, err := d.Store.HeldSubmissions(store.AllForms(), 50, 0)
 	if err != nil {
 		return false, fmt.Errorf("digest: list held: %w", err)
 	}

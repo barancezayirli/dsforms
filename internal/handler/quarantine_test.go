@@ -237,7 +237,7 @@ func TestQuarantineDeleteAndEmpty(t *testing.T) {
 	if w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/delete", form.Encode()); w.Code != http.StatusSeeOther {
 		t.Fatalf("delete status = %d, want 303", w.Code)
 	}
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(held) != 1 || held[0].ID != "h3" {
 		t.Fatalf("after bulk delete: %v, want only h3", held)
 	}
@@ -245,7 +245,7 @@ func TestQuarantineDeleteAndEmpty(t *testing.T) {
 	if w := doAdminRequest(t, s, r, "POST", "/admin/quarantine/empty", ""); w.Code != http.StatusSeeOther {
 		t.Fatalf("empty status = %d, want 303", w.Code)
 	}
-	held, _ = s.HeldSubmissions(10, 0)
+	held, _ = s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(held) != 0 {
 		t.Errorf("quarantine not emptied: %v", held)
 	}
@@ -263,7 +263,7 @@ func TestQuarantineReportKeepsTheSubmission(t *testing.T) {
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303", w.Code)
 	}
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if len(held) != 1 {
 		t.Error("reporting a false positive must not remove the submission")
 	}
@@ -367,7 +367,7 @@ func TestSubmissionReaderRejectsHeldSubmissions(t *testing.T) {
 	}
 
 	// And it must not have been marked read as a side effect.
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestQuarantineRestoreAbortsWhenTheFormIsUnreadable(t *testing.T) {
 
 	// The submission must still be held: a restore that could not notify is a
 	// restore that should not have happened.
-	held, err := s.HeldSubmissions(10, 0)
+	held, err := s.HeldSubmissions(store.AllForms(), 10, 0)
 	if err != nil {
 		t.Fatalf("HeldSubmissions: %v", err)
 	}

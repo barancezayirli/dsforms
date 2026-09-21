@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/redact"
 	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/barancezayirli/dsforms/internal/urlsafe"
@@ -26,7 +27,7 @@ import (
 // only GetForm. Splitting it is a separate change; naming the surface is the
 // precondition for seeing that it wants splitting.
 type AdminStore interface {
-	CountAllSubmissions() (int, error)
+	CountAllSubmissions(forms store.FormScope) (int, error)
 	CountSubmissions(formID string) (int, error)
 	CreateForm(f store.Form) error
 	DeleteForm(id string) error
@@ -35,13 +36,13 @@ type AdminStore interface {
 	GetForm(id string) (store.Form, error)
 	GetSubmission(id string) (store.Submission, error)
 	HeldCountForForm(formID string) (int, error)
-	ListForms() ([]store.FormSummary, error)
+	ListForms(forms store.FormScope) ([]store.FormSummary, error)
 	ListSubmissions(formID string) ([]store.Submission, error)
 	ListSubmissionsPaged(formID string, limit, offset int) ([]store.Submission, error)
 	MarkAllRead(formID string) error
 	MarkRead(submissionID string) error
 	Neighbours(formID, subID string) (newerID, olderID string, position, total int, err error)
-	PerFormStats() ([]store.FormStats, error)
+	PerFormStats(forms store.FormScope) ([]store.FormStats, error)
 	SubmissionSignals(submissionID string) ([]store.SpamSignal, error)
 	SubmissionsPerFormPerDay(days int) (map[string][]int, error)
 	UnreadCount(formID string) (int, error)
@@ -106,14 +107,14 @@ type formEditData struct {
 // Dashboard renders the admin dashboard with form list and stats.
 func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 
-	forms, err := h.Store.ListForms()
+	forms, err := h.Store.ListForms(store.AllForms())
 	if err != nil {
 		log.Printf("dashboard: list forms error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	totalAll, err := h.Store.CountAllSubmissions()
+	totalAll, err := h.Store.CountAllSubmissions(store.AllForms())
 	if err != nil {
 		log.Printf("dashboard: count submissions error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -123,7 +124,7 @@ func (h *AdminHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	// Counts and sparklines come from two grouped queries rather than a pair
 	// per form: an instance with fifty forms would otherwise issue a hundred
 	// queries to draw one page.
-	stats, err := h.Store.PerFormStats()
+	stats, err := h.Store.PerFormStats(store.AllForms())
 	degraded := err != nil
 	if err != nil {
 		log.Printf("dashboard: per-form stats: %v", err)
@@ -467,6 +468,63 @@ type Field struct {
 	Value string
 }
 
+// HiddenBlock is one region of a submission that MCP clients are not shown,
+// with the original lines quoted in full.
+//
+// The admin is the audience the redaction is not protecting: an operator
+// deciding whether this was an attack, a test, or a false positive needs the
+// characters, not a summary of them. So the reader marks what was withheld and
+// then prints it.
+type HiddenBlock struct {
+	Field   string
+	InName  bool
+	Line    int
+	Through int
+	Reason  string
+	Matched string
+	Lines   []string
+}
+
+// hiddenBlocks reports what the MCP path would remove from these fields.
+//
+// It calls the same function the MCP path calls rather than reading a stored
+// flag. Nothing is written when a submission arrives, so there is no column to
+// migrate, no backfill for the submissions already in the database, and — the
+// reason that matters — no way for the mark to drift from what clients are
+// actually served, because it is the same code answering both questions.
+func hiddenBlocks(data map[string]string) []HiddenBlock {
+	_, hits := redact.Fields(data)
+	if len(hits) == 0 {
+		return nil
+	}
+	out := make([]HiddenBlock, 0, len(hits))
+	for _, h := range hits {
+		block := HiddenBlock{
+			Field: h.Field, InName: h.InName, Line: h.Line, Through: h.Through,
+			Reason: h.Reason.Describe(), Matched: h.Matched,
+		}
+
+		// A hit about a field *name* names a field that was dropped rather than
+		// cleaned, so there is no value to quote; the operator sees the name
+		// itself in the field grid above. Read from the flag, not from an empty
+		// Field — a form can legitimately post an empty key.
+		if !h.InName {
+			lines := strings.Split(data[h.Field], "\n")
+			from, to := h.Line-1, h.Through
+			if from < 0 || to > len(lines) || from >= to {
+				// A report that does not line up with the value it came from is
+				// a bug in redact, not something to render around. Skipped
+				// rather than clamped: a quietly wrong quotation is worse than
+				// none.
+				continue
+			}
+			block.Lines = lines[from:to]
+		}
+		out = append(out, block)
+	}
+	return out
+}
+
 type submissionDetailData struct {
 	PageData
 	Form       store.Form
@@ -480,6 +538,10 @@ type submissionDetailData struct {
 	Message string
 
 	Signals []store.SpamSignal
+
+	// Hidden is what an MCP client would not have been shown. Empty for almost
+	// every submission, and the template renders nothing at all when it is.
+	Hidden []HiddenBlock
 
 	NewerID  string
 	OlderID  string
@@ -617,6 +679,7 @@ func (h *AdminHandler) SubmissionDetail(w http.ResponseWriter, r *http.Request) 
 		Submission: sub,
 		Fields:     fields,
 		Message:    message,
+		Hidden:     hiddenBlocks(sub.Data),
 		Signals:    signals,
 		NewerID:    newer,
 		OlderID:    older,

@@ -31,7 +31,7 @@ func TestSubmissionsPerDayZeroFillsQuietDays(t *testing.T) {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
 
-	days, err := s.SubmissionsPerDay(3)
+	days, err := s.SubmissionsPerDay(3, AllForms())
 	if err != nil {
 		t.Fatalf("SubmissionsPerDay: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestSubmissionsPerDayZeroFillsQuietDays(t *testing.T) {
 func TestSubmissionsPerDayEmptyInstance(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
-	days, err := s.SubmissionsPerDay(7)
+	days, err := s.SubmissionsPerDay(7, AllForms())
 	if err != nil {
 		t.Fatalf("SubmissionsPerDay: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestPerFormStats(t *testing.T) {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
 
-	stats, err := s.PerFormStats()
+	stats, err := s.PerFormStats(AllForms())
 	if err != nil {
 		t.Fatalf("PerFormStats: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestPerFormStatsIncludesEmptyForms(t *testing.T) {
 	s := mustNew(t)
 	seedForm(t, s, "quiet")
 
-	stats, err := s.PerFormStats()
+	stats, err := s.PerFormStats(AllForms())
 	if err != nil {
 		t.Fatalf("PerFormStats: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestTopSpamSignals(t *testing.T) {
 		}
 	}
 
-	tallies, err := s.TopSpamSignals(30)
+	tallies, err := s.TopSpamSignals(30, AllForms())
 	if err != nil {
 		t.Fatalf("TopSpamSignals: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestHeldSince(t *testing.T) {
 		t.Fatalf("CreateHeldSubmission: %v", err)
 	}
 
-	held, total, err := s.HeldSince(30)
+	held, total, err := s.HeldSince(30, AllForms())
 	if err != nil {
 		t.Fatalf("HeldSince: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestPurgeHeldUsesComparableTimestamps(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("purged %d, want exactly the one older than the cutoff", n)
 	}
-	held, _ := s.HeldSubmissions(10, 0)
+	held, _ := s.HeldSubmissions(AllForms(), 10, 0)
 	if len(held) != 1 || held[0].ID != "new" {
 		t.Errorf("survivors = %+v, want only \"new\"", held)
 	}

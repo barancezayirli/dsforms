@@ -71,6 +71,9 @@
           <a class="nav-item {{if eq .Active "users"}}on{{end}}" href="/admin/users" title="Users">
             <svg class="i"><use href="#ph-user-circle"/></svg><span class="label">Users</span>
           </a>
+          <a class="nav-item {{if eq .Active "tokens"}}on{{end}}" href="/admin/tokens" title="API tokens">
+            <svg class="i"><use href="#ph-lock-key"/></svg><span class="label">API tokens</span>
+          </a>
           <a class="nav-item {{if eq .Active "backups"}}on{{end}}" href="/admin/backups" title="Backups">
             <svg class="i"><use href="#ph-database"/></svg><span class="label">Backups</span>
           </a>

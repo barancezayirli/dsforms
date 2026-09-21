@@ -75,23 +75,34 @@ are no cycles.
 
 ```
 main.go        config, store, handler construction, routes, CLI — no logic
-  │            also constructs mail, webhook and broadcaster, and wires them
-  │            into handler through the interfaces handler declares
+  │            also constructs mail, webhook, broadcaster and mcpserver, and
+  │            wires the first three into handler through the interfaces
+  │            handler declares
   └── handler  HTTP: request → store/domain calls → template
         ├── auth                        wraps store (sessions)
         ├── backup                      imports nothing from internal/
         ├── store                       every SQL statement in the project
         ├── screen                      the hold/accept decision, sealed
+        ├── mcpserver                   the MCP surface; owns the token scopes
+        ├── redact                      what a stranger wrote that is not language
         ├── urlsafe                     which URLs we hand out or call
         └── ratelimit · flash · safe
 ```
 
+`handler` imports `mcpserver` for one thing only: the `Scope` value set, which
+the token page renders as checkboxes and validates a submitted form against.
+That is the same arrangement as `handler` → `screen`, and it points the right
+way — `mcpserver` is the package that owns what a scope means, so the
+alternative is a second list of scopes in the template, maintained by memory.
+Nothing else crosses that edge, and `mcpserver` imports no handler.
+
 Verified with `go list -f '{{join .Imports "\n"}}'`, not from memory:
 
-- `handler` → auth, backup, flash, ratelimit, safe, screen, store, urlsafe
+- `handler` → auth, backup, flash, mcpserver, ratelimit, redact, safe, screen, store, urlsafe
 - `store` → screen · `config` → screen · `broadcaster` → safe, store
+- `mcpserver` → redact, screen, store
 - `auth`, `mail`, `webhook` → store · `ratelimit` → safe
-- `backup`, `flash`, `safe` and `urlsafe` import nothing from `internal/`
+- `backup`, `flash`, `redact`, `safe` and `urlsafe` import nothing from `internal/`
 
 `backup` used to import `store`, for one parameter: `Import(s *store.Store, …)`,
 which called two methods on it. Naming those two in an interface `backup`
@@ -115,6 +126,14 @@ diagram claimed `mail` for two rounds because nobody did, and it claimed
   has no dependencies of its own and every layer needs it: a goroutine anywhere
   that is not guarded can take the process down. Anything else in a leaf is a
   design error.
+
+  `redact` is a leaf for the reason `safe` is one: two packages need it and
+  every other home inverts the direction. It is deliberately not part of
+  `screen`, which owns one thing — the hold/accept verdict. Removing a forged
+  chat turn before an MCP client reads a message is not a verdict, and filing it
+  under `screen` would imply these findings move the spam score. They do not,
+  and making them do so would silently change hold decisions on upgrade for
+  every existing deployment.
 
 - **`screen` is a sealed subtree, not a leaf.** Its public surface is one file;
   the implementation lives in `internal/screen/internal/{addr,rules,score,repeat}`,
@@ -167,15 +186,32 @@ The signal is duplicated *shape*, not duplicated text.
 
 ## 4. Go rules
 
-**Dependencies — only these four.** They are the direct block in `go.mod`;
-everything else there is transitive. Adding a fifth is a discussion.
+**Dependencies — only these five.** They are the direct block in `go.mod`;
+everything else there is transitive. Adding a sixth is a discussion.
 
 ```
 github.com/go-chi/chi/v5
-modernc.org/sqlite      (pure Go — the build is CGO_ENABLED=0)
+modernc.org/sqlite               (pure Go — the build is CGO_ENABLED=0)
 golang.org/x/crypto
 github.com/google/uuid
+github.com/modelcontextprotocol/go-sdk
 ```
+
+The fifth was a discussion, and this paragraph is its record. The MCP server in
+`internal/mcpserver` speaks a versioned wire protocol to third-party clients, so
+the alternative was owning a JSON-RPC and Streamable-HTTP implementation whose
+correctness is judged by someone else's clients against a spec that revises on
+its own schedule. That is the one shape of problem where a dependency is worth
+more than it costs: the protocol is not ours, and being subtly wrong about it is
+invisible here and visible to every user.
+
+It costs more than it looks. The `mcp` package pulls `jsonschema-go`,
+`uritemplate/v3`, `x/oauth2`, `x/sync`, `x/time` and `segmentio/encoding`, and
+the `auth` package adds `golang-jwt/v5` via `oauthex` — so one direct
+dependency became seven transitive ones. All are pure Go, so `CGO_ENABLED=0`
+still holds and the binary is still one file with no runtime dependency, which
+was the constraint this rule exists to protect. Nothing else in the project may
+import it: it is reached only through `internal/mcpserver`.
 
 **Errors.** Wrap with context: `fmt.Errorf("descriptive context: %w", err)`.
 Never `_` an error on a path where the result is shown to someone — a discarded

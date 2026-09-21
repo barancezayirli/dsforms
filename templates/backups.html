@@ -35,6 +35,8 @@
       </a>
       <p class="dim" style="font-size:11px;margin-top:8px">
         <code>VACUUM INTO</code> a temp file, then streamed — safe while the server is running.
+        API tokens and login sessions are left out. The rest is all there — treat the
+        file like the database it is a copy of.
       </p>
     </div>
   </div>
@@ -49,11 +51,13 @@
       <div class="notice">
         <svg class="i"><use href="#ph-warning"/></svg>
         <span>This replaces every form, submission and user with the uploaded
-              file's contents. It cannot be undone.</span>
+              file's contents. It cannot be undone.
+              <strong>Every API token is revoked and everyone is signed out</strong>,
+              including you — MCP clients stop working until you mint new tokens.</span>
       </div>
 
       <form method="POST" action="/admin/backups/import" enctype="multipart/form-data"
-            data-confirm="Replace the entire database with the uploaded file? This cannot be undone.">
+            data-confirm="Replace the entire database with the uploaded file? Every API token is revoked and everyone is signed out, including you. This cannot be undone.">
         <div class="dropzone" data-dropzone data-dropzone-submit="#restore-btn">
           <svg class="i"><use href="#ph-cloud-arrow-up"/></svg>
           <span style="font-size:13px" data-dropzone-name>Drop a <code>.db</code> file, or browse</span>

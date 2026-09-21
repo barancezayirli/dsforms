@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,12 +26,14 @@ import (
 	"github.com/barancezayirli/dsforms/internal/config"
 	"github.com/barancezayirli/dsforms/internal/handler"
 	"github.com/barancezayirli/dsforms/internal/mail"
+	"github.com/barancezayirli/dsforms/internal/mcpserver"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/barancezayirli/dsforms/internal/webhook"
 	"github.com/go-chi/chi/v5"
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 // Compile-time checks that the concrete types satisfy the interfaces their
@@ -68,6 +72,7 @@ var (
 	_ handler.WaitlistSubmitStore = (*store.Store)(nil)
 	_ handler.SearchStore         = (*store.Store)(nil)
 	_ handler.DigestStore         = (*store.Store)(nil)
+	_ handler.TokensStore         = (*store.Store)(nil)
 
 	// backup.Import swaps the database file underneath the process; it names the
 	// two methods that takes rather than importing store at all.
@@ -134,7 +139,7 @@ var basePages = []string{
 	"submission_detail.html", "users.html", "users_new.html", "account.html",
 	"backups.html", "waitlists.html", "waitlist_new.html", "waitlist_edit.html",
 	"waitlist_detail.html", "broadcast_new.html", "broadcast_detail.html",
-	"quarantine.html", "rules.html", "home.html", "search.html",
+	"quarantine.html", "rules.html", "home.html", "search.html", "tokens.html", "token_new.html",
 }
 
 var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
@@ -292,11 +297,22 @@ func newRouter(healthy healthCheck, templates map[string]*template.Template) *ch
 		})
 	})
 
-	// Request body size limit (64KB); backup import has its own 100MB limit.
+	// Request body size limit (64KB), with two exemptions.
+	//
+	// The cap is applied here, before any route runs, so a route that needs a
+	// different one cannot ask for it later: the body is already wrapped and a
+	// MaxBytesReader does not unwrap. Anything with its own limit has to be
+	// named here instead.
+	//
+	// Backup import sets its own 100MB limit inside the handler. /mcp sets its
+	// own on the SDK handler in internal/mcpserver — listed here so the limit
+	// has exactly one owner rather than two that disagree, with the smaller
+	// silently winning and the larger one reading as a setting that does
+	// something.
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Backup import sets its own limit inside the handler
-			if r.URL.Path == "/admin/backups/import" {
+			switch r.URL.Path {
+			case "/admin/backups/import", "/mcp":
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -336,6 +352,185 @@ func newRouter(healthy healthCheck, templates map[string]*template.Template) *ch
 	})
 
 	return r
+}
+
+// mountMCP wires POST /mcp, when the operator has asked for it.
+//
+// The route is absent entirely when MCP_ENABLED is unset, rather than present
+// and answering 401. A disabled feature that still has a live route is a thing
+// to keep auditing; one that was never registered is not, and `chi.Walk` says so.
+//
+// It sits outside the RequireAuth group deliberately: an MCP client presents a
+// bearer token, not a session cookie, and putting it inside would mean every
+// request redirecting to an HTML login page. The route table test in
+// routes_test.go only walks /admin*, so /mcp has its own refusal tests —
+// TestMCPRefusesEveryUnauthenticatedShape.
+func mountMCP(r *chi.Mux, d serverDeps) {
+	if !d.cfg.MCPEnabled {
+		return
+	}
+
+	// Its own limiter and its own guard, rather than the ones the submit path
+	// uses. An API client polling for new messages would otherwise evict the
+	// token buckets of real form submitters, and a form submitter's traffic
+	// would count towards an API client's budget. They are different populations
+	// with different shapes.
+	limiter := ratelimit.NewLimiter(mcpRateBurst, mcpRatePerMinute, time.Now)
+	limiter.StartCleanup(10*time.Minute, 30*time.Minute)
+
+	guard := ratelimit.NewLoginGuard(mcpMaxTokenFailures, mcpTokenLockout, time.Now)
+	guard.StartCleanup(30*time.Minute, 30*time.Minute)
+
+	srv := mcpserver.New(d.store, version, mcpserver.Options{
+		IncludeIPs: d.cfg.MCPIncludeIPs,
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(rateLimitMiddleware(limiter))
+		r.Use(bearerChallenge)
+		r.Use(mcpauth.RequireBearerToken(verifyMCPToken(d.store, guard), &mcpauth.RequireBearerTokenOptions{
+			// dsforms tokens may legitimately never expire — a client in a
+			// config file is not somewhere a rotation reminder reaches — and
+			// without this the SDK rejects every one of them for having no
+			// expiry, whatever the database says.
+			AllowMissingExpiration: true,
+		}))
+		r.Handle("/mcp", srv.Handler())
+	})
+
+	log.Printf("MCP endpoint enabled at %s/mcp", d.cfg.BaseURL)
+}
+
+// bearerChallenge adds the WWW-Authenticate header RFC 6750 §3 asks a
+// bearer-protected resource to send with a 401.
+//
+// The SDK emits one only when it has OAuth resource metadata to point at, and
+// dsforms has none to give: these are static tokens an operator mints, with no
+// authorization server behind them. Serving RFC 9728 metadata anyway would
+// advertise a discovery flow that goes nowhere, so the honest fix is the plain
+// challenge — which is what tells a generic client "this endpoint wants a
+// bearer token" rather than leaving it to guess from a bare 401.
+//
+// Set before the response is written, because headers cannot be added once the
+// status has gone out. It is written unconditionally and removed again on any
+// non-401, which is cheaper than wrapping every write.
+func bearerChallenge(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&challengeWriter{ResponseWriter: w}, r)
+	})
+}
+
+// challengeWriter attaches the bearer challenge at the moment a 401 is written.
+type challengeWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (c *challengeWriter) WriteHeader(status int) {
+	if !c.wroteHeader {
+		c.wroteHeader = true
+		if status == http.StatusUnauthorized {
+			c.Header().Set("WWW-Authenticate",
+				`Bearer realm="dsforms", error="invalid_token", `+
+					`error_description="a dsforms API token is required"`)
+		}
+	}
+	c.ResponseWriter.WriteHeader(status)
+}
+
+// Write covers a handler that writes a body without calling WriteHeader, which
+// implies 200 — recorded so a later WriteHeader cannot add the header after the
+// status is already on the wire.
+func (c *challengeWriter) Write(b []byte) (int, error) {
+	c.wroteHeader = true
+	return c.ResponseWriter.Write(b)
+}
+
+// MCP rate limits. Deliberately more generous than the form-submit budget — a
+// client working through an inbox makes a burst of small calls, where a form
+// submitter making six requests a minute is already suspicious — and deliberately
+// finite, because the caller is an autonomous agent and a loop is one bug away.
+const (
+	mcpRateBurst     = 30
+	mcpRatePerMinute = 120
+
+	mcpMaxTokenFailures = 10
+	mcpTokenLockout     = 15 * time.Minute
+)
+
+// verifyMCPToken resolves a bearer token into the scopes it carries.
+//
+// The guard is checked before the database is touched, so a caller grinding
+// through token guesses is refused without a hash lookup per attempt. A correct
+// token clears its own IP's failure count, so one client's typo cannot lock out
+// a shared egress address for fifteen minutes once it is fixed.
+//
+// Every failure returns mcpauth.ErrInvalidToken and nothing else. Unknown, revoked
+// and expired are one answer on the wire: telling them apart is a distinction
+// available to whoever is guessing, and it is worth nothing to a legitimate
+// client, which either has a working token or does not.
+//
+// The token value itself is never logged, here or anywhere.
+func verifyMCPToken(st *store.Store, guard *ratelimit.LoginGuard) mcpauth.TokenVerifier {
+	return func(_ context.Context, token string, r *http.Request) (*mcpauth.TokenInfo, error) {
+		ip := handler.ExtractIP(r)
+		if guard.IsLocked(ip) {
+			return nil, fmt.Errorf("too many failed attempts: %w", mcpauth.ErrInvalidToken)
+		}
+
+		tok, err := st.GetAPIToken(token)
+		if err != nil {
+			// Only a credential that does not match counts against the lockout.
+			// A database failure is not a bad token, and counting it made ten
+			// requests during an outage lock a legitimate client out for fifteen
+			// minutes *after* the database came back — turning a transient
+			// problem into a longer one, for the client least deserving of it.
+			//
+			// The refusal is identical either way: the caller still gets 401 and
+			// cannot tell the two apart, which is the point.
+			if errors.Is(err, store.ErrNotFound) {
+				guard.RecordFailure(ip)
+			} else {
+				log.Printf("mcp: verifying a token: %v", err)
+			}
+			return nil, mcpauth.ErrInvalidToken
+		}
+		guard.RecordSuccess(ip)
+
+		// Best-effort, and deliberately not fatal: the request is already
+		// authenticated, and refusing it because a bookkeeping column would not
+		// write turns a cosmetic problem into an outage.
+		if err := st.TouchAPIToken(tok.ID); err != nil {
+			log.Printf("mcp: recording last use of token %s: %v", tok.ID, err)
+		}
+
+		return &mcpauth.TokenInfo{
+			Scopes: tok.Scopes,
+			UserID: tok.UserID,
+			// The token's name, so a write can record which client made it and
+			// not just which account. Tokens are per-user, so the username alone
+			// cannot tell two of someone's clients apart — which is exactly the
+			// question asked when one of them misbehaves. The key is owned by
+			// mcpserver, the only reader.
+			//
+			// The forms it may reach travel the same way. A token with none
+			// recorded reaches every form — see store.ParseFormScope, which
+			// owns that reading — so an upgrade does not revoke what is already
+			// issued, while mcpserver's zero FormAccess still denies, because
+			// the one thing this must not do is grant on a wiring mistake.
+			Extra: map[string]any{
+				mcpserver.TokenNameKey: tok.Name,
+				mcpserver.FormsKey: mcpserver.FormAccess{
+					All: tok.Scope().All(),
+					IDs: tok.FormIDs,
+				},
+			},
+			// Left zero for a token that never expires, which is why the
+			// middleware is configured with AllowMissingExpiration. GetAPIToken
+			// has already refused an expired one.
+			Expiration: tok.ExpiresAt,
+		}, nil
+	}
 }
 
 func rateLimitMiddleware(l *ratelimit.Limiter) func(http.Handler) http.Handler {
@@ -494,6 +689,220 @@ func runBackupCLI(args []string) {
 	fmt.Printf("Backup created: %s\n", destPath)
 }
 
+// runTokenCLI manages the API tokens MCP clients present.
+//
+// It exists alongside the admin page because this is the safer way to mint one:
+// the value is printed to a terminal the operator already trusts, rather than
+// crossing a network and landing in a browser. On a fresh install it is also the
+// only way, since the endpoint may be wanted before anyone has signed in.
+//
+// It opens the database directly rather than going through config.Load, matching
+// the user and backup commands — a CLI that refused to run without SECRET_KEY
+// set would be useless in exactly the recovery situations it is for.
+func runTokenCLI(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: dsforms token <list|create|revoke> [args...]")
+		os.Exit(1)
+	}
+
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "/data/dsforms.db"
+	}
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer s.Close()
+
+	switch args[0] {
+	case "list":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Usage: dsforms token list <username>")
+			os.Exit(1)
+		}
+		u := mustUser(s, args[1])
+		tokens, err := s.ListAPITokens(u.ID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if len(tokens) == 0 {
+			fmt.Printf("No API tokens for %q.\n", args[1])
+			return
+		}
+		fmt.Printf("%-38s %-20s %-18s %-22s %s\n", "ID", "NAME", "SCOPES", "REACH", "LAST USED")
+		for _, t := range tokens {
+			lastUsed := "never"
+			if !t.LastUsedAt.IsZero() {
+				lastUsed = t.LastUsedAt.Format("2006-01-02 15:04")
+			}
+			fmt.Printf("%-38s %-20s %-18s %-22s %s\n",
+				t.ID, t.Name, strings.Join(t.Scopes, ","), t.Scope(), lastUsed)
+		}
+
+	case "create":
+		if len(args) < 4 {
+			fmt.Fprintf(os.Stderr, "Usage: dsforms token create <username> <name> <scopes> [days] [form-ids]\n"+
+				"  scopes is a comma-separated list: %s\n"+
+				"  days is optional; omit it, or pass 0, for a token that never expires\n"+
+				"  form-ids is a comma-separated list of form ids; omit it to reach every form.\n"+
+				"    It comes after days because both are positional, so pass 0 for days if you\n"+
+				"    want a token that never expires but does name its forms.\n",
+				mcpserver.Scopes(mcpserver.AllScopes))
+			os.Exit(1)
+		}
+		u := mustUser(s, args[1])
+
+		// The expiry is an argument rather than MCP_TOKEN_TTL_DAYS, because that
+		// is read by the *server* from the environment and honouring it here
+		// would mean loading config — which demands SECRET_KEY and makes this
+		// command useless on a fresh install, the one moment it matters most.
+		var days string
+		if len(args) > 4 {
+			days = args[4]
+		}
+		expiry, err := parseTokenExpiry(days)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// ValidateScopes, not ParseScopes: a typo here is a person's mistake to
+		// report, not a value to silently drop. Creating a token with fewer
+		// powers than asked for is a refusal discovered much later.
+		scopes, err := mcpserver.ValidateScopes(strings.Split(args[3], ","))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Checked against the forms that exist, for the reason ValidateScopes is
+		// used above: a mistyped id would otherwise mint a token that silently
+		// reaches nothing, which reads as a broken endpoint rather than a typo.
+		var formIDs []string
+		if len(args) > 5 {
+			formIDs, err = validateFormIDs(s, args[5])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+		raw, tok, err := s.CreateAPIToken(u.ID, args[2], scopes.Strings(), formIDs, expiry)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		expires := "never expires"
+		if !tok.ExpiresAt.IsZero() {
+			expires = "expires " + tok.ExpiresAt.Format("2006-01-02 15:04") + " UTC"
+		}
+		fmt.Printf("Token %q created for %s with scopes %s, reaching %s, %s.\n\n",
+			tok.Name, u.Username, scopes, tok.Scope(), expires)
+		fmt.Printf("  %s\n\n", raw)
+		fmt.Println("This is the only time it is shown — only a hash is stored.")
+		fmt.Println("Send it as an Authorization: Bearer header to the /mcp endpoint.")
+		fmt.Println("The endpoint serves requests only when MCP_ENABLED=true.")
+
+	case "revoke":
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: dsforms token revoke <username> <token-id>")
+			os.Exit(1)
+		}
+		u := mustUser(s, args[1])
+		removed, err := s.DeleteAPIToken(u.ID, args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if !removed {
+			// Not an error exit: the end state the operator wanted is the end
+			// state they have. Saying nothing happened is the honest part.
+			fmt.Printf("No token %s belongs to %q — nothing was revoked.\n", args[2], args[1])
+			return
+		}
+		fmt.Printf("Token %s revoked. Any client using it is refused from now on.\n", args[2])
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: token %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+// validateFormIDs turns a comma-separated list into the ids of forms that
+// exist, refusing anything else.
+//
+// The same reasoning as ValidateScopes and the admin form's own check: an id
+// typed at a terminal is a person stating an intent, and silently dropping one
+// produces a token narrower than they asked for — or, if every id goes, one
+// that reaches nothing, which reads as a broken endpoint rather than a typo.
+func validateFormIDs(s *store.Store, raw string) ([]string, error) {
+	forms, err := s.ListForms(store.AllForms())
+	if err != nil {
+		return nil, fmt.Errorf("reading forms: %w", err)
+	}
+	known := make(map[string]bool, len(forms))
+	for _, f := range forms {
+		known[f.ID] = true
+	}
+
+	var out, unknown []string
+	for _, id := range strings.Split(raw, ",") {
+		switch id = strings.TrimSpace(id); {
+		case id == "":
+		case known[id]:
+			if !slices.Contains(out, id) {
+				out = append(out, id)
+			}
+		default:
+			unknown = append(unknown, id)
+		}
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("no form with id %s", strings.Join(unknown, ", "))
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no form ids given; omit the argument for a token that reaches every form")
+	}
+	return out, nil
+}
+
+// parseTokenExpiry turns the CLI's optional days argument into a duration.
+//
+// An empty argument and an explicit 0 both mean "never expires", which is the
+// documented default. Anything else that is not a plain non-negative integer is
+// refused rather than clamped: a negative value would mint a token that is
+// already dead, and quietly reading it as "never expires" would grant more than
+// was asked for — the same direction every other value-set decision here takes.
+func parseTokenExpiry(days string) (time.Duration, error) {
+	if days == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(days)
+	if err != nil {
+		return 0, fmt.Errorf("days must be a whole number of days, got %q", days)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("days must not be negative, got %d", n)
+	}
+	return time.Duration(n) * 24 * time.Hour, nil
+}
+
+// mustUser resolves a username or exits. Every token command is scoped to a
+// user, so this is the same three lines four times over otherwise.
+func mustUser(s *store.Store, username string) store.User {
+	u, err := s.GetUserByUsername(username)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: no user %q\n", username)
+		os.Exit(1)
+	}
+	return u
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -502,6 +911,9 @@ func main() {
 			return
 		case "backup":
 			runBackupCLI(os.Args[2:])
+			return
+		case "token":
+			runTokenCLI(os.Args[2:])
 			return
 		default:
 			// Anything else used to fall through and start the server, which is
@@ -514,6 +926,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "  dsforms                      start the server")
 			fmt.Fprintln(os.Stderr, "  dsforms user <cmd> [args]    list, add, set-password, delete")
 			fmt.Fprintln(os.Stderr, "  dsforms backup <cmd>         create")
+			fmt.Fprintln(os.Stderr, "  dsforms token <cmd> [args]   list, create, revoke")
 			os.Exit(1)
 		}
 	}
@@ -723,6 +1136,15 @@ func routes(d serverDeps) *chi.Mux {
 	}
 	adminHandler := &handler.AdminHandler{Base: base, Store: d.store, Webhook: d.webhook}
 	usersHandler := &handler.UsersHandler{Base: base, Store: d.store}
+	// Reachable whether or not MCP is switched on: an operator should be able to
+	// prepare a token before turning the endpoint on, and to revoke one after
+	// turning it off. The page says which it is.
+	tokensHandler := &handler.TokensHandler{
+		Base:       base,
+		Store:      d.store,
+		TTLDays:    d.cfg.MCPTokenTTLDays,
+		MCPEnabled: d.cfg.MCPEnabled,
+	}
 	backupHandler := &handler.BackupHandler{Base: base, Store: d.store}
 
 	waitlistSubmitHandler := &handler.WaitlistSubmitHandler{
@@ -771,6 +1193,8 @@ func routes(d serverDeps) *chi.Mux {
 	}, d.templates)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
+
+	mountMCP(r, d)
 
 	// Embedded CSS, JS and the Inter woff2. Public and unauthenticated: the
 	// login page needs the stylesheet before anyone has a session.
@@ -826,6 +1250,10 @@ func routes(d serverDeps) *chi.Mux {
 		r.Get("/admin/users/new", usersHandler.NewUserPage)
 		r.Post("/admin/users/new", usersHandler.CreateUser)
 		r.Post("/admin/users/{id}/delete", usersHandler.DeleteUser)
+		r.Get("/admin/tokens", tokensHandler.Page)
+		r.Get("/admin/tokens/new", tokensHandler.NewPage)
+		r.Post("/admin/tokens", tokensHandler.Create)
+		r.Post("/admin/tokens/{id}/delete", tokensHandler.Delete)
 		r.Get("/admin/account", usersHandler.AccountPage)
 		r.Post("/admin/account/password", usersHandler.UpdatePassword)
 		r.Get("/admin/backups", backupHandler.Page)
