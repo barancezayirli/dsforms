@@ -143,8 +143,10 @@ curl -X POST https://your-server.com/f/FORM_ID \
 - dsforms refuses to start with the MCP endpoint enabled over plain http, since
   a bearer token would cross the network in the clear on every request
 - Chat-template control tokens and invisible Unicode are removed from submission
-  content before an MCP client sees it, and reported to the client; the stored
-  message is never changed, and the admin marks what was withheld
+  content before an MCP client sees it, and reported to the client. The
+  recognised marker families are a list, so the client is told that an empty
+  report is not a clean bill of health. The stored message is never changed, and
+  the admin marks what was withheld
 - An API token can be limited to particular forms, and then cannot read, change
   or delete anything in the others — enforced in SQL on every query, not by
   filtering rows afterwards

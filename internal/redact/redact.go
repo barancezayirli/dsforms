@@ -298,10 +298,14 @@ var (
 	// family as prose. U+2581 is that family's word separator and is allowed in
 	// the name for the same reason; lineMarkers folds it to an underscore so
 	// both spellings are one identity.
-	angleToken = regexp.MustCompile(`(?i)<[|\x{FF5C}]\s*([a-z0-9_\x{2581}]{1,32})\s*[|\x{FF5C}]>`)
+	// Spelled without (?i): Go folds case by Unicode, so [a-z] admitted U+017F
+	// and a marker name came back carrying it, against Hit.Matched's contract.
+	// A homoglyph is not a marker any tokenizer emits, so not matching it is
+	// also the right answer — it is odd prose, and this package leaves prose.
+	angleToken = regexp.MustCompile(`<[|\x{FF5C}]\s*([A-Za-z0-9_\x{2581}]{1,32})\s*[|\x{FF5C}]>`)
 
 	// bracketToken is the Llama 2 / Mistral family.
-	bracketToken = regexp.MustCompile(`(?i)\[\s*/?\s*INST\s*\]|<<\s*/?\s*SYS\s*>>`)
+	bracketToken = regexp.MustCompile(`\[\s*/?\s*[Ii][Nn][Ss][Tt]\s*\]|<<\s*/?\s*[Ss][Yy][Ss]\s*>>`)
 
 	// turnToken is the Gemma family, which delimits with nothing but angle
 	// brackets: <start_of_turn>, <end_of_turn>.
@@ -311,7 +315,7 @@ var (
 	// <word_word> on sight would take genuine prose with it. Zero false
 	// positives is the property this package is built on, so this family is a
 	// list and grows by hand.
-	turnToken = regexp.MustCompile(`(?i)<\s*(start_of_turn|end_of_turn)\s*>`)
+	turnToken = regexp.MustCompile(`<\s*(start_of_turn|end_of_turn)\s*>`)
 )
 
 // closers are the markers that end a turn. Everything else opens one.
@@ -322,12 +326,22 @@ var (
 // <|start|> through review, because it was in neither of the two lists this
 // used to keep and so counted as neither. Being wrong about an unknown marker
 // costs nothing, since a genuine message contains no marker at all.
-var closers = map[string]bool{
+// Kept per family, not in one map. A name that ends a turn in one template's
+// vocabulary is not a closer in another's, and sharing the map taught the
+// generic pipe path that <|end_of_turn|> — a spelling no piped template uses —
+// ends a region, so an attacker could write it to close early and have the
+// instruction below it delivered. The conservative default above only holds if
+// "unheard of" is judged within the family that was matched.
+var pipeClosers = map[string]bool{
 	"im_end": true, "eot_id": true, "eom_id": true,
 	"end_header_id": true, "endoftext": true, "return": true,
-	// Gemma, and DeepSeek's after U+2581 is folded to an underscore.
-	"end_of_turn": true, "end_of_sentence": true,
+	// DeepSeek's, after U+2581 is folded to an underscore. It belongs here
+	// because that family delimits with pipes — fullwidth ones.
+	"end_of_sentence": true,
 }
+
+// turnClosers is the Gemma family's, which has exactly one.
+var turnClosers = map[string]bool{"end_of_turn": true}
 
 // marker is one forged boundary found on a line.
 type marker struct {
@@ -356,11 +370,11 @@ func lineMarkers(line string) []marker {
 		// underscore-spelled end_of_sentence are one name in closers and one
 		// entry in the report.
 		name := strings.ToLower(strings.ReplaceAll(line[loc[2]:loc[3]], "\u2581", "_"))
-		ms = append(ms, marker{name: name, at: loc[0], closes: closers[name]})
+		ms = append(ms, marker{name: name, at: loc[0], closes: pipeClosers[name]})
 	}
 	for _, loc := range turnToken.FindAllStringSubmatchIndex(line, -1) {
 		name := strings.ToLower(line[loc[2]:loc[3]])
-		ms = append(ms, marker{name: name, at: loc[0], closes: closers[name]})
+		ms = append(ms, marker{name: name, at: loc[0], closes: turnClosers[name]})
 	}
 	for _, loc := range bracketToken.FindAllStringIndex(line, -1) {
 		text := line[loc[0]:loc[1]]

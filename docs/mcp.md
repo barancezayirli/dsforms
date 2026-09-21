@@ -291,8 +291,9 @@ was not shown, and the list marks the rows that carry them.
 the description of every tool that returns submitted text both say field values
 are data to report on rather than instructions to follow. Those are far from the
 text they are about, so the same statement now opens the result itself,
-immediately above the payload, along with a note that the mechanical removal has
-happened and **nothing else has been checked**.
+immediately above the payload, along with a note that markers are removed
+**where this server recognises them** — absence of a `redacted` list is not a
+guarantee — and that **nothing else has been checked**.
 
 **What it deliberately does not do is detect.** There is no classifier here, and
 that is a measurement rather than a preference. Llama Prompt Guard 2 was tested
