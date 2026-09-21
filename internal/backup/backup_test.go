@@ -760,6 +760,14 @@ func TestValidateTellsAnUnreadableSchemaFromAMissingTable(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
+	// What the failure actually is, asked of the same handle the same way, so
+	// the expectation is derived rather than written down: database/sql's
+	// wording here is unexported and not this package's to depend on.
+	want := db.QueryRow("SELECT 1").Scan(new(int))
+	if want == nil {
+		t.Fatal("the closed handle still answers; the fixture proves nothing")
+	}
+
 	err = requireTables(db, "users")
 	if err == nil {
 		t.Fatal("requireTables accepted a database it could not query")
@@ -767,14 +775,12 @@ func TestValidateTellsAnUnreadableSchemaFromAMissingTable(t *testing.T) {
 	if strings.Contains(err.Error(), "missing required table") {
 		t.Errorf("an unreadable schema reported as a missing table: %v", err)
 	}
-	// What went wrong is carried, not replaced. Asserted against the wrapped
-	// error's own text rather than a literal, which would be database/sql's
-	// unexported wording and not this package's to depend on.
-	cause := errors.Unwrap(err)
-	if cause == nil {
-		t.Fatalf("underlying error dropped rather than wrapped: %v", err)
+	// Carried, not replaced by an error of this package's own choosing —
+	// otherwise the admin is told nothing they can act on.
+	if !errors.Is(err, want) {
+		t.Errorf("underlying error dropped: %v, want it to carry %v", err, want)
 	}
-	if !strings.Contains(err.Error(), cause.Error()) {
+	if !strings.Contains(err.Error(), want.Error()) {
 		t.Errorf("error does not say what went wrong: %v", err)
 	}
 }
