@@ -697,3 +697,39 @@ func TestStrippingMatchesTableNamesTheWaySQLiteDoes(t *testing.T) {
 		t.Error("a table spelled API_Tokens was treated as absent and left intact")
 	}
 }
+
+// TestValidateMatchesTableNamesTheWaySQLiteDoes is the same defect as
+// TestStrippingMatchesTableNamesTheWaySQLiteDoes, one function over: the
+// required-table check compared with BINARY collation while every query that
+// then uses those tables resolves their names case-insensitively. A database
+// declaring Users/Forms/Submissions works perfectly and was refused as missing
+// them — closing the raw-database-copy recovery path operations.md advertises.
+func TestValidateMatchesTableNamesTheWaySQLiteDoes(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "mixed-case.db")
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE Users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE);
+		CREATE TABLE Forms (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE Submissions (id TEXT PRIMARY KEY, form_id TEXT NOT NULL, data TEXT NOT NULL);
+		INSERT INTO Users (id, username) VALUES ('u1', 'admin');
+	`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// The tables really are usable under the lowercase names the store uses.
+	var n int
+	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&n); err != nil {
+		t.Fatalf("the fixture is not actually case-insensitive here: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if err := Validate(path); err != nil {
+		t.Errorf("Validate refused a usable database over table-name casing: %v", err)
+	}
+}

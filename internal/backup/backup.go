@@ -171,8 +171,11 @@ func Validate(path string) error {
 	// Required tables must all be present
 	for _, table := range []string{"users", "forms", "submissions"} {
 		var name string
+		// NOCASE for the reason stripCredentials gives: every query that then
+		// uses these tables resolves their names case-insensitively, so a
+		// database declaring Users works and must not be refused as missing it.
 		err := db.QueryRow(
-			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", table,
+			"SELECT name FROM sqlite_master WHERE type='table' AND name = ? COLLATE NOCASE", table,
 		).Scan(&name)
 		if err != nil {
 			return fmt.Errorf("validate: missing required table %q", table)
