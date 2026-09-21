@@ -1060,7 +1060,7 @@ redaction was doing the attacker's work. Position decides now.
 The pattern under all of it: **a claim in a comment is not a property.** Every
 one of these was asserted somewhere in prose before it was false.
 
-## Backups carry no credentials
+## Backups carry no tokens or sessions
 
 Asked whether a backup exports the tokens table. It did — a snapshot is
 `VACUUM INTO`, a copy of the whole database — and testing it turned up the

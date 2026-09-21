@@ -60,11 +60,18 @@ They are stripped on the way in as well as on the way out, so a snapshot taken
 by an older build, or a raw copy of a database file, cannot walk them back in
 either.
 
-**A snapshot is still sensitive.** Those two tables are what a restore could
-walk back in; nothing else is stripped, so the file still holds every
-submission, every user's bcrypt password hash, and every form's webhook URL —
-which is itself a credential for the Slack or Discord channel it posts to. Treat
-a snapshot as you would the live database, not as something safe to pass around.
+**A snapshot is still sensitive.** Nothing but those two tables is stripped, so
+the file holds every submission, every waitlist entry with its email and IP,
+every user's bcrypt password hash, and every form's webhook URL — which is
+itself a credential for the Slack or Discord channel it posts to. Treat a
+snapshot as you would the live database, not as something safe to pass around.
+
+**And a restore is a whole-database replacement,** so it puts back more than
+those tables removed. An account you deleted since the snapshot comes back, with
+its password hash; a password you changed reverts to the old one. Stripping
+tokens and sessions stops those two credentials from being walked back in — it
+does not make a restore safe to run without looking at what the snapshot
+predates.
 
 The cost is the other side of that. **After restoring, your API tokens are gone
 and everyone is signed out, including you.** MCP clients stop working until you
