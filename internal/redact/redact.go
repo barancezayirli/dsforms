@@ -342,46 +342,6 @@ func asciiFold(word string) string {
 	return b.String()
 }
 
-// The markers that end a turn. Everything else opens one.
-//
-// Listing only the closers is the conservative direction. A marker this build
-// has not heard of must be assumed to open a turn that is never closed, so the
-// rest of the value goes: assuming the opposite is what let Harmony's own
-// <|start|> through review, because it was in neither of the two lists this
-// used to keep and so counted as neither. Being wrong about an unknown marker
-// costs nothing, since a genuine message contains no marker at all.
-//
-// One list per family, not one shared. A closer is a name in a particular
-// template's vocabulary, and a name can be a closer in one and unknown in
-// another — so whether a name is "unheard of" has to be asked of the family
-// that matched it. Sharing the map let an attacker write the other family's
-// closer to end a region early and have the instruction below it delivered.
-//
-// A name being absent here is not a claim that no template uses it. Some do
-// use <|end_of_turn|> with ASCII pipes; it stays out because the safe reading
-// of it in this family is "opens a turn nothing closes", and moving a name into
-// a list is how that safety is given away.
-var pipeClosers = map[string]bool{
-	"im_end": true, "eot_id": true, "eom_id": true,
-	"end_header_id": true, "endoftext": true, "return": true,
-	// DeepSeek's, after U+2581 is folded to an underscore. It belongs here
-	// because that family delimits with pipes — fullwidth ones.
-	"end_of_sentence": true,
-}
-
-// turnClosers is the Gemma family's, which has exactly one.
-var turnClosers = map[string]bool{"end_of_turn": true}
-
-// family is the template vocabulary a marker was written in. It decides which
-// closer list applies to it, and which opener a closer can answer.
-type family int
-
-const (
-	familyPipe family = iota
-	familyBracket
-	familyTurn
-)
-
 // marker is one forged boundary found on a line.
 type marker struct {
 	// name is what goes in Hit.Matched: the marker's identity without its
@@ -390,11 +350,6 @@ type marker struct {
 	// at is the byte offset in the line, so markers can be put back into the
 	// order they were written in.
 	at int
-	// closes says this one ends a turn rather than starting one.
-	closes bool
-	// in is the vocabulary it was written in, so a closer only answers an
-	// opener from the same one.
-	in family
 }
 
 // lineMarkers reports the markers on one line, in the order they appear.
@@ -412,11 +367,11 @@ func lineMarkers(line string) []marker {
 		// underscore-spelled end_of_sentence are one name in closers and one
 		// entry in the report.
 		name := strings.ToLower(strings.ReplaceAll(line[loc[2]:loc[3]], "\u2581", "_"))
-		ms = append(ms, marker{name: name, at: loc[0], closes: pipeClosers[name], in: familyPipe})
+		ms = append(ms, marker{name: name, at: loc[0]})
 	}
 	for _, loc := range turnToken.FindAllStringSubmatchIndex(line, -1) {
 		name := strings.ToLower(line[loc[2]:loc[3]])
-		ms = append(ms, marker{name: name, at: loc[0], closes: turnClosers[name], in: familyTurn})
+		ms = append(ms, marker{name: name, at: loc[0]})
 	}
 	for _, loc := range bracketToken.FindAllStringIndex(line, -1) {
 		text := line[loc[0]:loc[1]]
@@ -429,32 +384,32 @@ func lineMarkers(line string) []marker {
 			}
 			return r
 		}, text), " "))
-		ms = append(ms, marker{name: name, at: loc[0], closes: strings.Contains(text, "/"), in: familyBracket})
+		ms = append(ms, marker{name: name, at: loc[0]})
 	}
 	slices.SortFunc(ms, func(a, b marker) int { return a.at - b.at })
 	return ms
 }
 
-// stripForgedTurn removes the injected turn, and only it.
+// stripForgedTurn removes the injected turn.
 //
 // The rule is one sentence: everything from the first forged boundary to the
-// last one goes, and if the last boundary opens a turn that is never closed,
-// everything after it goes too.
+// end of the value goes.
 //
 // The granularity is the line rather than the marker. Deleting just the marker
 // and keeping its contents leaves the instruction and removes only the evidence
-// that it was framed as one, which is the worst of both. The granularity is
-// also not the whole field: prose before the first boundary is the message the
-// person actually sent — the common shape is a genuine enquiry with a payload
+// that it was framed as one, which is the worst of both. It is also not the
+// whole field: prose before the first boundary is the message the person
+// actually sent — the common shape is a genuine enquiry with a payload
 // appended — and it is kept.
 //
-// The unterminated case is the aggressive one, and it is safe for the reason
-// the package doc gives: a genuine message never reaches this branch, because a
-// genuine message contains no boundary at all.
+// Everything after it is not, and that is the aggressive half. It is safe for
+// the reason the package doc gives: a genuine message never reaches here at
+// all, because a genuine message contains no boundary. See the note on end
+// below for why the region no longer stops at a closing marker.
 func stripForgedTurn(field, text string) (string, *Hit) {
 	lines := strings.Split(text, "\n")
 
-	first, last := -1, -1
+	first := -1
 	var found []marker
 	for i, line := range lines {
 		ms := lineMarkers(line)
@@ -464,33 +419,29 @@ func stripForgedTurn(field, text string) (string, *Hit) {
 		if first < 0 {
 			first = i
 		}
-		last = i
 		found = append(found, ms...)
 	}
 	if first < 0 {
 		return text, nil
 	}
 
-	// Everything goes to the end of the value if any family was left open.
+	// From the first marker to the end of the value, always.
 	//
-	// Per family, not "did the last marker close". The families are different
-	// vocabularies and a closer from one says nothing about a turn opened in
-	// another, so asking the question globally let <start_of_turn> be answered
-	// by <|im_end|> — the region ended there and the instruction below it was
-	// handed over. Within a family this is the same rule as before: its last
-	// marker decides, because an opener replaces any earlier close.
-	open := map[family]bool{}
-	for _, m := range found {
-		if m.closes {
-			delete(open, m.in)
-			continue
-		}
-		open[m.in] = true
-	}
-	end := last
-	if len(open) > 0 {
-		end = len(lines) - 1
-	}
+	// This used to stop at the last marker when that marker closed a turn, so a
+	// balanced forgery kept the prose after it. Three separate escapes were
+	// found in the bookkeeping that decided "balanced" — a closer from another
+	// delimiter syntax, a closer from another vocabulary sharing one syntax,
+	// and one shared list of closer names — and they were all the same bug:
+	// every closer name is a string the attacker types, so any rule that lets
+	// one end the region hands them a way to keep what follows it.
+	//
+	// There is no version of that bookkeeping an attacker cannot write their
+	// way out of, so there is none. What it bought was leniency toward a
+	// genuine message that quotes a chat template, and that costs little here:
+	// the stored submission is never touched and the admin sees all of it, so
+	// what narrows is only what an MCP client is shown of a message that
+	// demonstrably contains forged turn boundaries.
+	end := len(lines) - 1
 
 	matched := make([]string, 0, len(found))
 	for _, m := range found {

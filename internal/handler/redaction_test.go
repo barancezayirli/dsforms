@@ -188,10 +188,13 @@ func TestHiddenBlocksQuoteTheOriginalLines(t *testing.T) {
 		t.Fatalf("blocks = %+v, want 1", blocks)
 	}
 	b := blocks[0]
-	if b.Field != "message" || b.Line != 2 || b.Through != 4 {
-		t.Errorf("block = %+v, want message lines 2-4", b)
+	// Through the end of the value, matching what the client was not shown: the
+	// region no longer stops at a closing marker, so the sign-off under the
+	// forged turn is withheld too and the operator must see that it was.
+	if b.Field != "message" || b.Line != 2 || b.Through != 5 {
+		t.Errorf("block = %+v, want message lines 2-5", b)
 	}
-	want := []string{hiddenPayloadLine, hiddenPayloadBody, "<|im_end|>"}
+	want := []string{hiddenPayloadLine, hiddenPayloadBody, "<|im_end|>", "Thanks, Ada"}
 	if len(b.Lines) != len(want) {
 		t.Fatalf("lines = %q, want %q", b.Lines, want)
 	}

@@ -253,10 +253,18 @@ through with no `redacted` entry. The banner above each payload says so rather
 than claiming the content is clean, and the per-form binding below is what
 holds when this does not.
 
-A forged chat turn takes its whole region: deleting the marker and keeping its
-contents leaves the instruction and removes only the evidence that it was framed
-as one. Prose before the boundary is kept, because the usual shape is a real
-enquiry with a payload appended. Invisible text loses only the characters, since
+A forged chat turn takes everything from its first marker to the end of that
+field: deleting the marker and keeping its contents leaves the instruction and
+removes only the evidence that it was framed as one. Prose before the boundary
+is kept, because the usual shape is a real enquiry with a payload appended.
+
+It used to stop at a closing marker, so a balanced forgery kept the text after
+it. Three different ways of writing a closer the code would honour were found,
+and they were one bug: every closer name is a string the submitter types. What
+that leniency bought was tolerance for a genuine message quoting a chat
+template, which costs little — the stored submission is untouched and you see
+all of it in the admin, so what narrows is only what a client is shown of a
+message that demonstrably contains forged boundaries. Invisible text loses only the characters, since
 a smuggled payload rides inside prose the person did write. Zero-width joiners
 are deliberately left alone — they shape Persian and Arabic script and build
 emoji sequences, and a filter that ate them would mangle a correctly spelled
