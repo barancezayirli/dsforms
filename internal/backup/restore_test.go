@@ -631,3 +631,55 @@ func TestImportSerializesConcurrentRestores(t *testing.T) {
 	}
 	assertNoRollbackFile(t, dbPath)
 }
+
+// TestARefusalAfterValidateIsNotTheFilesFault pins the boundary the two
+// sentinels draw.
+//
+// Every refusal Import can return once Validate has passed is about this
+// instance — a leftover parked database, a write-ahead log another request is
+// pinning, a write the disk would not take. Reported as a plain rejection they
+// all told the operator their file was bad, and the obvious next step, re-export
+// and re-upload, redoes the one thing that was already fine.
+//
+// Both sentinels, deliberately: nothing was touched is still true, and a caller
+// that only wants to know whether its data survived must not have to learn a
+// second name for it.
+func TestARefusalAfterValidateIsNotTheFilesFault(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	if err := os.WriteFile(dbPath+rollbackSuffix, []byte("the operator's only database"), 0o644); err != nil {
+		t.Fatalf("writing leftover: %v", err)
+	}
+
+	err := Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, want it to carry ErrNotAttempted: the "+
+			"uploaded file passed Validate, so it is not what stopped the restore", err)
+	}
+	if !errors.Is(err, ErrRejected) {
+		t.Errorf("Import returned %v, want it to carry ErrRejected too: nothing "+
+			"was touched, and that is what a caller asks first", err)
+	}
+}
+
+// And the other side of the boundary: a file that cannot be validated is the
+// file's fault, and must not claim otherwise.
+func TestARefusedFileIsTheFilesFault(t *testing.T) {
+	t.Parallel()
+	live, dbPath, _ := restoreFixture(t)
+
+	bad := filepath.Join(t.TempDir(), "not-a-database.db")
+	if err := os.WriteFile(bad, []byte("this is not a database"), 0o644); err != nil {
+		t.Fatalf("writing the bad upload: %v", err)
+	}
+
+	err := Import(live, bad, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, but this one really is the uploaded file — "+
+			"telling the operator otherwise sends them looking at the wrong thing", err)
+	}
+}

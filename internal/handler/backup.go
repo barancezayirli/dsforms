@@ -152,6 +152,15 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, backup.ErrRolledBack):
 			flash.Set(w, h.SecretKey, "error",
 				"Restore failed. Your existing database is unchanged and still in use.")
+		case errors.Is(err, backup.ErrNotAttempted):
+			// Before ErrRejected, which this also is: nothing was touched. But
+			// the file passed validation and the obstacle is on this side, so
+			// "that file was rejected" would send the operator to re-export and
+			// re-upload the one thing that was not the problem.
+			flash.Set(w, h.SecretKey, "error",
+				"The restore could not be started, and not because of the file you "+
+					"uploaded. Your database is unchanged. Check the server log for "+
+					"what is in the way, then try again.")
 		case errors.Is(err, backup.ErrRejected):
 			flash.Set(w, h.SecretKey, "error",
 				"That file was rejected. Your database is unchanged.")

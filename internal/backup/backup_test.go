@@ -783,4 +783,10 @@ func TestValidateTellsAnUnreadableSchemaFromAMissingTable(t *testing.T) {
 	if !strings.Contains(err.Error(), want.Error()) {
 		t.Errorf("error does not say what went wrong: %v", err)
 	}
+	// And says where it went wrong. A bare return err carries the cause and
+	// passes both checks above, leaving an admin a database/sql message with
+	// nothing naming the backup, the check, or the table it was reading.
+	if !strings.Contains(err.Error(), `"users"`) {
+		t.Errorf("error does not name what it was looking for: %v", err)
+	}
 }

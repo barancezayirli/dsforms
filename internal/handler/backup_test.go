@@ -221,12 +221,24 @@ func TestBackupImportTellsTheOperatorWhichOutcomeHappened(t *testing.T) {
 		name        string
 		failReopens int
 		upload      string // "valid" or "garbage"
+		leftover    bool   // a parked database from a restore that did not finish
 		want        string
 	}{
 		{
 			name:   "a file that is not a database is refused, and says so",
 			upload: "garbage",
 			want:   "That file was rejected. Your database is unchanged.",
+		},
+		{
+			// Everything Import refuses after Validate has passed is about this
+			// instance, not the upload. Reported as a rejection, it sent the
+			// operator to re-export and re-upload the one thing that was fine.
+			name:     "an obstacle on this side does not blame the uploaded file",
+			upload:   "valid",
+			leftover: true,
+			want: "The restore could not be started, and not because of the file you " +
+				"uploaded. Your database is unchanged. Check the server log for " +
+				"what is in the way, then try again.",
 		},
 		{
 			name:        "a failed swap says the existing database is still in use",
@@ -252,6 +264,14 @@ func TestBackupImportTellsTheOperatorWhichOutcomeHappened(t *testing.T) {
 			// handler the request will hit.
 			if tc.failReopens > 0 {
 				bh.Store = &failingReopenStore{inner: s, failReopens: tc.failReopens}
+			}
+			// What a restore killed between the park and the swap leaves behind.
+			// Import refuses rather than renaming over it, because that file may
+			// be the operator's only database.
+			if tc.leftover {
+				if err := os.WriteFile(bh.DBPath+".rollback", []byte("parked"), 0o644); err != nil {
+					t.Fatalf("writing the leftover parked database: %v", err)
+				}
 			}
 
 			var body *bytes.Buffer

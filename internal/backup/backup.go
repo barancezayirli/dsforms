@@ -225,6 +225,19 @@ const (
 var (
 	// ErrRejected: refused before the live database was touched.
 	ErrRejected = errors.New("backup: restore rejected")
+	// ErrNotAttempted: refused, and not because of the uploaded file — it had
+	// already passed Validate. Everything after that point is about this
+	// instance: a leftover parked database, a write-ahead log another request is
+	// pinning, a disk that would not take the write.
+	//
+	// Wrapped alongside ErrRejected rather than instead of it, because the
+	// guarantee an operator needs first — nothing was touched, your database is
+	// as it was — is the same one, and a caller asking only that must not have to
+	// learn a second name for it. This says whose fault it was, which is what
+	// decides whether re-exporting the file could possibly help. It could not:
+	// telling them it was rejected sends them to redo the one thing that was
+	// already fine.
+	ErrNotAttempted = errors.New("backup: restore not attempted")
 	// ErrRolledBack: the swap failed and the previous database is back in service.
 	ErrRolledBack = errors.New("backup: restore rolled back")
 	// ErrUnavailable: the swap failed and so did the recovery. The process has no
@@ -341,7 +354,7 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	// It is the uploaded file being modified, before anything is swapped, so a
 	// rejected restore leaves the live database untouched as before.
 	if err := stripCredentials(uploadedPath); err != nil {
-		return fmt.Errorf("%w: %w", ErrRejected, err)
+		return fmt.Errorf("%w: %w: %w", ErrRejected, ErrNotAttempted, err)
 	}
 
 	// Refuse if a previous restore left its parked database behind.
@@ -357,13 +370,13 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	// Nothing else in the codebase looks at this file, so refusing here is what
 	// makes it survivable.
 	if _, err := os.Stat(dbPath + rollbackSuffix); err == nil {
-		return fmt.Errorf("%w: %s already exists, which means a previous restore did "+
-			"not finish. That file may be your database — move it somewhere safe (or "+
-			"back to %s) before restoring again",
-			ErrRejected, dbPath+rollbackSuffix, dbPath)
+		return fmt.Errorf("%w: %w: %s already exists, which means a previous restore "+
+			"did not finish. That file may be your database — move it somewhere safe "+
+			"(or back to %s) before restoring again",
+			ErrRejected, ErrNotAttempted, dbPath+rollbackSuffix, dbPath)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("%w: cannot check for a leftover %s: %w",
-			ErrRejected, dbPath+rollbackSuffix, err)
+		return fmt.Errorf("%w: %w: cannot check for a leftover %s: %w",
+			ErrRejected, ErrNotAttempted, dbPath+rollbackSuffix, err)
 	}
 
 	// Flush the write-ahead log into the main database before anything is
@@ -383,15 +396,16 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	var busy, walFrames, flushed sql.NullInt64
 	if err := s.DB().QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
 		Scan(&busy, &walFrames, &flushed); err != nil {
-		return fmt.Errorf("%w: cannot flush the current database to disk, so it "+
-			"cannot be safely set aside: %w", ErrRejected, err)
+		return fmt.Errorf("%w: %w: cannot flush the current database to disk, so it "+
+			"cannot be safely set aside: %w", ErrRejected, ErrNotAttempted, err)
 	}
 	// A database not in WAL mode reports -1 for both counts: nothing to flush.
 	if walFrames.Int64 > 0 && flushed.Int64 < walFrames.Int64 {
-		return fmt.Errorf("%w: %d of %d write-ahead frames could not be written to "+
-			"the database file, most likely because another request is holding a read "+
-			"snapshot. Removing the log now would discard those writes; retry the "+
-			"restore", ErrRejected, walFrames.Int64-flushed.Int64, walFrames.Int64)
+		return fmt.Errorf("%w: %w: %d of %d write-ahead frames could not be written "+
+			"to the database file, most likely because another request is holding a "+
+			"read snapshot. Removing the log now would discard those writes; retry "+
+			"the restore", ErrRejected, ErrNotAttempted,
+			walFrames.Int64-flushed.Int64, walFrames.Int64)
 	}
 
 	// Close before any filesystem operation so no write races the rename.
