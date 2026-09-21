@@ -108,19 +108,26 @@ func stripCredentials(path string) (err error) {
 	// lasts only for the strip: store.New opens with journal_mode(WAL), so a
 	// restored database is back in WAL on the next open.
 	//
-	// The result row is what has to be checked, not the error. PRAGMA
-	// journal_mode reports the mode it ended up in, and returns "wal" — with a
-	// nil error — when it could not switch.
+	// The result row is what has to be checked, not the error: PRAGMA
+	// journal_mode answers with the mode it ended up in, so a switch that did
+	// not happen is reported in the row rather than as a failure.
+	//
+	// Every way this has been made to fail — a reader holding a snapshot, a
+	// writer holding the file, an exclusive lock, an open transaction, a
+	// read-only file — came back as a coded error caught just below, and the
+	// silent case has not been reproduced with this driver. The guard stays
+	// because the PRAGMA's contract allows it and the cost of being wrong is a
+	// restore that reports success while resurrecting every credential it was
+	// supposed to remove. It is the one branch here nothing has watched fail.
 	var mode string
 	if err := db.QueryRow("PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
 		return fmt.Errorf("stripping credentials: taking %s out of WAL mode: %w", path, err)
 	}
 	if !strings.EqualFold(mode, "delete") {
-		// The one refusal here that carries no result code, because there was no
-		// error to carry one: SQLite reports this by the mode it ended up in. So
-		// machineFault cannot sort it and it defaults with everything else, to the
-		// file. Saying "not your file" on a guess is the claim that sends an
-		// operator hunting something that is not there.
+		// No result code, because there was no error to carry one. So machineFault
+		// cannot sort it and it defaults to the file, as Validate's own codeless
+		// refusals do. Saying "not your file" on a guess is the claim that sends
+		// an operator hunting something that is not there.
 		return fmt.Errorf("stripping credentials: %s is still in %q journal mode, so the "+
 			"cleared rows would not be written to the file that gets restored", path, mode)
 	}
