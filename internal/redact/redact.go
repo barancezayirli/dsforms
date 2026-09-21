@@ -302,10 +302,12 @@ var (
 	// and a marker name came back carrying it, against Hit.Matched's contract.
 	// A homoglyph is not a marker any tokenizer emits, so not matching it is
 	// also the right answer — it is odd prose, and this package leaves prose.
+	// Case still does not matter, here through an explicit class and below
+	// through asciiFold: dropping the flag must not drop ASCII case with it.
 	angleToken = regexp.MustCompile(`<[|\x{FF5C}]\s*([A-Za-z0-9_\x{2581}]{1,32})\s*[|\x{FF5C}]>`)
 
 	// bracketToken is the Llama 2 / Mistral family.
-	bracketToken = regexp.MustCompile(`\[\s*/?\s*[Ii][Nn][Ss][Tt]\s*\]|<<\s*/?\s*[Ss][Yy][Ss]\s*>>`)
+	bracketToken = regexp.MustCompile(`\[\s*/?\s*` + asciiFold("INST") + `\s*\]|<<\s*/?\s*` + asciiFold("SYS") + `\s*>>`)
 
 	// turnToken is the Gemma family, which delimits with nothing but angle
 	// brackets: <start_of_turn>, <end_of_turn>.
@@ -315,23 +317,50 @@ var (
 	// <word_word> on sight would take genuine prose with it. Zero false
 	// positives is the property this package is built on, so this family is a
 	// list and grows by hand.
-	turnToken = regexp.MustCompile(`<\s*(start_of_turn|end_of_turn)\s*>`)
+	turnToken = regexp.MustCompile(`<\s*(` + asciiFold("start_of_turn") + `|` + asciiFold("end_of_turn") + `)\s*>`)
 )
 
-// closers are the markers that end a turn. Everything else opens one.
+// asciiFold spells a literal so it matches in either ASCII case without (?i).
 //
-// Only one list, and it is the conservative direction. A marker this build has
-// not heard of must be assumed to open a turn that is never closed, so the rest
-// of the value goes: assuming the opposite is what let Harmony's own
+// Go's (?i) folds by Unicode, which admits homoglyphs — U+017F satisfies "s",
+// so <|ſystem|> matched and its name reached Hit.Matched, which is documented
+// as printable ASCII. Turning the flag off fixed that and silently gave up
+// ordinary case folding too, so <START_OF_TURN> stopped matching at all. These
+// are separable, and this is the separation.
+func asciiFold(word string) string {
+	var b strings.Builder
+	for _, r := range word {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteString("[" + string(r-32) + string(r) + "]")
+		case r >= 'A' && r <= 'Z':
+			b.WriteString("[" + string(r) + string(r+32) + "]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	return b.String()
+}
+
+// The markers that end a turn. Everything else opens one.
+//
+// Listing only the closers is the conservative direction. A marker this build
+// has not heard of must be assumed to open a turn that is never closed, so the
+// rest of the value goes: assuming the opposite is what let Harmony's own
 // <|start|> through review, because it was in neither of the two lists this
 // used to keep and so counted as neither. Being wrong about an unknown marker
 // costs nothing, since a genuine message contains no marker at all.
-// Kept per family, not in one map. A name that ends a turn in one template's
-// vocabulary is not a closer in another's, and sharing the map taught the
-// generic pipe path that <|end_of_turn|> — a spelling no piped template uses —
-// ends a region, so an attacker could write it to close early and have the
-// instruction below it delivered. The conservative default above only holds if
-// "unheard of" is judged within the family that was matched.
+//
+// One list per family, not one shared. A closer is a name in a particular
+// template's vocabulary, and a name can be a closer in one and unknown in
+// another — so whether a name is "unheard of" has to be asked of the family
+// that matched it. Sharing the map let an attacker write the other family's
+// closer to end a region early and have the instruction below it delivered.
+//
+// A name being absent here is not a claim that no template uses it. Some do
+// use <|end_of_turn|> with ASCII pipes; it stays out because the safe reading
+// of it in this family is "opens a turn nothing closes", and moving a name into
+// a list is how that safety is given away.
 var pipeClosers = map[string]bool{
 	"im_end": true, "eot_id": true, "eom_id": true,
 	"end_header_id": true, "endoftext": true, "return": true,
@@ -343,6 +372,16 @@ var pipeClosers = map[string]bool{
 // turnClosers is the Gemma family's, which has exactly one.
 var turnClosers = map[string]bool{"end_of_turn": true}
 
+// family is the template vocabulary a marker was written in. It decides which
+// closer list applies to it, and which opener a closer can answer.
+type family int
+
+const (
+	familyPipe family = iota
+	familyBracket
+	familyTurn
+)
+
 // marker is one forged boundary found on a line.
 type marker struct {
 	// name is what goes in Hit.Matched: the marker's identity without its
@@ -353,6 +392,9 @@ type marker struct {
 	at int
 	// closes says this one ends a turn rather than starting one.
 	closes bool
+	// in is the vocabulary it was written in, so a closer only answers an
+	// opener from the same one.
+	in family
 }
 
 // lineMarkers reports the markers on one line, in the order they appear.
@@ -370,11 +412,11 @@ func lineMarkers(line string) []marker {
 		// underscore-spelled end_of_sentence are one name in closers and one
 		// entry in the report.
 		name := strings.ToLower(strings.ReplaceAll(line[loc[2]:loc[3]], "\u2581", "_"))
-		ms = append(ms, marker{name: name, at: loc[0], closes: pipeClosers[name]})
+		ms = append(ms, marker{name: name, at: loc[0], closes: pipeClosers[name], in: familyPipe})
 	}
 	for _, loc := range turnToken.FindAllStringSubmatchIndex(line, -1) {
 		name := strings.ToLower(line[loc[2]:loc[3]])
-		ms = append(ms, marker{name: name, at: loc[0], closes: turnClosers[name]})
+		ms = append(ms, marker{name: name, at: loc[0], closes: turnClosers[name], in: familyTurn})
 	}
 	for _, loc := range bracketToken.FindAllStringIndex(line, -1) {
 		text := line[loc[0]:loc[1]]
@@ -387,7 +429,7 @@ func lineMarkers(line string) []marker {
 			}
 			return r
 		}, text), " "))
-		ms = append(ms, marker{name: name, at: loc[0], closes: strings.Contains(text, "/")})
+		ms = append(ms, marker{name: name, at: loc[0], closes: strings.Contains(text, "/"), in: familyBracket})
 	}
 	slices.SortFunc(ms, func(a, b marker) int { return a.at - b.at })
 	return ms
@@ -429,9 +471,24 @@ func stripForgedTurn(field, text string) (string, *Hit) {
 		return text, nil
 	}
 
-	// The last marker written decides, not whatever the last line contained.
+	// Everything goes to the end of the value if any family was left open.
+	//
+	// Per family, not "did the last marker close". The families are different
+	// vocabularies and a closer from one says nothing about a turn opened in
+	// another, so asking the question globally let <start_of_turn> be answered
+	// by <|im_end|> — the region ended there and the instruction below it was
+	// handed over. Within a family this is the same rule as before: its last
+	// marker decides, because an opener replaces any earlier close.
+	open := map[family]bool{}
+	for _, m := range found {
+		if m.closes {
+			delete(open, m.in)
+			continue
+		}
+		open[m.in] = true
+	}
 	end := last
-	if !found[len(found)-1].closes {
+	if len(open) > 0 {
 		end = len(lines) - 1
 	}
 
