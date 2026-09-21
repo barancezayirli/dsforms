@@ -644,8 +644,10 @@ func TestImportSerializesConcurrentRestores(t *testing.T) {
 // re-export and re-upload, redoes the one thing that was already fine.
 //
 // The two steps that read the upload, Validate and stripCredentials, go either
-// way, and are sorted by the result code SQLite gives — the three tests below
-// whose names end in TheFilesFault, WhoseFaultTheyAre and AreSortedToo.
+// way. Those are sorted by the result code SQLite gives, except the journal-mode
+// refusal, which comes with no error and so no code, and defaults to the file
+// with everything else unrecognised. The tests for all of that are below, and
+// machineFault's own table is in TestMachineFaultClaimsNothingItDoesNotKnow.
 //
 // Both sentinels, deliberately: nothing was touched is still true, and a caller
 // that only wants to know whether its data survived must not have to learn a
