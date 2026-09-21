@@ -3,6 +3,7 @@ package backup
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,8 +116,14 @@ func TestValidateMissingTables(t *testing.T) {
 	db, _ := sql.Open("sqlite", path)
 	db.Exec("CREATE TABLE dummy (id TEXT)")
 	db.Close()
-	if err := Validate(path); err == nil {
+	err := Validate(path)
+	if err == nil {
 		t.Fatal("expected error for missing required tables")
+	}
+	// Named as missing, so the NOCASE lookup cannot pass by reporting every
+	// failure the same way.
+	if !strings.Contains(err.Error(), "missing required table") {
+		t.Errorf("a missing table reported as %v, want it named as missing", err)
 	}
 }
 
@@ -712,6 +719,7 @@ func TestValidateMatchesTableNamesTheWaySQLiteDoes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	defer db.Close()
 	if _, err := db.Exec(`
 		CREATE TABLE Users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE);
 		CREATE TABLE Forms (id TEXT PRIMARY KEY, name TEXT NOT NULL);
@@ -731,5 +739,38 @@ func TestValidateMatchesTableNamesTheWaySQLiteDoes(t *testing.T) {
 
 	if err := Validate(path); err != nil {
 		t.Errorf("Validate refused a usable database over table-name casing: %v", err)
+	}
+}
+
+// A schema that could not be read is not a schema that is missing a table. The
+// two used to be the same error, which told an admin to re-export a good file.
+func TestValidateTellsAnUnreadableSchemaFromAMissingTable(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "closed.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE users (id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Closed, so the query fails for a reason that has nothing to do with what
+	// the schema declares — the table it asks about is right there.
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	err = requireTables(db, "users")
+	if err == nil {
+		t.Fatal("requireTables accepted a database it could not query")
+	}
+	if strings.Contains(err.Error(), "missing required table") {
+		t.Errorf("an unreadable schema reported as a missing table: %v", err)
+	}
+	if errors.Unwrap(err) == nil {
+		t.Errorf("underlying error dropped rather than wrapped: %v", err)
+	}
+	if !strings.Contains(err.Error(), "database is closed") {
+		t.Errorf("error does not say what went wrong: %v", err)
 	}
 }

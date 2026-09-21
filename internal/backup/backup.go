@@ -168,20 +168,37 @@ func Validate(path string) error {
 		return fmt.Errorf("validate: integrity check failed: %s", result)
 	}
 
-	// Required tables must all be present
-	for _, table := range []string{"users", "forms", "submissions"} {
+	return requireTables(db, "users", "forms", "submissions")
+}
+
+// rowQueryer is the part of *sql.DB that requireTables uses.
+type rowQueryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// requireTables refuses a schema that does not declare every one of tables, and
+// says which one it is missing.
+//
+// A schema it could not read is a different answer and gets a different error.
+// Collapsing the two told an admin their backup was missing "users" when the
+// file was merely busy or the read failed, and sent them to re-export a file
+// that was fine.
+//
+// NOCASE for the reason stripCredentials gives: every query that then uses
+// these tables resolves their names case-insensitively, so a database declaring
+// Users works and must not be refused as missing it.
+func requireTables(db rowQueryer, tables ...string) error {
+	for _, table := range tables {
 		var name string
-		// NOCASE for the reason stripCredentials gives: every query that then
-		// uses these tables resolves their names case-insensitively, so a
-		// database declaring Users works and must not be refused as missing it.
-		err := db.QueryRow(
+		switch err := db.QueryRow(
 			"SELECT name FROM sqlite_master WHERE type='table' AND name = ? COLLATE NOCASE", table,
-		).Scan(&name)
-		if err != nil {
+		).Scan(&name); {
+		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("validate: missing required table %q", table)
+		case err != nil:
+			return fmt.Errorf("validate: looking for table %q: %w", table, err)
 		}
 	}
-
 	return nil
 }
 
