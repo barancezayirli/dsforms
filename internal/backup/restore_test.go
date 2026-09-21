@@ -3,6 +3,7 @@ package backup
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -635,11 +636,14 @@ func TestImportSerializesConcurrentRestores(t *testing.T) {
 // TestARefusalAfterValidateIsNotTheFilesFault pins the boundary the two
 // sentinels draw.
 //
-// Every refusal Import can return once Validate has passed is about this
-// instance — a leftover parked database, a write-ahead log another request is
-// pinning, a write the disk would not take. Reported as a plain rejection they
-// all told the operator their file was bad, and the obvious next step, re-export
-// and re-upload, redoes the one thing that was already fine.
+// Once the upload has been validated and stripped, nothing Import can still
+// refuse for is about the file — a leftover parked database, a write-ahead log
+// another request is pinning on the live side. Reported as a plain rejection
+// they all told the operator their file was bad, and the obvious next step,
+// re-export and re-upload, redoes the one thing that was already fine.
+//
+// The step in between, stripCredentials, goes either way: see
+// TestStrippingFailuresStayTheFilesFault and its sorted counterpart below.
 //
 // Both sentinels, deliberately: nothing was touched is still true, and a caller
 // that only wants to know whether its data survived must not have to learn a
@@ -738,3 +742,88 @@ func TestStrippingFailuresStayTheFilesFault(t *testing.T) {
 		t.Errorf("after a refused restore the live store holds %v, want [Original]", got)
 	}
 }
+
+// TestStrippingFailuresAreSortedByWhoseFaultTheyAre is the other half of
+// TestStrippingFailuresStayTheFilesFault.
+//
+// stripCredentials is the one step that can fail either way, so it is the one
+// step that asks. Its VACUUM writes a second copy of the whole database, which
+// is where a full disk lands, and reporting that as "that file was rejected"
+// sends the operator to re-upload a file that was never the problem — while
+// reporting a trigger in their schema as a server obstacle sends them looking
+// for something that does not exist.
+func TestStrippingFailuresAreSortedByWhoseFaultTheyAre(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// Something else holding the staged file. Not the file's contents, so the
+	// operator's copy is fine and re-uploading it cannot help.
+	holder, err := sql.Open("sqlite", uploadPath)
+	if err != nil {
+		t.Fatalf("opening a second connection: %v", err)
+	}
+	defer holder.Close()
+	tx, err := holder.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO forms (id, name, email_to) VALUES ('pin', 'Pin', 'p@q.com')`,
+	); err != nil {
+		t.Fatalf("taking the write lock: %v", err)
+	}
+	defer tx.Rollback()
+
+	err = Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if !errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, want it to carry ErrNotAttempted: the file "+
+			"is locked, not malformed, so re-exporting and re-uploading it is the "+
+			"one thing that cannot help", err)
+	}
+}
+
+// machineFault decides a claim, so what it does with an answer it does not
+// recognise is the whole of it.
+func TestMachineFaultClaimsNothingItDoesNotKnow(t *testing.T) {
+	t.Parallel()
+
+	coded := func(code int) error {
+		return fmt.Errorf("wrapped: %w", &codedError{code: code})
+	}
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"busy is the machine", coded(5), true},
+		{"disk full is the machine", coded(13), true},
+		{"io error is the machine", coded(10), true},
+		// The extended codes SQLite actually returns, not the bare primaries.
+		{"an extended io error is still the machine", coded(10 | 12<<8), true},
+		{"an extended full is still the machine", coded(13 | 2<<8), true},
+		{"a constraint is the file", coded(19), false},
+		{"corruption is the file", coded(11), false},
+		{"not a database is the file", coded(26), false},
+		{"a code nobody listed is the file", coded(99), false},
+		{"an error with no code at all is the file", errors.New("something"), false},
+		{"and nil claims nothing", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := machineFault(tc.err); got != tc.want {
+				t.Errorf("machineFault(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// codedError carries a SQLite result code the way the driver's own error does.
+type codedError struct{ code int }
+
+func (e *codedError) Error() string { return fmt.Sprintf("sqlite error (%d)", e.code) }
+func (e *codedError) Code() int     { return e.code }

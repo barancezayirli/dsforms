@@ -151,6 +151,37 @@ func stripCredentials(path string) (err error) {
 	return nil
 }
 
+// machineFault reports whether an error is the machine's rather than the
+// uploaded file's, by the result code SQLite itself assigned it.
+//
+// Unrecognised is the file's, and so is an error carrying no code at all. The
+// caller uses this to decide whether to tell an operator their file is fine,
+// which is a claim, and a claim nobody has established is not one to make — the
+// same direction the zero value takes everywhere else here. Getting it wrong in
+// this direction costs a re-upload; wrong in the other sends someone hunting a
+// server problem that does not exist.
+func machineFault(err error) bool {
+	// The driver's error type, declared here rather than imported, so this does
+	// not turn a blank driver import into a real dependency.
+	var coded interface{ Code() int }
+	if !errors.As(err, &coded) {
+		return false
+	}
+	// SQLite's primary result code; the high bits are the extended reason, which
+	// only ever refines one of these.
+	switch coded.Code() & 0xff {
+	case 5, // SQLITE_BUSY: something else holds the file
+		6,  // SQLITE_LOCKED
+		7,  // SQLITE_NOMEM
+		8,  // SQLITE_READONLY: the staging directory, which dsforms chose
+		10, // SQLITE_IOERR
+		13, // SQLITE_FULL: no room for the VACUUM's second copy
+		14: // SQLITE_CANTOPEN
+		return true
+	}
+	return false
+}
+
 // Validate checks that a file is a valid DSForms SQLite database.
 func Validate(path string) error {
 	db, err := sql.Open("sqlite", path)
@@ -231,8 +262,9 @@ var (
 	// write.
 	//
 	// Passing Validate is not the line. stripCredentials runs after it and still
-	// works on the upload, so its failures are the file's. This sentinel claims
-	// the operator's file is fine, so it belongs only where that is known.
+	// works on the upload, so its failures go either way and are sorted by
+	// machineFault. This sentinel claims the operator's file is fine, so it
+	// belongs only where that is known.
 	//
 	// Wrapped alongside ErrRejected rather than instead of it, because the
 	// guarantee an operator needs first — nothing was touched, your database is
@@ -358,12 +390,15 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	// It is the uploaded file being modified, before anything is swapped, so a
 	// rejected restore leaves the live database untouched as before.
 	//
-	// Rejected, not ErrNotAttempted, even though it runs after Validate: this is
-	// the last step that still operates on the uploaded file, and the file can be
+	// The one step that can fail either way, so it is the one step that asks.
+	// It runs after Validate but still works on the upload, and the file can be
 	// what stops it — a trigger on api_tokens, a schema that will not leave WAL
-	// mode. ErrNotAttempted asserts that the operator's file is fine, so it is
-	// only for refusals where that has been established.
+	// mode. The machine can be too: the VACUUM writes a second copy of the whole
+	// database, which is the most space-hungry moment in a restore.
 	if err := stripCredentials(uploadedPath); err != nil {
+		if machineFault(err) {
+			return fmt.Errorf("%w: %w: %w", ErrRejected, ErrNotAttempted, err)
+		}
 		return fmt.Errorf("%w: %w", ErrRejected, err)
 	}
 
