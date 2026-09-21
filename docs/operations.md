@@ -46,7 +46,9 @@ smaller than the figure the Backups page reports, which is the on-disk footprint
 including the write-ahead log.
 
 You can open it with any SQLite client, or drop it in as a direct replacement
-for the live database — with one caveat about credentials, below.
+for the live database. Stop the server first and delete the `-wal` and `-shm`
+files beside the old database: SQLite would otherwise replay the old database's
+frames over the file you just put there. The Backups page does this for you.
 
 **API tokens and login sessions are not in a snapshot.** They are cleared from
 the copy, and the copy is rewritten so the hashes are gone from the file rather
@@ -60,11 +62,15 @@ They are stripped on the way in as well as on the way out, so restoring through
 the Backups page cleans a snapshot taken by an older build, or a raw copy of a
 database file, before anything is swapped.
 
-**Copying a file over `DB_PATH` skips that.** The stripping lives in export and
-restore; starting the server on a database file does not clean it. So a raw copy
-put in place by hand — the direct replacement offered above — carries whatever
-tokens and sessions it had, and they work again. Go through the Backups page if
-the file might predate a revocation.
+**Whether a file is cleaned depends on how it gets there.** The stripping lives
+in export and restore; starting the server on a database file does not clean it.
+A snapshot from the Backups page was stripped when it was made, so copying it
+into place is fine on this count — but a file you copied yourself from a live
+database, or one from a build before any of this existed, still carries its
+tokens and sessions, and putting it at `DB_PATH` by hand makes them work again.
+Restore that kind of file through the Backups page instead, which strips it on
+the way in. The upload is capped at 100MB and must be a SQLite database rather
+than an archive, so `VACUUM INTO` a large raw copy first.
 
 **A snapshot is still sensitive.** Nothing but those two tables is stripped, so
 the file holds every submission, every waitlist entry with its email and IP,
