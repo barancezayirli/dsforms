@@ -79,7 +79,7 @@ func TestABareTurnLabelIsNotMatched(t *testing.T) {
 	}
 }
 
-func TestFieldsRemovesToTheEndWhenTheTurnIsNeverClosed(t *testing.T) {
+func TestFieldsRemovesToTheEndOfTheValue(t *testing.T) {
 	t.Parallel()
 	// The "everything after this is system" shape. Nothing after a boundary is
 	// recoverable as trustworthy text, and a genuine message never gets here at
