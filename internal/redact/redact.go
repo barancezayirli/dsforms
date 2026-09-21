@@ -291,10 +291,27 @@ var (
 	// stale with every new model release. The name is bounded to one
 	// underscore-joined word, which keeps "<|1000 units|>" out (a real typo
 	// from the test corpus) and bounds what can reach Hit.Matched.
-	angleToken = regexp.MustCompile(`(?i)<\|\s*([a-z0-9_]{1,32})\s*\|>`)
+	//
+	// The delimiter is either pipe. DeepSeek writes <｜begin▁of▁sentence｜>
+	// with U+FF5C, which renders almost identically to U+007C and is a
+	// different character, so a matcher spelled with ASCII pipes read the whole
+	// family as prose. U+2581 is that family's word separator and is allowed in
+	// the name for the same reason; lineMarkers folds it to an underscore so
+	// both spellings are one identity.
+	angleToken = regexp.MustCompile(`(?i)<[|\x{FF5C}]\s*([a-z0-9_\x{2581}]{1,32})\s*[|\x{FF5C}]>`)
 
 	// bracketToken is the Llama 2 / Mistral family.
 	bracketToken = regexp.MustCompile(`(?i)\[\s*/?\s*INST\s*\]|<<\s*/?\s*SYS\s*>>`)
+
+	// turnToken is the Gemma family, which delimits with nothing but angle
+	// brackets: <start_of_turn>, <end_of_turn>.
+	//
+	// Named rather than generic, unlike angleToken, because bare angle brackets
+	// are ordinary punctuation — <b>, <3, <see attached> — and matching
+	// <word_word> on sight would take genuine prose with it. Zero false
+	// positives is the property this package is built on, so this family is a
+	// list and grows by hand.
+	turnToken = regexp.MustCompile(`(?i)<\s*(start_of_turn|end_of_turn)\s*>`)
 )
 
 // closers are the markers that end a turn. Everything else opens one.
@@ -308,6 +325,8 @@ var (
 var closers = map[string]bool{
 	"im_end": true, "eot_id": true, "eom_id": true,
 	"end_header_id": true, "endoftext": true, "return": true,
+	// Gemma, and DeepSeek's after U+2581 is folded to an underscore.
+	"end_of_turn": true, "end_of_sentence": true,
 }
 
 // marker is one forged boundary found on a line.
@@ -333,6 +352,13 @@ type marker struct {
 func lineMarkers(line string) []marker {
 	var ms []marker
 	for _, loc := range angleToken.FindAllStringSubmatchIndex(line, -1) {
+		// U+2581 folded to an underscore, so DeepSeek's end▁of▁sentence and an
+		// underscore-spelled end_of_sentence are one name in closers and one
+		// entry in the report.
+		name := strings.ToLower(strings.ReplaceAll(line[loc[2]:loc[3]], "\u2581", "_"))
+		ms = append(ms, marker{name: name, at: loc[0], closes: closers[name]})
+	}
+	for _, loc := range turnToken.FindAllStringSubmatchIndex(line, -1) {
 		name := strings.ToLower(line[loc[2]:loc[3]])
 		ms = append(ms, marker{name: name, at: loc[0], closes: closers[name]})
 	}

@@ -238,11 +238,20 @@ everything, and it is the one you would hand out most freely.
 **What dsforms does about it.** Two things, and it is worth being clear about
 which is which.
 
-**It removes what is not language.** Chat-template control tokens
-(`<|im_start|>`, `[INST]`, `<<SYS>>` and the rest), text hidden in invisible
-Unicode — the tag block, bidi overrides, terminal escapes — and bytes that are
-not valid text at all. A person asking about pricing does not type any of it, so
-removing it costs genuine messages nothing.
+**It removes what is not language.** Chat-template control tokens — the
+`<|im_start|>` family generically, `[INST]` and `<<SYS>>`, Gemma's
+`<start_of_turn>`, and DeepSeek's `<｜begin▁of▁sentence｜>` with its fullwidth
+pipes — text hidden in invisible Unicode (the tag block, bidi overrides,
+terminal escapes), and bytes that are not valid text at all. A person asking
+about pricing does not type any of it, so removing it costs genuine messages
+nothing.
+
+The families that delimit with something other than a pipe are a list, and a
+list goes stale: Gemma and DeepSeek were both missed by the first version of
+this, and a submission carrying a marker from a family not yet listed is passed
+through with no `redacted` entry. The banner above each payload says so rather
+than claiming the content is clean, and the per-form binding below is what
+holds when this does not.
 
 A forged chat turn takes its whole region: deleting the marker and keeping its
 contents leaves the instruction and removes only the evidence that it was framed
