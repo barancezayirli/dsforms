@@ -47,15 +47,23 @@ including the write-ahead log.
 
 You can open it with any SQLite client, or drop it in as a direct replacement
 for the live database. Stop the server, then move the old database **and its
-`-wal` and `-shm` files** aside together before putting the new one in place:
-SQLite replays a leftover `-wal` over whatever file it finds, which would write
-the old database's last transactions into your replacement. Move rather than
-delete — that `-wal` may hold writes the old database never checkpointed, and
-dsforms installs no signal handler, so a container stop leaves them there.
+`-wal` and `-shm` files** aside before putting the new one in place: SQLite
+replays a leftover `-wal` over whatever file it finds, which would write the old
+database's last transactions into your replacement. Move rather than delete —
+that `-wal` may hold writes the old database never checkpointed, and dsforms
+installs no signal handler, so a container stop leaves them there.
+
+Move all three into a directory together, keeping their names. SQLite finds a
+log only at `<database>-wal`, so renaming them apart — `dsforms.db.old` beside
+`dsforms.db-wal.old` — orphans the log and loses exactly the writes moving it
+was meant to keep.
 
 Restoring through the Backups page is the safer route and does none of this by
 hand: it checkpoints the running database first and refuses outright if the log
-cannot be flushed, then parks the old file rather than removing it.
+cannot be flushed, then parks the old file until the replacement has opened.
+That park is not an undo — it is deleted once the new database answers, so a
+restore that succeeds on the wrong snapshot has nothing to go back to. Take
+your own copy first.
 
 **API tokens and login sessions are not in a snapshot.** They are cleared from
 the copy, and the copy is rewritten so the hashes are gone from the file rather
@@ -81,9 +89,11 @@ than an archive — there is no decompression on that path.
 
 One thing to know about where such a file came from: **`cp` is not a way to copy
 a running SQLite database.** It takes the main file without the `-wal` beside
-it, so it is whatever the last checkpoint left, and nothing downstream can tell
-— it opens cleanly and passes the integrity check. Use the Backups page, `dsforms
-backup create`, or `VACUUM INTO` against the live database itself.
+it, so at best it is whatever the last checkpoint left; it is not an atomic read
+either, so it may instead be torn and refuse to open at all. The stale case is
+the dangerous one, because nothing downstream can tell — it opens cleanly and
+passes the integrity check. Use the Backups page, `dsforms backup create`, or
+`VACUUM INTO` against the live database itself.
 
 **A snapshot is still sensitive.** Nothing but those two tables is stripped, so
 the file holds every submission, every waitlist entry with its email and IP,
