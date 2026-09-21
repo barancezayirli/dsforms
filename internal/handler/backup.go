@@ -154,8 +154,9 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 				"Restore failed. Your existing database is unchanged and still in use.")
 		case errors.Is(err, backup.ErrNotAttempted):
 			// Before ErrRejected, which this also is: nothing was touched. But
-			// the file passed validation and the obstacle is on this side, so
-			// "that file was rejected" would send the operator to re-export and
+			// the obstacle is on this side — either the upload was never reached
+			// or SQLite said the failure reading it was the machine's — so "that
+			// file was rejected" would send the operator to re-export and
 			// re-upload the one thing that was not the problem.
 			flash.Set(w, h.SecretKey, "error",
 				"The restore could not be started, and not because of the file you "+

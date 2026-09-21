@@ -643,8 +643,9 @@ func TestImportSerializesConcurrentRestores(t *testing.T) {
 // they all told the operator their file was bad, and the obvious next step,
 // re-export and re-upload, redoes the one thing that was already fine.
 //
-// The step in between, stripCredentials, goes either way: see
-// TestStrippingFailuresStayTheFilesFault and its sorted counterpart below.
+// The two steps that read the upload, Validate and stripCredentials, go either
+// way, and are sorted by the result code SQLite gives — the three tests below
+// whose names end in TheFilesFault, WhoseFaultTheyAre and AreSortedToo.
 //
 // Both sentinels, deliberately: nothing was touched is still true, and a caller
 // that only wants to know whether its data survived must not have to learn a

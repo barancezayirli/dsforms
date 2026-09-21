@@ -1090,3 +1090,45 @@ calls a guarantee. Measured: a logged-out session answered 200 after a restore.
 The cost is documented where an operator meets it, on the restore button and in
 operations.md: after restoring, tokens are gone and everyone signs in again.
 A client or a person visibly stopping is the better failure.
+
+## Whose fault the restore was
+
+The backup work ended in seven review rounds over the same few lines, all of
+one shape: **a message that names the wrong culprit sends the operator to fix
+the wrong thing.**
+
+`Validate` collapsed every error from its schema lookup into "missing required
+table `users`", so an unreadable file was reported as an incomplete one, and
+the operator was sent to re-export a backup that was fine. Then `Import`
+returned one sentinel for every refusal before the swap, so a leftover parked
+database, a pinned write-ahead log and a full disk all surfaced as *"that file
+was rejected"* — again pointing at the upload, again the one thing that was
+already good.
+
+`ErrNotAttempted` rides alongside `ErrRejected` rather than replacing it. The
+guarantee an operator wants first — nothing was touched — is the same either
+way and must not need a second name; the new sentinel answers the separate
+question of whether re-uploading could possibly help.
+
+**Where the boundary sits took three goes to place.** It is not "after
+Validate": `stripCredentials` runs after it and still works on the upload, so a
+trigger on `api_tokens` stops the restore and that really is the file. It is
+not "before stripCredentials" either: that step's `VACUUM` writes a second copy
+of the whole database, which is the likeliest moment in a restore for a disk to
+fill. Both steps read the staged file, both fail either way, and both now ask
+SQLite which it was.
+
+`machineFault` decides that from the result code, and **an answer it does not
+recognise is the file's.** It is deciding whether to assert that the operator's
+file is fine, which is a claim; wrong in that direction costs a re-upload,
+wrong in the other sends someone hunting a server problem that does not exist.
+The journal-mode guard is the one refusal that cannot be sorted — SQLite
+reports it by the mode it ended up in, with no error and so no code — and it
+says so where it defaults.
+
+Two things the tests had to be re-broken to prove. A guard asserting only that
+*something* was wrapped passes when the real failure is thrown away and
+replaced; the expectation is derived now, from the same query on the same
+handle. And the fixture for a blocked `integrity_check` needed `BEGIN
+EXCLUSIVE` — a plain write takes a reserved lock, readers go straight past it,
+and the first version of that test proved nothing while passing.

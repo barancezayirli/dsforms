@@ -278,10 +278,10 @@ var (
 	// write-ahead log another request is pinning, a disk that would not take the
 	// write.
 	//
-	// Passing Validate is not the line. stripCredentials runs after it and still
-	// works on the upload, so its failures go either way and are sorted by
-	// machineFault. This sentinel claims the operator's file is fine, so it
-	// belongs only where that is known.
+	// Passing Validate is not the line, and neither is reaching it. Both it and
+	// stripCredentials read the staged upload, so both fail either way, and both
+	// are sorted by machineFault through rejected. This sentinel claims the
+	// operator's file is fine, so it belongs only where that is known.
 	//
 	// Wrapped alongside ErrRejected rather than instead of it, because the
 	// guarantee an operator needs first — nothing was touched, your database is
