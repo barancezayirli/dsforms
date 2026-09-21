@@ -181,8 +181,7 @@ type rowQueryer interface {
 //
 // A schema it could not read is a different answer and gets a different error.
 // Collapsing the two told an admin their backup was missing "users" when the
-// file was merely busy or the read failed, and sent them to re-export a file
-// that was fine.
+// read had simply failed, and sent them to re-export a file that was fine.
 //
 // NOCASE for the reason stripCredentials gives: every query that then uses
 // these tables resolves their names case-insensitively, so a database declaring

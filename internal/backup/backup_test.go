@@ -767,10 +767,14 @@ func TestValidateTellsAnUnreadableSchemaFromAMissingTable(t *testing.T) {
 	if strings.Contains(err.Error(), "missing required table") {
 		t.Errorf("an unreadable schema reported as a missing table: %v", err)
 	}
-	if errors.Unwrap(err) == nil {
-		t.Errorf("underlying error dropped rather than wrapped: %v", err)
+	// What went wrong is carried, not replaced. Asserted against the wrapped
+	// error's own text rather than a literal, which would be database/sql's
+	// unexported wording and not this package's to depend on.
+	cause := errors.Unwrap(err)
+	if cause == nil {
+		t.Fatalf("underlying error dropped rather than wrapped: %v", err)
 	}
-	if !strings.Contains(err.Error(), "database is closed") {
+	if !strings.Contains(err.Error(), cause.Error()) {
 		t.Errorf("error does not say what went wrong: %v", err)
 	}
 }
