@@ -71,4 +71,17 @@ jobs:
         #
         # -count=1 defeats the test cache: a cached pass tells you the code was
         # green at some point, not that it is green now.
-        run: go test -race -count=1 ./...
+        #
+        # -timeout because Go's default is 10 minutes per package and
+        # internal/handler now sits just under it: the MCP branch merged at
+        # 600.077s and failed on main having passed on the pull request minutes
+        # earlier, the same tree either side. The cost is bcrypt, not a hang —
+        # store.New seeds the default admin at cost 12, every handler fixture
+        # builds a store, and -race makes each hash several times slower, so an
+        # ordinary auth test costs six seconds before it asserts anything.
+        #
+        # Raising the ceiling is not the fix for that, it is what stops a real
+        # failure being reported as a timeout while the fix is decided. The fix
+        # is fewer hashes, and it needs a decision about how tests get a cheaper
+        # cost without production gaining a knob that can weaken one.
+        run: go test -race -count=1 -timeout 25m ./...
