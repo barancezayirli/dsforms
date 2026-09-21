@@ -55,9 +55,12 @@ installs no signal handler, so a container stop leaves them there.
 
 Move all three into a directory together, keeping their names. SQLite finds a
 log only at `<database>-wal`, so renaming them apart — `dsforms.db.old` beside
-`dsforms.db-wal.old` — detaches the log, and the writes in it stop being
-visible. Detached, not destroyed: rename it back to `<database>-wal` and they
-are found again.
+`dsforms.db-wal.old` — detaches the log and the writes in it stop being visible.
+They are still in the file: name it for the database it belongs to, here
+`dsforms.db.old-wal`, and it is found again, as long as nothing has opened that
+database for writing in the meantime. Not `dsforms.db-wal` — that name now
+belongs to the database you restored, and SQLite would replay these frames over
+it.
 
 Restoring through the Backups page is the safer route and does none of this by
 hand: it checkpoints the running database first and refuses outright if the log
@@ -90,13 +93,13 @@ than an archive — there is no decompression on that path.
 
 One thing to know about where such a file came from: **`cp` is not a way to copy
 a running SQLite database.** It takes the main file without the `-wal` beside
-it, so what you get is at best whatever the last checkpoint left. The read is
-not atomic either, so it can be torn — sometimes visibly, refusing to open, and
-sometimes not: a copy taken while a checkpoint was writing can be structurally
-sound and still internally inconsistent. `PRAGMA integrity_check` is a
-structural check, so it answers `ok` either way, and that is the only gate a
-restore puts in front of it. Use the Backups page, `dsforms backup create`, or
-`VACUUM INTO` against the live database itself.
+it, so what you get is whatever the last checkpoint left: internally consistent,
+opening cleanly, passing the integrity check, and missing every write since.
+That is the dangerous outcome, because nothing downstream can tell. The read is
+not atomic either, so the copy can come out torn instead — the louder failure,
+since a torn file usually refuses to open or fails the integrity check. Use the
+Backups page, `dsforms backup create`, or `VACUUM INTO` against the live
+database itself.
 
 **A snapshot is still sensitive.** Nothing but those two tables is stripped, so
 the file holds every submission, every waitlist entry with its email and IP,
