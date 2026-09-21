@@ -96,8 +96,9 @@ a running SQLite database.** It takes the main file without the `-wal` beside
 it, so what you get is whatever the last checkpoint left: internally consistent,
 opening cleanly, passing the integrity check, and missing every write since.
 That is the dangerous outcome, because nothing downstream can tell. The read is
-not atomic either, so the copy can come out torn instead — the louder failure,
-since a torn file usually refuses to open or fails the integrity check. Use the
+not atomic either, so the copy can come out torn instead — usually the louder
+failure, since a torn file tends to refuse to open or fail the integrity check,
+though one torn mid-checkpoint can be structurally valid and pass. Use the
 Backups page, `dsforms backup create`, or `VACUUM INTO` against the live
 database itself.
 
