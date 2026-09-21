@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -580,5 +581,119 @@ func TestSweepRemovesTheSidecarsToo(t *testing.T) {
 	// And it did not take the live database with it.
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("the sweep removed the live database: %v", err)
+	}
+}
+
+// walFile writes a database in WAL mode holding one recognisable secret, as a
+// raw copy of a live instance would be.
+func walFile(t *testing.T, table string) (path, secret string) {
+	t.Helper()
+	path = filepath.Join(t.TempDir(), "raw-copy.db")
+	secret = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE);
+		CREATE TABLE forms (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE submissions (id TEXT PRIMARY KEY, form_id TEXT NOT NULL, data TEXT NOT NULL, read INTEGER NOT NULL DEFAULT 0);
+		CREATE TABLE ` + table + ` (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL);
+		INSERT INTO users (id, username) VALUES ('u1', 'admin');
+		INSERT INTO forms (id, name) VALUES ('f1', 'Contact');
+	`); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO "+table+" (id, token_hash) VALUES ('t1', ?)", secret); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Fatalf("fixture is in %q mode, not wal, so it does not exercise the path it is for", mode)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return path, secret
+}
+
+// TestStrippingLeavesNoWriteAheadLogBehind.
+//
+// A raw copy of a live database arrives in WAL mode, and the first version of
+// this relied on Close checkpointing the DELETE and VACUUM into the main file —
+// which is the file Import renames into place. A checkpoint that fails is not
+// reported as an error by SQLite, so that left a restore able to report success
+// while renaming an unstripped file; the same lesson Import's own
+// wal_checkpoint handling records one screen above.
+//
+// Taking the file out of WAL mode removes the failure rather than detecting it:
+// there is no sidecar to checkpoint, and nothing can be left outside the file
+// that gets renamed. store.New reopens with journal_mode(WAL), so the change is
+// only for the duration of the strip.
+func TestStrippingLeavesNoWriteAheadLogBehind(t *testing.T) {
+	t.Parallel()
+	path, secret := walFile(t, "api_tokens")
+
+	if err := stripCredentials(path); err != nil {
+		t.Fatalf("stripCredentials: %v", err)
+	}
+
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(path + suffix); !os.IsNotExist(err) {
+			t.Errorf("%s survived the strip", filepath.Base(path+suffix))
+		}
+	}
+
+	// Structurally, not incidentally: the file is out of WAL mode, so there is
+	// no checkpoint that could fail silently and leave the main file stale.
+	after, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	var mode string
+	if err := after.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("journal_mode: %v", err)
+	}
+	if err := after.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if strings.EqualFold(mode, "wal") {
+		t.Error("the stripped file is still in WAL mode, so the cleared rows may sit " +
+			"in a sidecar that Import does not rename")
+	}
+
+	// Everything has to be in the file Import renames, because that is the only
+	// one it renames.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if bytes.Contains(raw, []byte(secret)) {
+		t.Error("the hash is still in the main database file")
+	}
+}
+
+// TestStrippingMatchesTableNamesTheWaySQLiteDoes. The presence check and the
+// DELETE it guards have to agree: sqlite_master compares with BINARY collation
+// while DELETE resolves table names case-insensitively, so a schema declaring
+// API_Tokens was skipped as absent and the restore reported success with the
+// credentials intact.
+func TestStrippingMatchesTableNamesTheWaySQLiteDoes(t *testing.T) {
+	t.Parallel()
+	path, secret := walFile(t, "API_Tokens")
+
+	if err := stripCredentials(path); err != nil {
+		t.Fatalf("stripCredentials: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if bytes.Contains(raw, []byte(secret)) {
+		t.Error("a table spelled API_Tokens was treated as absent and left intact")
 	}
 }

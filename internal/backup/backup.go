@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite"
@@ -84,19 +85,40 @@ func stripCredentials(path string) (err error) {
 	if openErr != nil {
 		return fmt.Errorf("stripping credentials: open %s: %w", path, openErr)
 	}
-	// Closed explicitly, and its error returned.
-	//
-	// An uploaded file may be a raw copy of a live database, which is in WAL
-	// mode — so the DELETE and the VACUUM live in a sidecar until Close
-	// checkpoints them. Discarding that error meant a failed checkpoint
-	// (no space, say) returned nil, and Import then renamed the *unstripped*
-	// main file into place: a restore that reported success while resurrecting
-	// every revoked token and logged-out session.
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("stripping credentials: flushing %s: %w", path, closeErr)
+			err = fmt.Errorf("stripping credentials: closing %s: %w", path, closeErr)
 		}
 	}()
+
+	// Out of WAL mode before anything is written.
+	//
+	// An uploaded file may be a raw copy of a live database, and those are in
+	// WAL mode — so the DELETE and the VACUUM would live in a sidecar until
+	// Close checkpointed them into the main file, which is the only file Import
+	// renames into place. Relying on that was the first version of this, and
+	// SQLite does not report a failed checkpoint as an error: Close returns nil
+	// and the unstripped main file gets renamed, a restore reporting success
+	// while resurrecting every revoked token and logged-out session. Import's
+	// own wal_checkpoint handling records the same lesson one screen below.
+	//
+	// Switching the journal mode removes the failure instead of detecting it.
+	// There is then no sidecar to checkpoint, nothing can be left outside the
+	// file that is renamed, and no -wal is left beside a staged upload. It
+	// lasts only for the strip: store.New opens with journal_mode(WAL), so a
+	// restored database is back in WAL on the next open.
+	//
+	// The result row is what has to be checked, not the error. PRAGMA
+	// journal_mode reports the mode it ended up in, and returns "wal" — with a
+	// nil error — when it could not switch.
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
+		return fmt.Errorf("stripping credentials: taking %s out of WAL mode: %w", path, err)
+	}
+	if !strings.EqualFold(mode, "delete") {
+		return fmt.Errorf("stripping credentials: %s is still in %q journal mode, so the "+
+			"cleared rows would not be written to the file that gets restored", path, mode)
+	}
 
 	for _, table := range credentialTables {
 		// Skipped when absent rather than failing.
@@ -106,17 +128,21 @@ func stripCredentials(path string) (err error) {
 		// restore — closing the recovery path for every older backup and for the
 		// raw database copy operations.md invites. The names are this package's
 		// own constants, never input.
+		// NOCASE, because the DELETE below resolves table names
+		// case-insensitively while sqlite_master compares with BINARY. A schema
+		// declaring API_Tokens was read as absent and left intact.
 		var present string
 		switch err := db.QueryRow(
-			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", table,
+			"SELECT name FROM sqlite_master WHERE type='table' AND name = ? COLLATE NOCASE", table,
 		).Scan(&present); {
 		case errors.Is(err, sql.ErrNoRows):
 			continue
 		case err != nil:
 			return fmt.Errorf("stripping credentials: looking for %s: %w", table, err)
 		}
-		if _, err := db.Exec("DELETE FROM " + table); err != nil {
-			return fmt.Errorf("stripping credentials: clearing %s: %w", table, err)
+		// The name as the schema spells it, not as this package spells it.
+		if _, err := db.Exec("DELETE FROM " + present); err != nil {
+			return fmt.Errorf("stripping credentials: clearing %s: %w", present, err)
 		}
 	}
 	if _, err := db.Exec("VACUUM"); err != nil {
