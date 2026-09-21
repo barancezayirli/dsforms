@@ -46,7 +46,7 @@ smaller than the figure the Backups page reports, which is the on-disk footprint
 including the write-ahead log.
 
 You can open it with any SQLite client, or drop it in as a direct replacement
-for the live database.
+for the live database — with one caveat about credentials, below.
 
 **API tokens and login sessions are not in a snapshot.** They are cleared from
 the copy, and the copy is rewritten so the hashes are gone from the file rather
@@ -56,9 +56,15 @@ restoring a snapshot used to undo revocation. A token you revoked, a session you
 logged out of, a session cascaded away with a deleted user: all of them came
 back and worked again.
 
-They are stripped on the way in as well as on the way out, so a snapshot taken
-by an older build, or a raw copy of a database file, cannot walk them back in
-either.
+They are stripped on the way in as well as on the way out, so restoring through
+the Backups page cleans a snapshot taken by an older build, or a raw copy of a
+database file, before anything is swapped.
+
+**Copying a file over `DB_PATH` skips that.** The stripping lives in export and
+restore; starting the server on a database file does not clean it. So a raw copy
+put in place by hand — the direct replacement offered above — carries whatever
+tokens and sessions it had, and they work again. Go through the Backups page if
+the file might predate a revocation.
 
 **A snapshot is still sensitive.** Nothing but those two tables is stripped, so
 the file holds every submission, every waitlist entry with its email and IP,
@@ -66,12 +72,11 @@ every user's bcrypt password hash, and every form's webhook URL — which is
 itself a credential for the Slack or Discord channel it posts to. Treat a
 snapshot as you would the live database, not as something safe to pass around.
 
-**And a restore is a whole-database replacement,** so it puts back more than
-those tables removed. An account you deleted since the snapshot comes back, with
-its password hash; a password you changed reverts to the old one. Stripping
-tokens and sessions stops those two credentials from being walked back in — it
-does not make a restore safe to run without looking at what the snapshot
-predates.
+**And a restore is a whole-database replacement.** Everything the stripping does
+not remove comes back as the snapshot had it: an account you deleted since
+returns with its password hash, and a password you changed reverts to the old
+one. Clearing tokens and sessions keeps those two out; it does not make a
+restore safe to run without looking at what the snapshot predates.
 
 The cost is the other side of that. **After restoring, your API tokens are gone
 and everyone is signed out, including you.** MCP clients stop working until you

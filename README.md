@@ -137,9 +137,9 @@ curl -X POST https://your-server.com/f/FORM_ID \
 - API tokens stored as SHA-256 hashes, shown once, scoped and individually
   revocable; deleting a user revokes theirs in the same statement
 - API tokens and sessions are stripped from a snapshot on the way out *and* on
-  the way in, so no restore walks a revoked token or an ended session back in.
-  Nothing else is removed, so a snapshot is as sensitive as the database it
-  copies, and a restore still returns everything else to that point in time
+  the way in, so a restore through the admin walks no revoked token or ended
+  session back in. Nothing else is removed, so a snapshot is as sensitive as the
+  database it copies, and a restore returns everything else to that point
 - dsforms refuses to start with the MCP endpoint enabled over plain http, since
   a bearer token would cross the network in the clear on every request
 - Chat-template control tokens and invisible Unicode are removed from submission
