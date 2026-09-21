@@ -46,9 +46,16 @@ smaller than the figure the Backups page reports, which is the on-disk footprint
 including the write-ahead log.
 
 You can open it with any SQLite client, or drop it in as a direct replacement
-for the live database. Stop the server first and delete the `-wal` and `-shm`
-files beside the old database: SQLite would otherwise replay the old database's
-frames over the file you just put there. The Backups page does this for you.
+for the live database. Stop the server, then move the old database **and its
+`-wal` and `-shm` files** aside together before putting the new one in place:
+SQLite replays a leftover `-wal` over whatever file it finds, which would write
+the old database's last transactions into your replacement. Move rather than
+delete — that `-wal` may hold writes the old database never checkpointed, and
+dsforms installs no signal handler, so a container stop leaves them there.
+
+Restoring through the Backups page is the safer route and does none of this by
+hand: it checkpoints the running database first and refuses outright if the log
+cannot be flushed, then parks the old file rather than removing it.
 
 **API tokens and login sessions are not in a snapshot.** They are cleared from
 the copy, and the copy is rewritten so the hashes are gone from the file rather
@@ -70,7 +77,13 @@ database, or one from a build before any of this existed, still carries its
 tokens and sessions, and putting it at `DB_PATH` by hand makes them work again.
 Restore that kind of file through the Backups page instead, which strips it on
 the way in. The upload is capped at 100MB and must be a SQLite database rather
-than an archive, so `VACUUM INTO` a large raw copy first.
+than an archive — there is no decompression on that path.
+
+One thing to know about where such a file came from: **`cp` is not a way to copy
+a running SQLite database.** It takes the main file without the `-wal` beside
+it, so it is whatever the last checkpoint left, and nothing downstream can tell
+— it opens cleanly and passes the integrity check. Use the Backups page, `dsforms
+backup create`, or `VACUUM INTO` against the live database itself.
 
 **A snapshot is still sensitive.** Nothing but those two tables is stripped, so
 the file holds every submission, every waitlist entry with its email and IP,
