@@ -136,9 +136,9 @@ curl -X POST https://your-server.com/f/FORM_ID \
 - 64KB request body limit (100MB for backup import, 1MB for MCP)
 - API tokens stored as SHA-256 hashes, shown once, scoped and individually
   revocable; deleting a user revokes theirs in the same statement
-- Backups carry no credentials — API tokens and sessions are stripped from a
-  snapshot on the way out *and* on the way in, so no restore can undo a
-  revocation or a logout
+- API tokens and sessions are stripped from a snapshot on the way out *and* on
+  the way in, so no restore can undo a revocation or a logout. Nothing else is
+  removed, so a snapshot is still as sensitive as the database it copies
 - dsforms refuses to start with the MCP endpoint enabled over plain http, since
   a bearer token would cross the network in the clear on every request
 - Chat-template control tokens and invisible Unicode are removed from submission

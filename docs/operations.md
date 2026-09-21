@@ -48,17 +48,23 @@ including the write-ahead log.
 You can open it with any SQLite client, or drop it in as a direct replacement
 for the live database.
 
-**No credentials are in a snapshot** — neither API tokens nor login sessions.
-They are cleared from the copy, and the copy is rewritten so the hashes are gone
-from the file rather than merely unlinked. Two reasons: a backup gets copied to
-laptops and object stores and had no business carrying credential material, and
-— the sharper one — restoring a snapshot used to undo revocation. A token you
-revoked, a session you logged out of, a session cascaded away with a deleted
-user: all of them came back and worked again.
+**API tokens and login sessions are not in a snapshot.** They are cleared from
+the copy, and the copy is rewritten so the hashes are gone from the file rather
+than merely unlinked. Two reasons: a backup gets copied to laptops and object
+stores and had no business carrying credential material, and — the sharper one —
+restoring a snapshot used to undo revocation. A token you revoked, a session you
+logged out of, a session cascaded away with a deleted user: all of them came
+back and worked again.
 
 They are stripped on the way in as well as on the way out, so a snapshot taken
 by an older build, or a raw copy of a database file, cannot walk them back in
 either.
+
+**A snapshot is still sensitive.** Those two tables are what a restore could
+walk back in; nothing else is stripped, so the file still holds every
+submission, every user's bcrypt password hash, and every form's webhook URL —
+which is itself a credential for the Slack or Discord channel it posts to. Treat
+a snapshot as you would the live database, not as something safe to pass around.
 
 The cost is the other side of that. **After restoring, your API tokens are gone
 and everyone is signed out, including you.** MCP clients stop working until you
