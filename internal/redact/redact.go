@@ -354,18 +354,24 @@ type marker struct {
 
 // lineMarkers reports the markers on one line, in the order they appear.
 //
-// The order is the point. This used to return "did anything open" and "did
-// anything close" as two booleans, which made <|im_end|><|im_start|>system read
-// as balanced — so the removed region ended on that line and the instruction
-// below it was handed to the client while the genuine prose above was deleted.
-// The redaction was doing the attacker's work. Only the last marker decides,
-// and that cannot be known without positions.
+// Nothing about the region depends on that order any more — it runs to the end
+// of the value whatever the markers say. The positions and the sort are what
+// keeps Hit.Matched in the order the submitter wrote them, which is the only
+// reason to keep them, and the reason not to delete them as dead.
+//
+// They were load-bearing once, and the comment is kept because the bug is
+// instructive: this used to return "did anything open" and "did anything close"
+// as two booleans, so <|im_end|><|im_start|>system read as balanced, the region
+// ended on that line, and the instruction below it went to the client while the
+// genuine prose above was deleted. The redaction was doing the attacker's work.
 func lineMarkers(line string) []marker {
 	var ms []marker
 	for _, loc := range angleToken.FindAllStringSubmatchIndex(line, -1) {
-		// U+2581 folded to an underscore, so DeepSeek's end▁of▁sentence and an
-		// underscore-spelled end_of_sentence are one name in closers and one
-		// entry in the report.
+		// U+2581 folded to an underscore. Hit.Matched is documented as printable
+		// ASCII — it travels to a client and into the admin — and this is the one
+		// non-ASCII rune the name charset admits, because DeepSeek writes its
+		// markers with it. Folding also makes end▁of▁sentence and an
+		// underscore-spelled end_of_sentence one entry in the report.
 		name := strings.ToLower(strings.ReplaceAll(line[loc[2]:loc[3]], "\u2581", "_"))
 		ms = append(ms, marker{name: name, at: loc[0]})
 	}
