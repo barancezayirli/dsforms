@@ -78,12 +78,12 @@ A restore replaces the live database, so it is written to fail safely:
 - You are told which of those happened. *"That file was rejected"* means your
   database is untouched; *"your existing database is unchanged and still in
   use"* means the swap failed and was undone.
-- A restore can also be refused for a reason that is not your file at all — a
-  parked database from a restore that did not finish, a write-ahead log another
-  request is holding open, a disk with no room. Your database is untouched here
-  too, and the message says the file is not the problem, because the obvious
-  next step otherwise is to re-export and re-upload the one thing that was
-  already fine. The server log names the obstacle.
+- A restore can also be refused because this instance was not in a state to
+  accept it — a parked database from a restore that did not finish, a
+  write-ahead log another request is holding open, a disk with no room. Your
+  database is untouched here too, and the message says the file is not the
+  problem, because the obvious next step otherwise is to re-export and re-upload
+  the one thing that was already fine. The server log names the obstacle.
 - In the one case where neither works, the message names the file your data is
   in (`<DB_PATH>.rollback`) and says not to restart before moving it back —
   starting with no database there creates an empty one.

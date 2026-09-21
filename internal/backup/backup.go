@@ -225,10 +225,14 @@ const (
 var (
 	// ErrRejected: refused before the live database was touched.
 	ErrRejected = errors.New("backup: restore rejected")
-	// ErrNotAttempted: refused, and not because of the uploaded file — it had
-	// already passed Validate. Everything after that point is about this
-	// instance: a leftover parked database, a write-ahead log another request is
-	// pinning, a disk that would not take the write.
+	// ErrNotAttempted: refused, and not because of the uploaded file — this
+	// instance was not in a state to accept it. A leftover parked database, a
+	// write-ahead log another request is pinning, a disk that would not take the
+	// write.
+	//
+	// Passing Validate is not the line. stripCredentials runs after it and still
+	// works on the upload, so its failures are the file's. This sentinel claims
+	// the operator's file is fine, so it belongs only where that is known.
 	//
 	// Wrapped alongside ErrRejected rather than instead of it, because the
 	// guarantee an operator needs first — nothing was touched, your database is
@@ -353,8 +357,14 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	//
 	// It is the uploaded file being modified, before anything is swapped, so a
 	// rejected restore leaves the live database untouched as before.
+	//
+	// Rejected, not ErrNotAttempted, even though it runs after Validate: this is
+	// the last step that still operates on the uploaded file, and the file can be
+	// what stops it — a trigger on api_tokens, a schema that will not leave WAL
+	// mode. ErrNotAttempted asserts that the operator's file is fine, so it is
+	// only for refusals where that has been established.
 	if err := stripCredentials(uploadedPath); err != nil {
-		return fmt.Errorf("%w: %w: %w", ErrRejected, ErrNotAttempted, err)
+		return fmt.Errorf("%w: %w", ErrRejected, err)
 	}
 
 	// Refuse if a previous restore left its parked database behind.

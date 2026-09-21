@@ -683,3 +683,58 @@ func TestARefusedFileIsTheFilesFault(t *testing.T) {
 			"telling the operator otherwise sends them looking at the wrong thing", err)
 	}
 }
+
+// TestStrippingFailuresStayTheFilesFault is where the boundary between the two
+// sentinels actually lies, which is one step earlier than it first looks.
+//
+// stripCredentials runs after Validate has passed, so it seems to belong with
+// the refusals that are about this instance. It does not: it is the last step
+// that still operates on the uploaded file, and the file can be what stops it —
+// a trigger on api_tokens, a schema that will not come out of WAL mode.
+// ErrNotAttempted asserts something positive, that the operator's file is fine,
+// so it may only be used where that has been established. Here it has not, and
+// claiming it sends them looking for a server-side obstacle that is not there.
+func TestStrippingFailuresStayTheFilesFault(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// A database that passes Validate and then refuses to be stripped.
+	upload, err := sql.Open("sqlite", uploadPath)
+	if err != nil {
+		t.Fatalf("opening the upload: %v", err)
+	}
+	if _, err := upload.Exec(
+		`CREATE TRIGGER no_delete BEFORE DELETE ON api_tokens
+		 BEGIN SELECT RAISE(ABORT, 'nope'); END`,
+	); err != nil {
+		t.Fatalf("arming the upload: %v", err)
+	}
+	if _, err := upload.Exec(
+		`INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, created_at)
+		 VALUES ('t1', 'u1', 'laptop', 'deadbeef', 'read', CURRENT_TIMESTAMP)`,
+	); err != nil {
+		t.Fatalf("seeding a token to strip: %v", err)
+	}
+	if err := upload.Close(); err != nil {
+		t.Fatalf("closing the upload: %v", err)
+	}
+
+	// It really does get past Validate, or this proves nothing about the step
+	// after it.
+	if err := Validate(uploadPath); err != nil {
+		t.Fatalf("the fixture does not reach stripCredentials: %v", err)
+	}
+
+	err = Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, but the uploaded file is exactly what "+
+			"stopped the restore — telling the operator to go looking at the "+
+			"server sends them after an obstacle that is not there", err)
+	}
+	if got := formNames(t, live); len(got) != 1 || got[0] != "Original" {
+		t.Errorf("after a refused restore the live store holds %v, want [Original]", got)
+	}
+}
