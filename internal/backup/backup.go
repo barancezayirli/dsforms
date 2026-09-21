@@ -118,7 +118,7 @@ func stripCredentials(path string) (err error) {
 	// silent case has not been reproduced with this driver. The guard stays
 	// because the PRAGMA's contract allows it and the cost of being wrong is a
 	// restore that reports success while resurrecting every credential it was
-	// supposed to remove. It is the one branch here nothing has watched fail.
+	// supposed to remove. Unproven, though, not proven safe.
 	var mode string
 	if err := db.QueryRow("PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
 		return fmt.Errorf("stripping credentials: taking %s out of WAL mode: %w", path, err)

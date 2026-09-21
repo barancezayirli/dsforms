@@ -648,7 +648,7 @@ func TestImportSerializesConcurrentRestores(t *testing.T) {
 // carrying no code — a failed integrity check, a missing table, a journal mode
 // that did not change — is the file's, along with every code machineFault does
 // not recognise. Its table is TestMachineFaultClaimsNothingItDoesNotKnow; the
-// tests either side of this one cover the two steps.
+// tests below cover the two steps themselves.
 //
 // Both sentinels, deliberately: nothing was touched is still true, and a caller
 // that only wants to know whether its data survived must not have to learn a
