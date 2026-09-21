@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -827,3 +828,65 @@ type codedError struct{ code int }
 
 func (e *codedError) Error() string { return fmt.Sprintf("sqlite error (%d)", e.code) }
 func (e *codedError) Code() int     { return e.code }
+
+// TestValidationFailuresAreSortedToo closes the mechanism rather than the
+// instance.
+//
+// Validate reads the same staged file stripCredentials does — integrity_check
+// walks every page of it — so it fails for the same two kinds of reason, and
+// sorting one step while leaving the other to blame the upload leaves the same
+// wrong answer one line higher.
+func TestValidationFailuresAreSortedToo(t *testing.T) {
+	t.Parallel()
+	live, dbPath, uploadPath := restoreFixture(t)
+
+	// Out of WAL mode, so a writer blocks the reader integrity_check is. In WAL
+	// mode it would read the snapshot happily and this would prove nothing.
+	prep, err := sql.Open("sqlite", uploadPath)
+	if err != nil {
+		t.Fatalf("opening the upload: %v", err)
+	}
+	var mode string
+	if err := prep.QueryRow("PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
+		t.Fatalf("switching journal mode: %v", err)
+	}
+	if !strings.EqualFold(mode, "delete") {
+		t.Fatalf("upload is in %q mode, want delete", mode)
+	}
+	if err := prep.Close(); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+
+	// EXCLUSIVE, not the RESERVED a plain write takes: a reserved lock still lets
+	// readers in, and integrity_check is a reader. An earlier version of this
+	// test used a plain transaction and Validate sailed straight through it.
+	holder, err := sql.Open("sqlite", uploadPath)
+	if err != nil {
+		t.Fatalf("opening a second connection: %v", err)
+	}
+	defer holder.Close()
+	conn, err := holder.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("taking a connection: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), "BEGIN EXCLUSIVE"); err != nil {
+		t.Fatalf("taking the exclusive lock: %v", err)
+	}
+	defer conn.ExecContext(context.Background(), "ROLLBACK")
+
+	// It really is Validate that refuses, not a later step.
+	if err := Validate(uploadPath); err == nil {
+		t.Fatal("the fixture does not make Validate fail, so it proves nothing")
+	}
+
+	err = Import(live, uploadPath, dbPath)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("Import returned %v, want ErrRejected", err)
+	}
+	if !errors.Is(err, ErrNotAttempted) {
+		t.Errorf("Import returned %v, want it to carry ErrNotAttempted: the file "+
+			"could not be read, which is not the same as it being a bad file, and "+
+			"re-uploading the same bytes hits the same wall", err)
+	}
+}

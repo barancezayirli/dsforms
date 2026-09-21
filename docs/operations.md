@@ -85,8 +85,9 @@ A restore replaces the live database, so it is written to fail safely:
   problem, because the obvious next step otherwise is to re-export and re-upload
   the one thing that was already fine. The server log names the obstacle.
   Where a failure could be either — the disk filling up while the upload is
-  being cleaned, say — dsforms goes by the reason SQLite gives, and says nothing
-  about your file unless it knows.
+  being read or cleaned, say — dsforms goes by the reason SQLite gives. When
+  that reason does not say, it reports the file as rejected rather than guess:
+  so if re-uploading fails the same way, the server log is the place to look.
 - In the one case where neither works, the message names the file your data is
   in (`<DB_PATH>.rollback`) and says not to restart before moving it back —
   starting with no database there creates an empty one.

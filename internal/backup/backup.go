@@ -116,6 +116,11 @@ func stripCredentials(path string) (err error) {
 		return fmt.Errorf("stripping credentials: taking %s out of WAL mode: %w", path, err)
 	}
 	if !strings.EqualFold(mode, "delete") {
+		// The one refusal here that carries no result code, because there was no
+		// error to carry one: SQLite reports this by the mode it ended up in. So
+		// machineFault cannot sort it and it defaults with everything else, to the
+		// file. Saying "not your file" on a guess is the claim that sends an
+		// operator hunting something that is not there.
 		return fmt.Errorf("stripping credentials: %s is still in %q journal mode, so the "+
 			"cleared rows would not be written to the file that gets restored", path, mode)
 	}
@@ -149,6 +154,18 @@ func stripCredentials(path string) (err error) {
 		return fmt.Errorf("stripping credentials: rewriting %s: %w", path, err)
 	}
 	return nil
+}
+
+// rejected wraps a refusal that came before the live database was touched, and
+// adds ErrNotAttempted where SQLite says the failure was not the upload's.
+//
+// One function for every step that still reads the staged file, so the two
+// cannot drift into disagreeing about the same error.
+func rejected(err error) error {
+	if machineFault(err) {
+		return fmt.Errorf("%w: %w: %w", ErrRejected, ErrNotAttempted, err)
+	}
+	return fmt.Errorf("%w: %w", ErrRejected, err)
 }
 
 // machineFault reports whether an error is the machine's rather than the
@@ -375,8 +392,11 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	importMu.Lock()
 	defer importMu.Unlock()
 
+	// Through rejected, not a bare wrap: integrity_check reads the same staged
+	// file, so a flaky volume or a memory-capped container fails it for reasons
+	// the upload had nothing to do with.
 	if err := Validate(uploadedPath); err != nil {
-		return fmt.Errorf("%w: %w", ErrRejected, err)
+		return rejected(err)
 	}
 
 	// Stripped again on the way in, not only on the way out.
@@ -396,10 +416,7 @@ func Import(s Store, uploadedPath, dbPath string) error {
 	// mode. The machine can be too: the VACUUM writes a second copy of the whole
 	// database, which is the most space-hungry moment in a restore.
 	if err := stripCredentials(uploadedPath); err != nil {
-		if machineFault(err) {
-			return fmt.Errorf("%w: %w: %w", ErrRejected, ErrNotAttempted, err)
-		}
-		return fmt.Errorf("%w: %w", ErrRejected, err)
+		return rejected(err)
 	}
 
 	// Refuse if a previous restore left its parked database behind.
