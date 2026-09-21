@@ -510,15 +510,15 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
   <div class="wrap">
     <div class="kick"><span></span><span>MCP</span></div>
     <h2>Let an agent work your inbox, on a leash.</h2>
-    <p class="lede">Point an MCP client at your instance and it can list what you
-       have not read, read one, file spam, or ask what is in the database. Off
-       until you turn it on.</p>
+    <p class="lede">Point an MCP client at <span class="mono">/mcp</span> and it
+       can list what you have not read, read one, file spam, or ask what is in
+       the database. Off until you turn it on.</p>
 
     <div class="row" style="margin-top:32px;align-items:flex-start">
       <div class="codecard">
         <header>
           <svg class="i" style="font-size:15px;color:var(--n-600)"><use href="#ph-brackets-curly"/></svg>
-          <span class="name">POST /mcp</span>
+          <span class="name">client config</span>
           <button class="btn btn-ghost" data-copy>
             <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span>Copy</span>
           </button>
@@ -549,8 +549,8 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
           <div style="font-weight:500">Bound to the forms you pick</div>
           <p class="muted" style="font-size:13.5px;margin-top:4px">
             A bound token does not see the others at all — not refused, absent.
-            Enforced in the query, so an id from another form answers exactly as
-            an id that does not exist.
+            Every listing is filtered in the query itself, and an id from another
+            form answers exactly as an id that does not exist.
           </p>
         </div>
         <div class="card">
@@ -565,7 +565,8 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
     </div>
 
     <p class="muted" style="font-size:13px;margin-top:22px">
-      Refuses to start over plain http — a bearer token rides every request.
+      Refuses to start over plain http, since a bearer token rides every
+      request — override it for localhost and it warns on every boot instead.
       Full setup, the tool list and what each scope costs:
       <a href="https://github.com/barancezayirli/dsforms/blob/main/docs/mcp.md"
          style="color:var(--accent);text-decoration:underline;text-underline-offset:3px">docs/mcp.md</a>.
@@ -621,7 +622,7 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         <div class="card">
           <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-cloud-arrow-up"/></svg></span>
           <div style="font-size:14.5px;font-weight:500;margin-top:10px">Backup and restore</div>
-          <p class="muted" style="font-size:12.5px;margin-top:4px">A consistent snapshot while the server keeps running.</p>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">A consistent snapshot while the server keeps running, carrying no credentials either way.</p>
           <div class="mono dim" style="font-size:10.5px;margin-top:6px">/admin/backups</div>
         </div>
         <div class="card">
@@ -670,12 +671,6 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
           <div style="font-size:14.5px;font-weight:500;margin-top:10px">MCP endpoint</div>
           <p class="muted" style="font-size:12.5px;margin-top:4px">Scoped bearer tokens, limitable to single forms. Off unless you enable it.</p>
           <div class="mono dim" style="font-size:10.5px;margin-top:6px">MCP_ENABLED</div>
-        </div>
-        <div class="card">
-          <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-cloud-arrow-up"/></svg></span>
-          <div style="font-size:14.5px;font-weight:500;margin-top:10px">Credential-free backups</div>
-          <p class="muted" style="font-size:12.5px;margin-top:4px">Tokens and sessions are stripped both ways, so no restore undoes a revocation.</p>
-          <div class="mono dim" style="font-size:10.5px;margin-top:6px">/admin/backups</div>
         </div>
       </div>
     </div>
