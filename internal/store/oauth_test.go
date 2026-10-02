@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -345,56 +346,106 @@ func TestALateReplayStillRevokes(t *testing.T) {
 	mustBeDead(t, s, pair.Access, "access token after a late replay")
 }
 
-// Concurrent presentations of one code. At most one may issue, and since every
-// other one is a replay, what it issued ends up revoked. Sequential replay
-// tests cannot see the window this closes: redeeming and issuing used to be two
-// transactions, and a replay between them revoked nothing.
+// fileStore is a store on a real file, as production runs: WAL and a pool of
+// connections. The in-memory store serialises everything on one connection, so
+// it cannot show what concurrent requests do to each other.
+func fileStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := New(filepath.Join(t.TempDir(), "concurrent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+// race runs fn n times at once and returns what each returned.
+func race(n int, fn func() (TokenPair, error)) ([]TokenPair, []error) {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var pairs []TokenPair
+	var errs []error
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			pair, err := fn()
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				pairs = append(pairs, pair)
+			} else {
+				errs = append(errs, err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	return pairs, errs
+}
+
+// Concurrent presentations of one code, on a real file database. Exactly one
+// issues; every other one is a clean replay — never a lock error, never a
+// failed revocation — and so what the winner was issued ends up revoked. Found
+// in review: without a busy timeout and write transactions, the losers hit
+// SQLITE_BUSY instead, revoked nothing, and raised false security alarms.
 func TestConcurrentExchangesOfOneCode(t *testing.T) {
 	t.Parallel()
-	s := mustNew(t)
+	s := fileStore(t)
 	c := newClient(t, s)
 	u := admin(t, s)
 	raw := newCode(t, s, c, u.ID, nil)
 
 	const n = 8
-	var wg sync.WaitGroup
-	results := make(chan error, n)
-	pairs := make(chan TokenPair, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			pair, err := s.ExchangeAuthCode(raw, acceptAll)
-			if err == nil {
-				pairs <- pair
-			}
-			results <- err
-		}()
+	pairs, errs := race(n, func() (TokenPair, error) { return s.ExchangeAuthCode(raw, acceptAll) })
+	if len(pairs) != 1 {
+		t.Fatalf("%d exchanges succeeded, want exactly 1 (errors: %v)", len(pairs), errs)
 	}
-	wg.Wait()
-	close(results)
-	close(pairs)
+	for _, err := range errs {
+		if !errors.Is(err, ErrCodeReused) || errors.Is(err, ErrRevokeFailed) {
+			t.Errorf("a losing exchange returned %v, want a clean ErrCodeReused", err)
+		}
+	}
+	mustBeDead(t, s, pairs[0].Access, "the winner's token after concurrent replays")
+	if grants, _ := s.ListOAuthGrants(u.ID); len(grants) != 0 {
+		t.Errorf("%d grants left after the replays revoked them", len(grants))
+	}
+}
 
-	var ok, reused int
-	for err := range results {
+// The same for a refresh token presented twice at once: one rotation, the
+// rest are reuse, and the whole grant goes.
+func TestConcurrentRefreshesOfOneToken(t *testing.T) {
+	t.Parallel()
+	s := fileStore(t)
+	c := newClient(t, s)
+	u := admin(t, s)
+	first := issue(t, s, c, u.ID)
+
+	pairs, errs := race(8, func() (TokenPair, error) { return s.RefreshGrant(first.Refresh, c.ID) })
+	if len(pairs) != 1 {
+		t.Fatalf("%d refreshes succeeded, want exactly 1 (errors: %v)", len(pairs), errs)
+	}
+	// The first loser detects the reuse and revokes the grant, which takes its
+	// refresh tokens with it; later losers then find nothing at all. Both are
+	// refusals. A lock error or a failed revocation is not.
+	var reused int
+	for _, err := range errs {
 		switch {
-		case err == nil:
-			ok++
-		case errors.Is(err, ErrCodeReused):
+		case errors.Is(err, ErrRevokeFailed):
+			t.Errorf("a losing refresh failed to revoke: %v", err)
+		case errors.Is(err, ErrRefreshReused):
 			reused++
+		case errors.Is(err, ErrNotFound):
+		default:
+			t.Errorf("a losing refresh returned %v, want reuse or not found", err)
 		}
 	}
-	if ok > 1 {
-		t.Fatalf("%d exchanges of one code succeeded", ok)
+	if reused == 0 {
+		t.Error("no losing refresh was recognised as reuse")
 	}
-	if reused > 0 {
-		for pair := range pairs {
-			mustBeDead(t, s, pair.Access, "the winner's token after concurrent replays")
-		}
-	}
-	if grants, _ := s.ListOAuthGrants(u.ID); len(grants) > 1 {
-		t.Errorf("%d grants from one code", len(grants))
-	}
+	mustBeDead(t, s, pairs[0].Access, "the rotated token after concurrent reuse")
 }
 
 func TestRefreshGrantRotates(t *testing.T) {

@@ -493,9 +493,23 @@ func runSearchMigrations(db execQuerier) error {
 	return syncSearchIndex(db)
 }
 
+// fileDSN is the connection string for a database file, used by New and
+// Reopen alike so the two cannot drift.
+//
+// busy_timeout and _txlock=immediate are what make concurrent writers queue
+// instead of failing. In WAL mode with a pool, two deferred transactions can
+// both read, and the second to write then gets SQLITE_BUSY at once — no wait,
+// no retry. An OAuth code presented twice at once turned that into a replay
+// that revoked nothing, and a form submission arriving mid-exchange into a 500.
+// Immediate transactions take the write lock at BEGIN, and the timeout makes
+// a waiting writer wait rather than fail.
+func fileDSN(path string) string {
+	return path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
+}
+
 // New opens a SQLite database and runs migrations.
 func New(path string) (*Store, error) {
-	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+	dsn := fileDSN(path)
 	if path == ":memory:" {
 		// Use file URI for in-memory so pragmas apply correctly.
 		dsn = "file::memory:?_pragma=foreign_keys(1)"
@@ -587,8 +601,7 @@ func (s *Store) conn() *sql.DB {
 // old connection. If the old connection was already closed (e.g. by Import),
 // that close error is intentionally ignored.
 func (s *Store) Reopen(path string) error {
-	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
-	newDB, err := sql.Open("sqlite", dsn)
+	newDB, err := sql.Open("sqlite", fileDSN(path))
 	if err != nil {
 		return fmt.Errorf("reopen: open new db: %w", err)
 	}
