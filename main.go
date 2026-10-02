@@ -27,6 +27,7 @@ import (
 	"github.com/barancezayirli/dsforms/internal/handler"
 	"github.com/barancezayirli/dsforms/internal/mail"
 	"github.com/barancezayirli/dsforms/internal/mcpserver"
+	"github.com/barancezayirli/dsforms/internal/oauth"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/barancezayirli/dsforms/internal/safe"
 	"github.com/barancezayirli/dsforms/internal/screen"
@@ -73,6 +74,7 @@ var (
 	_ handler.SearchStore         = (*store.Store)(nil)
 	_ handler.DigestStore         = (*store.Store)(nil)
 	_ handler.TokensStore         = (*store.Store)(nil)
+	_ handler.OAuthStore          = (*store.Store)(nil)
 
 	// backup.Import swaps the database file underneath the process; it names the
 	// two methods that takes rather than importing store at all.
@@ -142,7 +144,7 @@ var basePages = []string{
 	"quarantine.html", "rules.html", "home.html", "search.html", "tokens.html", "token_new.html",
 }
 
-var standalonePages = []string{"login.html", "success.html", "404.html", "500.html"}
+var standalonePages = []string{"login.html", "success.html", "404.html", "500.html", "oauth_consent.html"}
 
 // parseTemplates parses base.html once and clones it per page.
 //
@@ -371,7 +373,7 @@ func newRouter(healthy healthCheck, templates map[string]*template.Template) *ch
 // request redirecting to an HTML login page. The route table test in
 // routes_test.go only walks /admin*, so /mcp has its own refusal tests —
 // TestMCPRefusesEveryUnauthenticatedShape.
-func mountMCP(r *chi.Mux, d serverDeps) {
+func mountMCP(r *chi.Mux, d serverDeps, base handler.Base) {
 	if !d.cfg.MCPEnabled {
 		return
 	}
@@ -391,9 +393,24 @@ func mountMCP(r *chi.Mux, d serverDeps) {
 		IncludeIPs: d.cfg.MCPIncludeIPs,
 	})
 
+	// With OAuth on, the 401 names the resource metadata, which is how a
+	// client discovers where to sign in. With it off there is nowhere to send
+	// one, and pointing anyway would advertise a flow that goes nowhere.
+	resourceMetadata := ""
+	if d.cfg.MCPOAuth {
+		resourceMetadata = oauth.ResourceMetadataURL(d.cfg.BaseURL)
+		oh := &handler.OAuthHandler{
+			Base:    base,
+			Store:   d.store,
+			Consent: oauth.NewConsentSigner(d.cfg.SecretKey, time.Now),
+		}
+		oh.Mount(r, auth.RequireAuth(d.store), rateLimitMiddleware(limiter))
+		log.Printf("MCP OAuth enabled: clients sign in at %s%s", d.cfg.BaseURL, oauth.PathAuthorize)
+	}
+
 	r.Group(func(r chi.Router) {
 		r.Use(rateLimitMiddleware(limiter))
-		r.Use(bearerChallenge)
+		r.Use(bearerChallenge(resourceMetadata))
 		r.Use(mcpauth.RequireBearerToken(verifyMCPToken(d.store, guard), &mcpauth.RequireBearerTokenOptions{
 			// dsforms tokens may legitimately never expire — a client in a
 			// config file is not somewhere a rotation reminder reaches — and
@@ -410,25 +427,33 @@ func mountMCP(r *chi.Mux, d serverDeps) {
 // bearerChallenge adds the WWW-Authenticate header RFC 6750 §3 asks a
 // bearer-protected resource to send with a 401.
 //
-// The SDK emits one only when it has OAuth resource metadata to point at, and
-// dsforms has none to give: these are static tokens an operator mints, with no
-// authorization server behind them. Serving RFC 9728 metadata anyway would
-// advertise a discovery flow that goes nowhere, so the honest fix is the plain
-// challenge — which is what tells a generic client "this endpoint wants a
-// bearer token" rather than leaving it to guess from a bare 401.
+// The SDK writes one only from its own options, and never with the realm and
+// error a generic client reads, so dsforms writes its own. resourceMetadata is
+// the RFC 9728 document URL when OAuth is on — the pointer an OAuth client
+// follows to find where to sign in — and "" when it is off, because with
+// static tokens only there is no authorization server to point at, and
+// advertising one would send a client into a discovery flow that goes nowhere.
 //
 // Set before the response is written, because headers cannot be added once the
-// status has gone out. It is written unconditionally and removed again on any
-// non-401, which is cheaper than wrapping every write.
-func bearerChallenge(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(&challengeWriter{ResponseWriter: w}, r)
-	})
+// status has gone out. It is attached at WriteHeader and only for a 401, which
+// is cheaper than wrapping every write.
+func bearerChallenge(resourceMetadata string) func(http.Handler) http.Handler {
+	challenge := `Bearer realm="dsforms", error="invalid_token", ` +
+		`error_description="a dsforms API token is required"`
+	if resourceMetadata != "" {
+		challenge += `, resource_metadata="` + resourceMetadata + `"`
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(&challengeWriter{ResponseWriter: w, challenge: challenge}, r)
+		})
+	}
 }
 
 // challengeWriter attaches the bearer challenge at the moment a 401 is written.
 type challengeWriter struct {
 	http.ResponseWriter
+	challenge   string
 	wroteHeader bool
 }
 
@@ -436,9 +461,7 @@ func (c *challengeWriter) WriteHeader(status int) {
 	if !c.wroteHeader {
 		c.wroteHeader = true
 		if status == http.StatusUnauthorized {
-			c.Header().Set("WWW-Authenticate",
-				`Bearer realm="dsforms", error="invalid_token", `+
-					`error_description="a dsforms API token is required"`)
+			c.Header().Set("WWW-Authenticate", c.challenge)
 		}
 	}
 	c.ResponseWriter.WriteHeader(status)
@@ -957,6 +980,13 @@ func main() {
 					log.Printf("session cleanup error: %v", err)
 				}
 			})
+			// Run whether or not OAuth is on now: rows written while it was
+			// on are still credentials until they expire.
+			safe.Do("oauth cleanup", func() {
+				if err := s.CleanExpiredOAuth(); err != nil {
+					log.Printf("oauth cleanup error: %v", err)
+				}
+			})
 		}
 	}()
 
@@ -1200,7 +1230,7 @@ func routes(d serverDeps) *chi.Mux {
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
 
-	mountMCP(r, d)
+	mountMCP(r, d, base)
 
 	// Embedded CSS, JS and the Inter woff2. Public and unauthenticated: the
 	// login page needs the stylesheet before anyone has a session.

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Connect a client — dsforms</title>
+  <link rel="icon" href="/static/favicon.svg?v={{.AssetVer}}" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css?v={{.AssetVer}}">
+</head>
+<body>
+  <!-- Standalone, like the login page: this sits in the middle of a redirect
+       flow, and a sidebar link here would abandon the authorization with no
+       way back to the client that started it. -->
+  <main style="min-height:100vh;display:grid;place-items:center;padding:24px">
+    <div style="width:min(480px,100%)">
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:18px">
+        <span class="brand-mark" style="width:30px;height:30px">
+          <svg class="i" style="font-size:17px"><use href="#ph-tray-arrow-down"/></svg>
+        </span>
+        <span class="brand-word" style="font-size:20px">ds<em>forms</em></span>
+      </div>
+
+      {{if .Fatal}}
+      <!-- Nothing here redirects. A request whose client or redirect URI cannot
+           be trusted must not send the browser anywhere it names. -->
+      <div class="card elev-md" style="padding:22px">
+        <div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Fatal}}</span></div>
+        <p class="dim" style="font-size:12px;margin-top:12px">
+          Start the connection again from the client.
+        </p>
+      </div>
+      {{else}}
+      <form class="card elev-md" method="POST" action="/oauth/authorize" style="padding:22px">
+        <h4 style="margin:0 0 6px">Connect <strong>{{.ClientName}}</strong>?</h4>
+        <!-- The name is whatever the client registered itself as, so it proves
+             nothing. The host is where the code actually goes, and is the line
+             an operator should read. -->
+        <p style="font-size:13px;margin:0 0 4px">
+          It will act on your dsforms as <strong>{{.Username}}</strong>, and
+          sign-in results go to <strong>{{.RedirectHost}}</strong>.
+        </p>
+        <p class="dim" style="font-size:11.5px;margin:0 0 14px;word-break:break-all">{{.RedirectURI}}</p>
+
+        {{if .Error}}
+        <div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
+        {{end}}
+
+        {{template "access-fields" .}}
+
+        <span class="form-hint" style="display:block;margin-bottom:6px">
+          You can disconnect it any time under System &rarr; API tokens.
+        </span>
+
+        <input type="hidden" name="client_id" value="{{.ClientID}}">
+        <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
+        <input type="hidden" name="state" value="{{.State}}">
+        <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
+        <input type="hidden" name="resource" value="{{.Resource}}">
+        <input type="hidden" name="consent" value="{{.Signature}}">
+
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn btn-primary" type="submit" name="action" value="approve">Allow</button>
+          <button class="btn btn-secondary" type="submit" name="action" value="deny">Deny</button>
+        </div>
+      </form>
+      {{end}}
+
+      <p class="dim" style="font-size:11px;text-align:center;margin-top:14px">
+        dsforms {{.Version}} · self-hosted
+      </p>
+    </div>
+  </main>
+  {{template "icons"}}
+</body>
+</html>

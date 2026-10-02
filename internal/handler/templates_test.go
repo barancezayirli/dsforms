@@ -339,6 +339,7 @@ func TestRealTemplatesCoverEveryPage(t *testing.T) {
 		// main_test.go covers.
 		"base.html": true, "access_fields.html": true, "icons.html": true,
 		"login.html": true, "success.html": true, "404.html": true, "500.html": true,
+		"oauth_consent.html": true,
 	}
 	for _, name := range basePageNames {
 		known[name] = true
