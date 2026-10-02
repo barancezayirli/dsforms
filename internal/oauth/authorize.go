@@ -11,17 +11,19 @@ import (
 	"time"
 )
 
-// MaxStateLen bounds the opaque state a client round-trips through us. It is
-// echoed into a redirect and a form field; unbounded, it is a request-size knob
-// handed to a stranger.
+// MaxStateLen bounds the opaque state a client round-trips through us. A valid
+// state is echoed into a redirect and a form field; unbounded, it would be a
+// request-size knob handed to a stranger. An oversized one is never echoed.
 const MaxStateLen = 1024
 
 // ConsentTTL is how long a rendered consent page stays submittable.
 const ConsentTTL = 10 * time.Minute
 
-// AuthorizeRequest is an authorization request whose protocol fields are valid.
-// The client and redirect URI are only shaped here; whether they belong
-// together is a registry question, answered by the caller.
+// AuthorizeRequest is an authorization request. Its protocol fields are valid
+// when it comes from ParseAuthorizeRequest or ConsentSigner.VerifyForm — the
+// only two places one should be built. The client and redirect URI are only
+// shaped here; whether they belong together is a registry question, answered by
+// the caller.
 type AuthorizeRequest struct {
 	ClientID      string
 	RedirectURI   string
@@ -51,6 +53,10 @@ func ParseAuthorizeRequest(q url.Values, resource string) (AuthorizeRequest, *Er
 		return req, errorf(CodeUnsupportedResponseType, `only response_type "code" is supported`)
 	}
 	if len(req.State) > MaxStateLen {
+		// Dropped, not echoed: the error goes back to the client's redirect
+		// URI, and carrying an oversized state there is exactly the
+		// request-size knob this limit exists to take away.
+		req.State = ""
 		return req, errorf(CodeInvalidRequest, "state is too long")
 	}
 	// PKCE is mandatory, and S256 the only method (see VerifyPKCE).
@@ -90,14 +96,24 @@ type ConsentSigner struct {
 // NewConsentSigner derives a consent-only key from the instance secret, so a
 // signature made here can never be replayed as some other HMAC the instance
 // produces under the same secret (the flash cookie, for one).
+//
+// A nil now means time.Now. The zero ConsentSigner — one never built here —
+// signs nothing and verifies nothing, so a handler wired without one fails
+// closed instead of panicking mid-request.
 func NewConsentSigner(secret string, now func() time.Time) ConsentSigner {
+	if now == nil {
+		now = time.Now
+	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte("dsforms oauth consent v1"))
 	return ConsentSigner{key: mac.Sum(nil), now: now}
 }
 
-// Sign returns "<unix expiry>.<hex mac>".
+// Sign returns "<unix expiry>.<hex mac>", or "" from a zero signer.
 func (s ConsentSigner) Sign(userID string, req AuthorizeRequest) string {
+	if len(s.key) == 0 {
+		return ""
+	}
 	exp := s.now().Add(ConsentTTL).Unix()
 	return strconv.FormatInt(exp, 10) + "." + hex.EncodeToString(s.mac(exp, userID, req))
 }
@@ -105,6 +121,9 @@ func (s ConsentSigner) Sign(userID string, req AuthorizeRequest) string {
 // Verify reports whether sig was issued by Sign for exactly this user and
 // request, and has not expired.
 func (s ConsentSigner) Verify(sig, userID string, req AuthorizeRequest) bool {
+	if len(s.key) == 0 {
+		return false
+	}
 	expStr, macHex, ok := strings.Cut(sig, ".")
 	if !ok {
 		return false
@@ -118,6 +137,24 @@ func (s ConsentSigner) Verify(sig, userID string, req AuthorizeRequest) bool {
 		return false
 	}
 	return hmac.Equal(got, s.mac(exp, userID, req))
+}
+
+// VerifyForm reads a posted consent form back into the request it approves,
+// and reports whether its signature covers exactly that request for userID.
+// It is how the consent handler gets a request, so the protocol fields never
+// come from the form without the signature that vouches for them.
+func (s ConsentSigner) VerifyForm(form url.Values, userID string) (AuthorizeRequest, bool) {
+	req := AuthorizeRequest{
+		ClientID:      form.Get("client_id"),
+		RedirectURI:   form.Get("redirect_uri"),
+		State:         form.Get("state"),
+		CodeChallenge: form.Get("code_challenge"),
+		Resource:      form.Get("resource"),
+	}
+	if !s.Verify(form.Get("consent"), userID, req) {
+		return AuthorizeRequest{}, false
+	}
+	return req, true
 }
 
 // mac length-prefixes every field, so "ab"+"c" and "a"+"bc" sign differently.

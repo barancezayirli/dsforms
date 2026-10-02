@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -34,16 +35,14 @@ func newCode(t *testing.T, s *Store, c OAuthClient, userID string, formIDs []str
 	return raw
 }
 
+func acceptAll(AuthCode) bool { return true }
+
 // issue walks the code path end to end and returns the pair.
 func issue(t *testing.T, s *Store, c OAuthClient, userID string) TokenPair {
 	t.Helper()
-	code, err := s.RedeemAuthCode(newCode(t, s, c, userID, nil))
+	pair, err := s.ExchangeAuthCode(newCode(t, s, c, userID, nil), acceptAll)
 	if err != nil {
-		t.Fatalf("RedeemAuthCode: %v", err)
-	}
-	pair, err := s.IssueGrant(code)
-	if err != nil {
-		t.Fatalf("IssueGrant: %v", err)
+		t.Fatalf("ExchangeAuthCode: %v", err)
 	}
 	return pair
 }
@@ -131,45 +130,88 @@ func TestAuthCodeStoresOnlyTheHash(t *testing.T) {
 	}
 }
 
-func TestRedeemAuthCode(t *testing.T) {
+func TestExchangeAuthCodeShowsTheCheckWhatWasConsented(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	c := newClient(t, s)
 	u := admin(t, s)
 	raw := newCode(t, s, c, u.ID, []string{"f1"})
 
-	code, err := s.RedeemAuthCode(raw)
-	if err != nil {
-		t.Fatalf("RedeemAuthCode: %v", err)
+	var seen AuthCode
+	if _, err := s.ExchangeAuthCode(raw, func(code AuthCode) bool { seen = code; return true }); err != nil {
+		t.Fatalf("ExchangeAuthCode: %v", err)
 	}
-	if code.ClientID != c.ID || code.UserID != u.ID || code.RedirectURI != c.RedirectURIs[0] ||
-		code.CodeChallenge != "challenge" || code.Resource != "https://forms.example.com/mcp" ||
-		!slices.Equal(code.Scopes, []string{"read", "write"}) || !slices.Equal(code.FormIDs, []string{"f1"}) {
-		t.Errorf("redeemed %+v", code)
+	if seen.ClientID != c.ID || seen.UserID != u.ID || seen.RedirectURI != c.RedirectURIs[0] ||
+		seen.CodeChallenge != "challenge" || seen.Resource != "https://forms.example.com/mcp" ||
+		!slices.Equal(seen.Scopes, []string{"read", "write"}) || !slices.Equal(seen.FormIDs, []string{"f1"}) {
+		t.Errorf("the check saw %+v", seen)
 	}
 
 	// Single use. The second presentation is the signal that the code leaked.
-	if _, err := s.RedeemAuthCode(raw); !errors.Is(err, ErrCodeReused) {
-		t.Errorf("second redeem error = %v, want ErrCodeReused", err)
+	if _, err := s.ExchangeAuthCode(raw, acceptAll); !errors.Is(err, ErrCodeReused) {
+		t.Errorf("second exchange error = %v, want ErrCodeReused", err)
 	}
 }
 
-func TestRedeemAuthCodeRefusals(t *testing.T) {
+func TestExchangeAuthCodeRefusals(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	c := newClient(t, s)
 	raw := newCode(t, s, c, admin(t, s).ID, nil)
 
-	if _, err := s.RedeemAuthCode("unknown"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("unknown code error = %v, want ErrNotFound", err)
-	}
-	if _, err := s.RedeemAuthCode(""); !errors.Is(err, ErrNotFound) {
-		t.Errorf("empty code error = %v, want ErrNotFound", err)
+	for _, code := range []string{"unknown", ""} {
+		if _, err := s.ExchangeAuthCode(code, acceptAll); !errors.Is(err, ErrNotFound) {
+			t.Errorf("code %q error = %v, want ErrNotFound", code, err)
+		}
 	}
 
 	expireAll(t, s, "oauth_auth_codes")
-	if _, err := s.RedeemAuthCode(raw); !errors.Is(err, ErrNotFound) {
+	if _, err := s.ExchangeAuthCode(raw, acceptAll); !errors.Is(err, ErrNotFound) {
 		t.Errorf("expired code error = %v, want ErrNotFound", err)
+	}
+}
+
+// A code the caller's checks refuse is spent anyway: one guess at the
+// verifier per intercepted code, and no grant.
+func TestARejectedCodeIsBurned(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	c := newClient(t, s)
+	u := admin(t, s)
+	raw := newCode(t, s, c, u.ID, nil)
+
+	if _, err := s.ExchangeAuthCode(raw, func(AuthCode) bool { return false }); !errors.Is(err, ErrCodeRejected) {
+		t.Fatalf("rejected exchange error = %v, want ErrCodeRejected", err)
+	}
+	if _, err := s.ExchangeAuthCode(raw, acceptAll); !errors.Is(err, ErrCodeReused) {
+		t.Errorf("retry after rejection error = %v, want ErrCodeReused", err)
+	}
+	if grants, _ := s.ListOAuthGrants(u.ID); len(grants) != 0 {
+		t.Errorf("a rejected code left %d grants", len(grants))
+	}
+}
+
+// "Used" is whether the column is set, not whether it parses. A timestamp the
+// driver hands back in some other layout must read as used, never as fresh.
+func TestAnUnparseableUsedAtStillCountsAsUsed(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	c := newClient(t, s)
+	u := admin(t, s)
+	pair := issue(t, s, c, u.ID)
+	raw := newCode(t, s, c, u.ID, nil)
+
+	if _, err := s.conn().Exec("UPDATE oauth_auth_codes SET used_at = 'not a time' WHERE code_hash = ?", hashToken(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExchangeAuthCode(raw, acceptAll); !errors.Is(err, ErrCodeReused) {
+		t.Errorf("code with garbage used_at: %v, want ErrCodeReused", err)
+	}
+	if _, err := s.conn().Exec("UPDATE oauth_refresh_tokens SET used_at = 'not a time' WHERE token_hash = ?", hashToken(pair.Refresh)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RefreshGrant(pair.Refresh, c.ID); !errors.Is(err, ErrRefreshReused) {
+		t.Errorf("refresh with garbage used_at: %v, want ErrRefreshReused", err)
 	}
 }
 
@@ -182,16 +224,15 @@ func expireAll(t *testing.T, s *Store, table string) {
 	}
 }
 
-func TestIssueGrant(t *testing.T) {
+func TestExchangeAuthCodeIssuesAGrant(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	c := newClient(t, s)
 	u := admin(t, s)
 
-	code, _ := s.RedeemAuthCode(newCode(t, s, c, u.ID, []string{"f1"}))
-	pair, err := s.IssueGrant(code)
+	pair, err := s.ExchangeAuthCode(newCode(t, s, c, u.ID, []string{"f1"}), acceptAll)
 	if err != nil {
-		t.Fatalf("IssueGrant: %v", err)
+		t.Fatalf("ExchangeAuthCode: %v", err)
 	}
 
 	// The access token is an api_tokens row: the existing verifier accepts it
@@ -231,6 +272,10 @@ func TestIssueGrant(t *testing.T) {
 	if len(grants) != 1 || grants[0].ClientName != "Claude" || grants[0].ID != pair.GrantID {
 		t.Fatalf("grants = %+v", grants)
 	}
+	// The address the code went to, as the operator approved it.
+	if grants[0].RedirectURI != c.RedirectURIs[0] {
+		t.Errorf("grant redirect = %q", grants[0].RedirectURI)
+	}
 	if !grants[0].Scope().Allows("f1") || grants[0].Scope().Allows("f2") {
 		t.Error("grant scope does not match consent")
 	}
@@ -262,20 +307,93 @@ func TestReusedCodeRevokesTheGrantItIssued(t *testing.T) {
 	c := newClient(t, s)
 	raw := newCode(t, s, c, admin(t, s).ID, nil)
 
-	code, _ := s.RedeemAuthCode(raw)
-	pair, err := s.IssueGrant(code)
+	pair, err := s.ExchangeAuthCode(raw, acceptAll)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// RFC 6749 §4.1.2: if a code is used twice, revoke what it issued. Whoever
 	// replays it may be the attacker, and the tokens already out may be theirs.
-	if _, err := s.RedeemAuthCode(raw); !errors.Is(err, ErrCodeReused) {
+	if _, err := s.ExchangeAuthCode(raw, acceptAll); !errors.Is(err, ErrCodeReused) {
 		t.Fatalf("replay error = %v, want ErrCodeReused", err)
 	}
 	mustBeDead(t, s, pair.Access, "access token after code replay")
 	if _, err := s.RefreshGrant(pair.Refresh, c.ID); err == nil {
 		t.Error("refresh token survived a code replay")
+	}
+}
+
+// A replay after the code's minute is up is still a replay: the spent row is
+// kept for a day past its expiry so it can be recognised.
+func TestALateReplayStillRevokes(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	c := newClient(t, s)
+	raw := newCode(t, s, c, admin(t, s).ID, nil)
+	pair, err := s.ExchangeAuthCode(raw, acceptAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expireAll(t, s, "oauth_auth_codes")
+	if err := s.CleanExpiredOAuth(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.ExchangeAuthCode(raw, acceptAll); !errors.Is(err, ErrCodeReused) {
+		t.Fatalf("late replay error = %v, want ErrCodeReused", err)
+	}
+	mustBeDead(t, s, pair.Access, "access token after a late replay")
+}
+
+// Concurrent presentations of one code. At most one may issue, and since every
+// other one is a replay, what it issued ends up revoked. Sequential replay
+// tests cannot see the window this closes: redeeming and issuing used to be two
+// transactions, and a replay between them revoked nothing.
+func TestConcurrentExchangesOfOneCode(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	c := newClient(t, s)
+	u := admin(t, s)
+	raw := newCode(t, s, c, u.ID, nil)
+
+	const n = 8
+	var wg sync.WaitGroup
+	results := make(chan error, n)
+	pairs := make(chan TokenPair, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pair, err := s.ExchangeAuthCode(raw, acceptAll)
+			if err == nil {
+				pairs <- pair
+			}
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(pairs)
+
+	var ok, reused int
+	for err := range results {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, ErrCodeReused):
+			reused++
+		}
+	}
+	if ok > 1 {
+		t.Fatalf("%d exchanges of one code succeeded", ok)
+	}
+	if reused > 0 {
+		for pair := range pairs {
+			mustBeDead(t, s, pair.Access, "the winner's token after concurrent replays")
+		}
+	}
+	if grants, _ := s.ListOAuthGrants(u.ID); len(grants) > 1 {
+		t.Errorf("%d grants from one code", len(grants))
 	}
 }
 
@@ -448,9 +566,18 @@ func TestCleanExpiredOAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh := newClient(t, s)
+	// An approved client older than the window stays: pruning it would cascade
+	// to its grant and silently disconnect a working app.
+	if _, err := s.conn().Exec("UPDATE oauth_clients SET created_at = ? WHERE id = ?",
+		sqliteTimestamp(time.Now().Add(-48*time.Hour)), c.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := s.CleanExpiredOAuth(); err != nil {
 		t.Fatalf("CleanExpiredOAuth: %v", err)
+	}
+	if grants, _ := s.ListOAuthGrants(u.ID); len(grants) != 1 {
+		t.Errorf("an old approved client's grant was pruned: %d grants", len(grants))
 	}
 	// Nothing live is touched — including the rotated-out refresh token, which
 	// reuse detection needs until it would have expired anyway.
@@ -471,8 +598,11 @@ func TestCleanExpiredOAuth(t *testing.T) {
 	c2 := newClient(t, s2)
 	p2 := issue(t, s2, c2, u2.ID)
 	newCode(t, s2, c2, u2.ID, nil)
-	for _, table := range []string{"oauth_auth_codes", "oauth_refresh_tokens"} {
-		expireAll(t, s2, table)
+	expireAll(t, s2, "oauth_refresh_tokens")
+	// Codes are kept a day past expiry for replay detection; these are older.
+	if _, err := s2.conn().Exec("UPDATE oauth_auth_codes SET expires_at = ?",
+		sqliteTimestamp(time.Now().Add(-SpentCodeRetention-time.Minute))); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s2.conn().Exec("UPDATE api_tokens SET expires_at = ?", sqliteTimestamp(time.Now().Add(-time.Minute))); err != nil {
 		t.Fatal(err)
@@ -514,10 +644,10 @@ func TestCleanExpiredOAuthKeepsManualTokens(t *testing.T) {
 	}
 }
 
-// Approving a client again replaces the connection it already had. Found at
-// the checkpoint: a reconnect left two grants for one client, the first one's
+// Approving a client again replaces the connection it already had: a
+// reconnect would otherwise leave two grants for one client, the first one's
 // tokens still live and nothing in the admin to tell them apart.
-func TestIssueGrantReplacesTheClientsEarlierGrant(t *testing.T) {
+func TestExchangeReplacesTheClientsEarlierGrant(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	c := newClient(t, s)
@@ -542,20 +672,44 @@ func TestIssueGrantReplacesTheClientsEarlierGrant(t *testing.T) {
 	}
 }
 
-func TestCountPendingOAuthClients(t *testing.T) {
+func TestMakeRoomForOAuthClientEvictsTheOldestPending(t *testing.T) {
 	t.Parallel()
 	s := mustNew(t)
 	u := admin(t, s)
 
-	newClient(t, s)
-	newClient(t, s)
-	issue(t, s, newClient(t, s), u.ID) // approved, so no longer pending
+	var pending []OAuthClient
+	for i := 0; i < 4; i++ {
+		c := newClient(t, s)
+		// Distinct ages, oldest first.
+		if _, err := s.conn().Exec("UPDATE oauth_clients SET created_at = ? WHERE id = ?",
+			sqliteTimestamp(time.Now().Add(-time.Duration(10-i)*time.Minute)), c.ID); err != nil {
+			t.Fatal(err)
+		}
+		pending = append(pending, c)
+	}
+	approved := newClient(t, s)
+	if _, err := s.conn().Exec("UPDATE oauth_clients SET created_at = ? WHERE id = ?",
+		sqliteTimestamp(time.Now().Add(-time.Hour)), approved.ID); err != nil {
+		t.Fatal(err)
+	}
+	issue(t, s, approved, u.ID)
 
-	n, err := s.CountPendingOAuthClients()
+	// Room for one more under a cap of 3: two pending may stay.
+	n, err := s.MakeRoomForOAuthClient(3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {
-		t.Errorf("pending = %d, want 2", n)
+		t.Errorf("evicted %d, want 2", n)
+	}
+	for i, c := range pending {
+		_, err := s.GetOAuthClient(c.ID)
+		if gone := errors.Is(err, ErrNotFound); gone != (i < 2) {
+			t.Errorf("pending client %d gone = %v, want %v (oldest go first)", i, gone, i < 2)
+		}
+	}
+	// An approved client is never evicted, however old.
+	if _, err := s.GetOAuthClient(approved.ID); err != nil {
+		t.Errorf("the approved client was evicted: %v", err)
 	}
 }

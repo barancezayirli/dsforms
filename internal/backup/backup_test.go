@@ -215,12 +215,8 @@ func seedWithToken(t *testing.T, s *store.Store) string {
 	if err != nil {
 		t.Fatalf("CreateAuthCode: %v", err)
 	}
-	code, err := s.RedeemAuthCode(raw)
-	if err != nil {
-		t.Fatalf("RedeemAuthCode: %v", err)
-	}
-	if _, err := s.IssueGrant(code); err != nil {
-		t.Fatalf("IssueGrant: %v", err)
+	if _, err := s.ExchangeAuthCode(raw, func(store.AuthCode) bool { return true }); err != nil {
+		t.Fatalf("ExchangeAuthCode: %v", err)
 	}
 
 	var hash string

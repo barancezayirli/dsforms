@@ -99,7 +99,11 @@ func TestRedirectURL(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := url.Parse(RedirectURL(tc.base, tc.params))
+			raw, err := RedirectURL(tc.base, tc.params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := url.Parse(raw)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,5 +120,14 @@ func TestRedirectURL(t *testing.T) {
 				t.Errorf("query = %v, want %v", q, tc.wantQ)
 			}
 		})
+	}
+}
+
+// A redirect URI that does not parse is an error, never a redirect without the
+// code: a client left waiting with nothing is a silent failure.
+func TestRedirectURLRefusesWhatDoesNotParse(t *testing.T) {
+	t.Parallel()
+	if _, err := RedirectURL("https://exa mple.com/%zz", url.Values{"code": {"c"}}); err == nil {
+		t.Error("an unparseable redirect URI produced a redirect")
 	}
 }

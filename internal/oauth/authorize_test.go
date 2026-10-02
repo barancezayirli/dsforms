@@ -189,3 +189,78 @@ func TestConsentSignatureDependsOnTheKey(t *testing.T) {
 		t.Error("a signature verified under another key")
 	}
 }
+
+// The error for an oversized state goes back to the client's redirect URI, so
+// the state must not ride along with it — that is the request-size knob
+// MaxStateLen exists to take away.
+func TestAnOversizedStateIsNotEchoed(t *testing.T) {
+	t.Parallel()
+	q := validAuthorizeQuery()
+	q.Set("state", string(make([]byte, MaxStateLen+1)))
+	req, oe := ParseAuthorizeRequest(q, testResource)
+	if oe == nil {
+		t.Fatal("oversized state accepted")
+	}
+	if req.State != "" {
+		t.Errorf("State kept %d bytes", len(req.State))
+	}
+	if req.RedirectURI == "" || req.ClientID == "" {
+		t.Error("the client and redirect URI are needed to report the error")
+	}
+}
+
+// A zero ConsentSigner — a handler built without one — fails closed rather
+// than panicking mid-request or signing with an empty key.
+func TestAZeroConsentSignerFailsClosed(t *testing.T) {
+	t.Parallel()
+	var s ConsentSigner
+	req, _ := ParseAuthorizeRequest(validAuthorizeQuery(), testResource)
+	if sig := s.Sign("u", req); sig != "" {
+		t.Errorf("zero signer signed: %q", sig)
+	}
+	if s.Verify("1.00", "u", req) {
+		t.Error("zero signer verified")
+	}
+	if _, ok := s.VerifyForm(url.Values{}, "u"); ok {
+		t.Error("zero signer verified a form")
+	}
+}
+
+func TestNewConsentSignerDefaultsTheClock(t *testing.T) {
+	t.Parallel()
+	s := NewConsentSigner("secret", nil)
+	req, _ := ParseAuthorizeRequest(validAuthorizeQuery(), testResource)
+	if !s.Verify(s.Sign("u", req), "u", req) {
+		t.Error("a signer built with a nil clock does not round-trip")
+	}
+}
+
+// VerifyForm is the one way a consent post becomes a request: the fields come
+// back out of the form only together with a signature over them.
+func TestVerifyForm(t *testing.T) {
+	t.Parallel()
+	s := NewConsentSigner("secret", time.Now)
+	req, _ := ParseAuthorizeRequest(validAuthorizeQuery(), testResource)
+	form := url.Values{
+		"client_id":      {req.ClientID},
+		"redirect_uri":   {req.RedirectURI},
+		"state":          {req.State},
+		"code_challenge": {req.CodeChallenge},
+		"resource":       {req.Resource},
+		"consent":        {s.Sign("u", req)},
+	}
+
+	got, ok := s.VerifyForm(form, "u")
+	if !ok {
+		t.Fatal("a signed form did not verify")
+	}
+	if got.ClientID != req.ClientID || got.RedirectURI != req.RedirectURI || got.State != req.State ||
+		got.CodeChallenge != req.CodeChallenge || got.Resource != req.Resource {
+		t.Errorf("got %+v, want %+v", got, req)
+	}
+
+	form.Set("redirect_uri", "https://evil.example/cb")
+	if _, ok := s.VerifyForm(form, "u"); ok {
+		t.Error("an edited form verified")
+	}
+}

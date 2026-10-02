@@ -125,7 +125,8 @@ Give the client `https://forms.example.com/mcp` and no token. What happens:
    `resource_metadata="https://forms.example.com/.well-known/oauth-protected-resource/mcp"`,
    and reads where to sign in.
 2. It registers itself (dynamic client registration, RFC 7591). Registering
-   grants nothing; a client nobody approves is deleted after a day.
+   grants nothing; a client nobody approves is deleted after an hour, and if
+   unapproved registrations pile up, the oldest make room for new ones.
 3. Your browser opens dsforms. Sign in if you are not, and you get a consent
    page naming the client, the address it receives its sign-in result at, and
    the same scope and form choices as the token form.
@@ -144,8 +145,9 @@ Approved clients are listed under **System → API tokens → Connected apps**,
 with what they can reach and when they were last used. **Disconnect** ends one's
 access at once, refresh included; it has to be approved again to come back.
 Approving the same client again replaces its earlier connection rather than
-adding a second one. Switching `MCP_OAUTH` off stops new sign-ins, but leaves
-existing connections listed so you can still disconnect them.
+adding a second one. Switching `MCP_OAUTH` off stops new sign-ins and
+refreshes, so connected clients stop working within the hour; their
+connections stay listed so you can still disconnect them.
 
 A few things it deliberately does not do:
 
@@ -154,9 +156,9 @@ A few things it deliberately does not do:
 - **Exact redirect addresses.** A client may only receive results at an
   `https` address it registered, or a loopback one for desktop clients. A
   request naming anything else gets an error page and is never redirected.
-- **One use per code.** A sign-in code works once; presenting it again revokes
-  whatever it issued. Presenting a rotated-out refresh token revokes the whole
-  connection, since two parties evidently hold it.
+- **One use per code.** A sign-in code works once; presenting it again within
+  a day revokes whatever it issued. Presenting a rotated-out refresh token
+  revokes the whole connection, since two parties evidently hold it.
 
 ## Scopes
 

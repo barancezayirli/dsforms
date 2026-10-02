@@ -158,6 +158,11 @@ type accessFields struct {
 	Forms       []store.FormSummary
 	TickedForms map[string]bool
 	AllForms    bool
+
+	// FormsUnavailable means the list of forms could not be read. The picker
+	// then says so, rather than "no forms yet" — which on a consent page reads
+	// as "this will reach every form you ever create".
+	FormsUnavailable bool
 }
 
 // newAccessFields renders a choice back onto the form.
@@ -286,6 +291,7 @@ func (h *TokensHandler) renderForm(w http.ResponseWriter, r *http.Request, errMs
 		data.Degraded = true
 	}
 	data.accessFields = newAccessFields(choice, forms)
+	data.FormsUnavailable = err != nil
 
 	if r.Header.Get("X-Fragment") != "" {
 		tmpl := h.Templates["token_new.html"]
@@ -352,11 +358,12 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 		data.Degraded = true
 	}
 	for _, g := range grants {
-		host := ""
-		if len(g.RedirectURIs) > 0 {
-			if u, err := url.Parse(g.RedirectURIs[0]); err == nil {
-				host = u.Host
-			}
+		// The address the approved code went to, not the client's first
+		// registered one: a client may register several, and the one the
+		// operator saw on the consent page is the one to show.
+		host := g.RedirectURI
+		if u, err := url.Parse(g.RedirectURI); err == nil {
+			host = u.Host
 		}
 		data.Grants = append(data.Grants, grantRow{
 			ID:           g.ID,

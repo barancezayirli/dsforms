@@ -327,7 +327,7 @@ CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 --
 -- oauth_clients are self-registered (RFC 7591) and public: no secret, PKCE
 -- instead. redirect_uris is newline-separated, a character a valid URI cannot
--- hold unescaped. A client nobody ever approved is pruned after a day.
+-- hold unescaped. A client with no live grant is pruned after an hour.
 CREATE TABLE IF NOT EXISTS oauth_clients (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
@@ -336,8 +336,9 @@ CREATE TABLE IF NOT EXISTS oauth_clients (
     created_at    DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
--- A code lives a minute and is redeemed once. used_at and grant_id stay behind
--- after redemption so a replay can revoke what the code issued.
+-- A code lives a minute and is redeemed once. The row is kept for a day past
+-- its expiry with used_at and grant_id set, so a replay within that day is
+-- recognised and revokes what the code issued.
 CREATE TABLE IF NOT EXISTS oauth_auth_codes (
     code_hash      TEXT PRIMARY KEY,
     client_id      TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
@@ -359,6 +360,8 @@ CREATE TABLE IF NOT EXISTS oauth_grants (
     id           TEXT PRIMARY KEY,
     client_id    TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
     user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- The address the approved code went to, which Connected apps shows.
+    redirect_uri TEXT NOT NULL DEFAULT '',
     scopes       TEXT NOT NULL DEFAULT '',
     form_ids     TEXT NOT NULL DEFAULT '',
     created_at   DATETIME NOT NULL DEFAULT (datetime('now')),

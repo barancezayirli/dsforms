@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"errors"
+	"github.com/barancezayirli/dsforms/internal/flash"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +20,12 @@ import (
 )
 
 func setupTokens(t *testing.T) (*store.Store, *chi.Mux) {
+	return setupTokensWith(t, func(s *store.Store) TokensStore { return s })
+}
+
+// setupTokensWith puts a store of the test's choosing in front of the real one,
+// for the failure paths a healthy database never takes.
+func setupTokensWith(t *testing.T, wrap func(*store.Store) TokensStore) (*store.Store, *chi.Mux) {
 	t.Helper()
 	s, err := store.New(":memory:")
 	if err != nil {
@@ -48,7 +56,7 @@ func setupTokens(t *testing.T) (*store.Store, *chi.Mux) {
 	templates := map[string]*template.Template{"tokens.html": tok, "token_new.html": nw}
 
 	th := &TokensHandler{
-		Store:   s,
+		Store:   wrap(s),
 		TTLDays: 0,
 		Base: Base{
 			Nav:       s,
@@ -803,20 +811,22 @@ func checkedRadios(t *testing.T, body, group string) map[string]bool {
 // authorize and token endpoints do, and returns the access token.
 func connect(t *testing.T, s *store.Store, userID, clientName string, formIDs []string) store.TokenPair {
 	t.Helper()
-	c, err := s.CreateOAuthClient(clientName, []string{"https://client.example/cb"}, []string{"authorization_code", "refresh_token"})
+	return connectVia(t, s, userID, clientName, formIDs, "https://client.example/cb")
+}
+
+// connectVia approves the client for one of several registered redirect URIs.
+func connectVia(t *testing.T, s *store.Store, userID, clientName string, formIDs []string, redirect string) store.TokenPair {
+	t.Helper()
+	c, err := s.CreateOAuthClient(clientName, []string{"https://client.example/cb", "https://second.example/cb"}, []string{"authorization_code", "refresh_token"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := s.CreateAuthCode(store.AuthCode{ClientID: c.ID, UserID: userID, RedirectURI: "https://client.example/cb",
+	raw, err := s.CreateAuthCode(store.AuthCode{ClientID: c.ID, UserID: userID, RedirectURI: redirect,
 		CodeChallenge: "x", Scopes: []string{"read", "write"}, FormIDs: formIDs})
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, err := s.RedeemAuthCode(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pair, err := s.IssueGrant(code)
+	pair, err := s.ExchangeAuthCode(raw, func(store.AuthCode) bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -883,8 +893,115 @@ func TestRevokeGrantCannotDisconnectAnothersApp(t *testing.T) {
 	pair := connect(t, s, victim.ID, "Theirs", nil)
 
 	// admin is signed in and posts the victim's grant id.
-	doTokenRequest(t, s, r, "POST", "/admin/tokens/grants/"+pair.GrantID+"/delete", "")
+	w := doTokenRequest(t, s, r, "POST", "/admin/tokens/grants/"+pair.GrantID+"/delete", "")
 	if _, err := s.GetAPIToken(pair.Access); err != nil {
 		t.Errorf("another user's app was disconnected through the admin page: %v", err)
+	}
+	// And the page does not claim it did.
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d", w.Code)
+	}
+	if typ, msg := flashOf(t, w); typ != "success" || !strings.Contains(msg, "already disconnected") {
+		t.Errorf("flash = %s %q, want the already-gone message", typ, msg)
+	}
+}
+
+// flashOf reads the flash a response set.
+func flashOf(t *testing.T, w *httptest.ResponseRecorder) (string, string) {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/", nil)
+	for _, c := range w.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	return flash.Get(req, httptest.NewRecorder(), testSecretKey)
+}
+
+type failingTokensStore struct {
+	*store.Store
+	listGrants, revoke error
+}
+
+func (f failingTokensStore) ListOAuthGrants(userID string) ([]store.OAuthGrant, error) {
+	if f.listGrants != nil {
+		return nil, f.listGrants
+	}
+	return f.Store.ListOAuthGrants(userID)
+}
+
+func (f failingTokensStore) RevokeOAuthGrant(userID, id string) (bool, error) {
+	if f.revoke != nil {
+		return false, f.revoke
+	}
+	return f.Store.RevokeOAuthGrant(userID, id)
+}
+
+func TestRevokeGrantSaysWhenItFails(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokensWith(t, func(s *store.Store) TokensStore {
+		return failingTokensStore{Store: s, revoke: errors.New("database is locked")}
+	})
+	admin, _ := s.GetUserByUsername("admin")
+	pair := connect(t, s, admin.ID, "Claude", nil)
+
+	w := doTokenRequest(t, s, r, "POST", "/admin/tokens/grants/"+pair.GrantID+"/delete", "")
+	if typ, msg := flashOf(t, w); typ != "error" || !strings.Contains(msg, "could not be disconnected") {
+		t.Errorf("flash = %s %q, want the failure named", typ, msg)
+	}
+	if _, err := s.GetAPIToken(pair.Access); err != nil {
+		t.Errorf("token = %v; the failed disconnect should have left it", err)
+	}
+}
+
+// When connected apps cannot be read the page says so, rather than showing an
+// empty section an operator would read as "nothing is connected". Rendered
+// through the shipped templates, since the banner lives in the shell.
+func TestTokenPageDegradesWhenConnectedAppsCannotBeRead(t *testing.T) {
+	t.Parallel()
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	th := &TokensHandler{
+		Store:        failingTokensStore{Store: s, listGrants: errors.New("database is locked")},
+		OAuthEnabled: true,
+		Base:         Base{Nav: s, SecretKey: testSecretKey, Templates: realTemplates(t)},
+	}
+	r := chi.NewRouter()
+	r.With(auth.RequireAuth(s)).Get("/admin/tokens", th.Page)
+
+	body := doTokenRequest(t, s, r, "GET", "/admin/tokens", "").Body.String()
+	if !strings.Contains(body, "Some data could not be loaded") {
+		t.Error("the page does not say connected apps could not be read")
+	}
+}
+
+// The host listed is the one the approved code went to, not merely the
+// client's first registered redirect URI: a client can register several.
+func TestConnectedAppsShowTheApprovedAddress(t *testing.T) {
+	t.Parallel()
+	s, _ := setupTokens(t)
+	admin, _ := s.GetUserByUsername("admin")
+	connectVia(t, s, admin.ID, "Claude", nil, "https://second.example/cb")
+
+	grants, err := s.ListOAuthGrants(admin.ID)
+	if err != nil || len(grants) != 1 {
+		t.Fatalf("grants = %v, %v", grants, err)
+	}
+	if grants[0].RedirectURI != "https://second.example/cb" {
+		t.Errorf("grant redirect = %q, want the approved one", grants[0].RedirectURI)
+	}
+}
+
+func TestConnectedAppsEmptyStateWhileOAuthIsOn(t *testing.T) {
+	t.Parallel()
+	tmpl := realTemplates(t)["tokens.html"]
+	for _, on := range []bool{true, false} {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, "base", tokensData{PageData: PageData{Title: "API tokens"}, OAuthEnabled: on, BaseURL: "https://x.example"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(buf.String(), "No apps connected"); got != on {
+			t.Errorf("oauth=%v: empty state shown = %v", on, got)
+		}
 	}
 }

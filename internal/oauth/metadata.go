@@ -31,8 +31,9 @@ type ServerMetadata struct {
 	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 }
 
-// Issuer is BASE_URL without a trailing slash. The SDK client compares the
-// issuer it is given against the one it discovered and refuses a mismatch.
+// Issuer is BASE_URL without a trailing slash, the one form used everywhere:
+// the SDK client compares the iss on the redirect byte for byte with the
+// issuer in the metadata (RFC 9207), so the two must never differ by a slash.
 func Issuer(baseURL string) string {
 	return strings.TrimSuffix(baseURL, "/")
 }

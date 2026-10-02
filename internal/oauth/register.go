@@ -42,9 +42,11 @@ type registrationRequest struct {
 
 // ParseRegistration reads and validates a registration request body.
 //
-// RFC 7591 §2 lets the server replace requested values, and it does so where
-// refusing would only lock clients out: the auth method is always "none", and
-// grant types are narrowed to the two this server issues.
+// RFC 7591 §2 lets the server replace requested values, and dsforms does so
+// where refusing would only lock clients out: grant types are narrowed to the
+// two this server issues (a request without authorization_code is refused),
+// and the requested auth method is ignored — every client is registered as
+// public, and the handler answers "none" whatever was asked.
 func ParseRegistration(body io.Reader) (Registration, error) {
 	var req registrationRequest
 	if err := json.NewDecoder(body).Decode(&req); err != nil {

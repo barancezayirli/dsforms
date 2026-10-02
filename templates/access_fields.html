@@ -76,6 +76,13 @@
       </label>
       {{end}}
     </div>
+    {{else if .FormsUnavailable}}
+    <!-- Not "no forms yet": the list could not be read, and claiming there is
+         nothing to choose would describe all-forms access as harmless. -->
+    <span class="form-hint" style="display:block;margin:9px 0 0 26px">
+      The list of forms could not be loaded, so access cannot be limited to
+      particular forms right now. Reload to try again.
+    </span>
     {{else}}
     <span class="form-hint" style="display:block;margin:9px 0 0 26px">
       No forms yet, so there is nothing to choose between — this will

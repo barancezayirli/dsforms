@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/url"
 )
@@ -18,7 +19,6 @@ const (
 	CodeAccessDenied            = "access_denied"
 	CodeUnsupportedResponseType = "unsupported_response_type"
 	CodeServerError             = "server_error"
-	CodeTemporarilyUnavailable  = "temporarily_unavailable"
 	CodeInvalidTarget           = "invalid_target"
 	CodeInvalidRedirectURI      = "invalid_redirect_uri"
 	CodeInvalidClientMetadata   = "invalid_client_metadata"
@@ -63,25 +63,32 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	// Only a write can fail here, and for a token response that means tokens
+	// were minted and the client never saw them — its retry then looks like a
+	// replay. Worth a line in the log when it happens.
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("oauth: writing a %d response: %v", status, err)
+	}
 }
 
 // RedirectURL adds params to a registered redirect URI, keeping the URI's own
 // query (RFC 6749 §3.1.2) but letting ours win on a name collision: a client
 // that reads the first "code" must read the one we issued.
 //
-// redirectURI has already been matched against the client's registration, so
-// it parses; a failure here would mean the registry holds something
-// ValidateRedirectURI never accepted.
-func RedirectURL(redirectURI string, params url.Values) string {
+// redirectURI has been matched against the client's registration, and
+// registration only accepts what parses, so an error here means the registry
+// holds something ValidateRedirectURI never accepted. It is an error rather
+// than a redirect without the code, which would leave the client waiting on
+// nothing.
+func RedirectURL(redirectURI string, params url.Values) (string, error) {
 	u, err := url.Parse(redirectURI)
 	if err != nil {
-		return redirectURI
+		return "", err
 	}
 	q := u.Query()
 	for k, v := range params {
 		q[k] = v
 	}
 	u.RawQuery = q.Encode()
-	return u.String()
+	return u.String(), nil
 }
