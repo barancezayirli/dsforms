@@ -32,3 +32,6 @@ c.out
 # Fuzz corpora and golden diffs are local artefacts
 testdata/fuzz/
 *.actual
+
+# Local Claude Code permissions
+.claude/settings.local.json

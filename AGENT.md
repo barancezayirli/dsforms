@@ -54,19 +54,9 @@ as a checkpoint.
 
 ### Writing the issue
 
-```markdown
-## Goal
-Why this is needed, in one or two sentences.
-
-## What it does
-The behaviour in plain language: what changes for an operator or a client.
-No file names, no implementation plan.
-
-## Done when
-- [ ] Observable outcomes, in order, checkpoints marked
-```
-
-No commit hashes, test counts or estimates. **Show the issue text and get a yes
+Create issues with the `create-task` skill
+([`.claude/skills/create-task/SKILL.md`](.claude/skills/create-task/SKILL.md));
+it holds the issue shape and the procedure. **Show the issue text and get a yes
 before creating it**: creating an issue publishes it.
 
 ### The steps
