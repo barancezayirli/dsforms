@@ -7,6 +7,12 @@ import (
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
+// TemplatePartials are the shared template files every page is parsed with,
+// beside its own: the icon sprite, and the access-fields block the API token
+// form and the OAuth consent page both render. One list, read by main.go and
+// by the test harness, for the reason TemplateFuncs is one map.
+var TemplatePartials = []string{"icons.html", "access_fields.html"}
+
 // TemplateFuncs is the function map every template set is parsed with.
 //
 // It lives here, in one place, because there used to be five: the production map

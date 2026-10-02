@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/barancezayirli/dsforms/internal/store"
@@ -70,7 +71,14 @@ func RequireAuth(ss SessionStore) func(http.Handler) http.Handler {
 					http.Error(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
-				http.Redirect(w, r, "/admin/login", http.StatusFound)
+				// A GET carries the page it asked for, so signing in comes back
+				// to it — the OAuth consent page depends on this. LoginSubmit
+				// follows it only if it is a path on this server.
+				login := "/admin/login"
+				if r.Method == http.MethodGet {
+					login += "?next=" + url.QueryEscape(r.URL.RequestURI())
+				}
+				http.Redirect(w, r, login, http.StatusFound)
 			}
 
 			token, ok := GetSessionToken(r)

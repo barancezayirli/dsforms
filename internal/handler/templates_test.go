@@ -29,8 +29,11 @@ func realTemplates(t *testing.T) map[string]*template.Template {
 
 	funcMap := TemplateFuncs()
 
-	base, err := template.New("base").Funcs(funcMap).ParseFiles(
-		filepath.Join(templateDir, "base.html"), filepath.Join(templateDir, "icons.html"))
+	files := []string{filepath.Join(templateDir, "base.html")}
+	for _, p := range TemplatePartials {
+		files = append(files, filepath.Join(templateDir, p))
+	}
+	base, err := template.New("base").Funcs(funcMap).ParseFiles(files...)
 	if err != nil {
 		t.Fatalf("parse base: %v", err)
 	}
@@ -178,10 +181,10 @@ func populatedPageData() map[string]any {
 		// AllForms is left false so the form picker renders rather than the
 		// branch that says there is nothing to choose between.
 		"token_new.html": tokenFormData{PageData: shell, Error: "bad",
-			Scopes: scopeOptions(), Enabled: false, TTLDays: 90,
-			Name: "laptop", Ticked: map[string]bool{"read": true},
-			Forms:       []store.FormSummary{{Form: form}},
-			TickedForms: map[string]bool{"f1": true}, AllForms: false},
+			Enabled: false, TTLDays: 90, Name: "laptop",
+			accessFields: newAccessFields(
+				accessChoice{Scopes: []string{"read"}, Forms: []string{"f1"}, AllForms: false},
+				[]store.FormSummary{{Form: form}})},
 		"backups.html": backupPageData{PageData: shell},
 		"waitlists.html": waitlistListData{PageData: shell,
 			Waitlists: []store.WaitlistSummary{{Waitlist: wl, EntryCount: 42}}},
@@ -334,7 +337,7 @@ func TestRealTemplatesCoverEveryPage(t *testing.T) {
 	known := map[string]bool{
 		// Not base pages: the shell, the sprite, and the standalone documents
 		// main_test.go covers.
-		"base.html": true, "icons.html": true,
+		"base.html": true, "access_fields.html": true, "icons.html": true,
 		"login.html": true, "success.html": true, "404.html": true, "500.html": true,
 	}
 	for _, name := range basePageNames {

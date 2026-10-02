@@ -305,9 +305,8 @@ func TestTokenFormOffersEveryScope(t *testing.T) {
 	}
 
 	data := tokenFormData{
-		PageData: PageData{Title: "New API token", Active: "tokens"},
-		Scopes:   scopeOptions(),
-		Ticked:   map[string]bool{},
+		PageData:     PageData{Title: "New API token", Active: "tokens"},
+		accessFields: newAccessFields(accessChoice{Scopes: []string{}}, nil),
 	}
 
 	// Both presentations, because they are separate defines and only one of them
@@ -542,9 +541,8 @@ func TestTokenFormStatesWhatEachScopeRisks(t *testing.T) {
 
 	tmpl := realTemplates(t)["token_new.html"]
 	data := tokenFormData{
-		PageData: PageData{Title: "New API token", Active: "tokens"},
-		Scopes:   scopeOptions(),
-		Ticked:   map[string]bool{"read": true},
+		PageData:     PageData{Title: "New API token", Active: "tokens"},
+		accessFields: newAccessFields(accessChoice{Scopes: []string{"read"}}, nil),
 	}
 
 	for _, block := range []string{"base", "drawer"} {

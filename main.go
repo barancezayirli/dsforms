@@ -156,8 +156,13 @@ func parseTemplates() (map[string]*template.Template, error) {
 	// is not the one that ships.
 	funcMap := handler.TemplateFuncs()
 
+	partials := make([]string, 0, len(handler.TemplatePartials))
+	for _, p := range handler.TemplatePartials {
+		partials = append(partials, "templates/"+p)
+	}
+
 	baseTmpl, err := template.New("base").Funcs(funcMap).ParseFS(templateFS,
-		"templates/base.html", "templates/icons.html")
+		append([]string{"templates/base.html"}, partials...)...)
 	if err != nil {
 		return nil, fmt.Errorf("parse base template: %w", err)
 	}
@@ -175,11 +180,12 @@ func parseTemplates() (map[string]*template.Template, error) {
 	}
 
 	for _, name := range standalonePages {
-		// The icon sprite comes along: these pages do not extend base.html but
-		// they still render icons, and a missing "icons" template is an
-		// execution-time failure that template parsing alone will not catch.
+		// The partials come along: these pages do not extend base.html but
+		// they still render icons (and the consent page the access fields), and
+		// a missing template is an execution-time failure that parsing alone
+		// will not catch.
 		t, err := template.New(name).Funcs(funcMap).ParseFS(templateFS,
-			"templates/"+name, "templates/icons.html")
+			append([]string{"templates/" + name}, partials...)...)
 		if err != nil {
 			return nil, fmt.Errorf("parse template %s: %w", name, err)
 		}
