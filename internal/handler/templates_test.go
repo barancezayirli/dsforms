@@ -175,7 +175,10 @@ func populatedPageData() map[string]any {
 				APIToken:  store.APIToken{ID: "t1", Name: "laptop", Scopes: []string{"read", "write"}},
 				ScopeList: "read, write", Reach: "All forms", LastUsed: "Never", Expires: "Never"}, {
 				APIToken:  store.APIToken{ID: "t2", Name: "careers bot", Scopes: []string{"read"}, FormIDs: []string{"f1"}},
-				ScopeList: "read", Reach: "Contact", LastUsed: "Never", Expires: "Never"}}},
+				ScopeList: "read", Reach: "Contact", LastUsed: "Never", Expires: "Never"}},
+			OAuthEnabled: true,
+			Grants: []grantRow{{ID: "g1", ClientName: "Claude Desktop", RedirectHost: "claude.example",
+				ScopeList: "read", Reach: "All forms", Connected: "Oct 2, 2026 12:00", LastUsed: "Never"}}},
 		// The create form, which is its own page now. Error, a ticked scope and a
 		// ticked form are all behind {{if}}s, so all three are set — and
 		// AllForms is left false so the form picker renders rather than the
@@ -250,7 +253,7 @@ var pageMarkers = map[string][]string{
 	"broadcast_detail.html":  {"Hi"},
 	"broadcast_new.html":     {"42 recipient"},
 	"users.html":             {"admin"},
-	"tokens.html":            {"dsf_shown_once", "laptop", "read, write", "https://x.example/mcp", "All forms", "careers bot"},
+	"tokens.html":            {"dsf_shown_once", "laptop", "read, write", "https://x.example/mcp", "All forms", "careers bot", "Claude Desktop", "claude.example", "/admin/tokens/grants/g1/delete"},
 	"token_new.html":         {"laptop", "Create token", "All forms", "Only the forms I choose", "Contact"},
 
 	// No populated/empty split: these render the same shape whatever the data,

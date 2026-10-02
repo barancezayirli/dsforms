@@ -77,4 +77,47 @@
   </a>
 </div>
 {{end}}
+
+<!-- Connected apps: MCP clients that signed in through OAuth instead of being
+     given a token. Listed whenever any exist — including after MCP_OAUTH is
+     switched off — so a connection is never left with nowhere to revoke it. -->
+{{if or .Grants .OAuthEnabled}}
+<div class="page-head" style="margin-top:28px">
+  <h4 style="font-size:16px">Connected apps</h4>
+  <span class="muted" style="font-size:13px">Clients you approved by signing in. Disconnecting one ends its access at once; it has to be approved again to come back.</span>
+</div>
+{{if .Grants}}
+<div class="card elev-sm">
+  <div class="table-wrap">
+    <table class="table" style="min-width:660px">
+      <thead><tr><th>App</th><th>Scopes</th><th>Reach</th><th>Connected</th><th>Last used</th><th style="width:110px"></th></tr></thead>
+      <tbody>
+        {{range .Grants}}
+        <tr>
+          <td style="font-size:13.5px">{{.ClientName}}
+            <span class="dim" style="display:block;font-size:11.5px">{{.RedirectHost}}</span></td>
+          <td class="dim nowrap" style="font-size:12px">{{.ScopeList}}</td>
+          <td class="dim truncate" style="font-size:12px;max-width:180px" title="{{.Reach}}">{{.Reach}}</td>
+          <td class="dim nowrap" style="font-size:12px">{{.Connected}}</td>
+          <td class="dim nowrap" style="font-size:12px">{{.LastUsed}}</td>
+          <td style="text-align:right">
+            <form method="POST" action="/admin/tokens/grants/{{.ID}}/delete"
+                  data-confirm="Disconnect {{.ClientName}}? It stops working immediately.">
+              <button class="btn btn-quiet" type="submit">Disconnect</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{else}}
+<div class="card elev-sm empty">
+  <span class="empty-icon"><svg class="i"><use href="#ph-lock-key"/></svg></span>
+  <h3>No apps connected</h3>
+  <p>Point an MCP client at <code>{{.BaseURL}}/mcp</code> without a token and it will ask you to sign in here and approve it.</p>
+</div>
+{{end}}
+{{end}}
 {{end}}

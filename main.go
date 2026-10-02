@@ -1176,10 +1176,11 @@ func routes(d serverDeps) *chi.Mux {
 	// prepare a token before turning the endpoint on, and to revoke one after
 	// turning it off. The page says which it is.
 	tokensHandler := &handler.TokensHandler{
-		Base:       base,
-		Store:      d.store,
-		TTLDays:    d.cfg.MCPTokenTTLDays,
-		MCPEnabled: d.cfg.MCPEnabled,
+		Base:         base,
+		Store:        d.store,
+		TTLDays:      d.cfg.MCPTokenTTLDays,
+		MCPEnabled:   d.cfg.MCPEnabled,
+		OAuthEnabled: d.cfg.MCPOAuth,
 	}
 	backupHandler := &handler.BackupHandler{Base: base, Store: d.store}
 
@@ -1290,6 +1291,7 @@ func routes(d serverDeps) *chi.Mux {
 		r.Get("/admin/tokens/new", tokensHandler.NewPage)
 		r.Post("/admin/tokens", tokensHandler.Create)
 		r.Post("/admin/tokens/{id}/delete", tokensHandler.Delete)
+		r.Post("/admin/tokens/grants/{id}/delete", tokensHandler.RevokeGrant)
 		r.Get("/admin/account", usersHandler.AccountPage)
 		r.Post("/admin/account/password", usersHandler.UpdatePassword)
 		r.Get("/admin/backups", backupHandler.Page)

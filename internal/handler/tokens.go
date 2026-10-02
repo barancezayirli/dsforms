@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +25,11 @@ type TokensStore interface {
 	CreateAPIToken(userID, name string, scopes, formIDs []string, expiry time.Duration) (string, store.APIToken, error)
 	DeleteAPIToken(userID, id string) (bool, error)
 	ListAPITokens(userID string) ([]store.APIToken, error)
+
+	// The OAuth clients this user approved, and disconnecting one. Owner-scoped
+	// for the same reason the token methods are.
+	ListOAuthGrants(userID string) ([]store.OAuthGrant, error)
+	RevokeOAuthGrant(userID, id string) (bool, error)
 
 	// ListForms is the exception to the scoping above, and it reads no personal
 	// data: the picker has to offer the forms that exist, and the list has to
@@ -46,6 +52,24 @@ type TokensHandler struct {
 	// revoke one after switching it off — but it says which it is, because a
 	// token that silently does nothing is a confusing afternoon.
 	MCPEnabled bool
+
+	// OAuthEnabled reflects MCP_OAUTH. Connected apps are listed whenever any
+	// exist, so one approved while it was on can still be disconnected after
+	// it is switched off; the empty state is only shown while it is on.
+	OAuthEnabled bool
+}
+
+// grantRow is one connected app as the page renders it.
+type grantRow struct {
+	ID         string
+	ClientName string
+	// RedirectHost is where the client receives codes. The name is whatever
+	// the client registered itself as; the host is the part that identifies it.
+	RedirectHost string
+	ScopeList    string
+	Reach        string
+	Connected    string
+	LastUsed     string
 }
 
 // tokenRow is one token as the page renders it.
@@ -91,6 +115,10 @@ type tokensData struct {
 	// PageData, which does not carry it — the same arrangement the waitlist and
 	// form pages use for the endpoints they print.
 	BaseURL string
+
+	// Grants are the OAuth clients this user approved.
+	Grants       []grantRow
+	OAuthEnabled bool
 
 	// NewToken is the raw token, rendered once immediately after creation and
 	// never again.
@@ -278,10 +306,11 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 	user, _ := auth.UserFromContext(r.Context())
 
 	data := tokensData{
-		PageData: h.Shell(w, r, "API tokens", "tokens"),
-		Enabled:  h.MCPEnabled,
-		BaseURL:  h.Base.BaseURL,
-		NewToken: newToken,
+		PageData:     h.Shell(w, r, "API tokens", "tokens"),
+		Enabled:      h.MCPEnabled,
+		OAuthEnabled: h.OAuthEnabled,
+		BaseURL:      h.Base.BaseURL,
+		NewToken:     newToken,
 	}
 
 	tokens, err := h.Store.ListAPITokens(user.ID)
@@ -309,9 +338,34 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 		data.Tokens = append(data.Tokens, tokenRow{
 			APIToken:  t,
 			ScopeList: strings.Join(t.Scopes, ", "),
-			Reach:     describeReach(t, names),
+			Reach:     describeReach(t.Scope(), t.FormIDs, names),
 			LastUsed:  humanTime(t.LastUsedAt, "Never"),
 			Expires:   humanTime(t.ExpiresAt, "Never"),
+		})
+	}
+
+	grants, err := h.Store.ListOAuthGrants(user.ID)
+	if err != nil {
+		// Degraded for the reason the token list is: an empty section must not
+		// read as "nothing is connected" when it could not be read.
+		log.Printf("tokens: listing connected apps for %s: %v", user.ID, err)
+		data.Degraded = true
+	}
+	for _, g := range grants {
+		host := ""
+		if len(g.RedirectURIs) > 0 {
+			if u, err := url.Parse(g.RedirectURIs[0]); err == nil {
+				host = u.Host
+			}
+		}
+		data.Grants = append(data.Grants, grantRow{
+			ID:           g.ID,
+			ClientName:   g.ClientName,
+			RedirectHost: host,
+			ScopeList:    strings.Join(g.Scopes, ", "),
+			Reach:        describeReach(g.Scope(), g.FormIDs, names),
+			Connected:    humanTime(g.CreatedAt, "Unknown"),
+			LastUsed:     humanTime(g.LastUsedAt, "Never"),
 		})
 	}
 
@@ -394,17 +448,17 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, raw)
 }
 
-// describeReach says what a token can see, in form names.
+// describeReach says what a token or a connected app can see, in form names.
 //
 // A form that has since been deleted keeps its id here rather than vanishing:
-// the token still names it, and a reach that silently shortened would tell an
-// operator the token is narrower than it is.
-func describeReach(t store.APIToken, names map[string]string) string {
-	if t.Scope().All() {
+// the credential still names it, and a reach that silently shortened would tell
+// an operator it is narrower than it is.
+func describeReach(scope store.FormScope, formIDs []string, names map[string]string) string {
+	if scope.All() {
 		return "All forms"
 	}
-	out := make([]string, 0, len(t.FormIDs))
-	for _, id := range t.FormIDs {
+	out := make([]string, 0, len(formIDs))
+	for _, id := range formIDs {
 		if name, ok := names[id]; ok {
 			out = append(out, name)
 			continue
@@ -475,6 +529,27 @@ func (h *TokensHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	default:
 		log.Printf("tokens: revoked %s for user %s", id, user.Username)
 		flash.Set(w, h.SecretKey, "success", "Token revoked. Any client using it is refused from now on.")
+	}
+	http.Redirect(w, r, "/admin/tokens", http.StatusSeeOther)
+}
+
+// RevokeGrant disconnects one of the signed-in user's OAuth clients: its grant,
+// access tokens and refresh tokens go together. Scoped by owner in the store,
+// as Delete is.
+func (h *TokensHandler) RevokeGrant(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.UserFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+
+	removed, err := h.Store.RevokeOAuthGrant(user.ID, id)
+	switch {
+	case err != nil:
+		log.Printf("tokens: disconnecting grant %s for %s: %v", id, user.ID, err)
+		flash.Set(w, h.SecretKey, "error", "That app could not be disconnected.")
+	case !removed:
+		flash.Set(w, h.SecretKey, "success", "That app is already disconnected.")
+	default:
+		log.Printf("tokens: disconnected grant %s for user %s", id, user.Username)
+		flash.Set(w, h.SecretKey, "success", "App disconnected. It is refused from now on and has to be approved again to reconnect.")
 	}
 	http.Redirect(w, r, "/admin/tokens", http.StatusSeeOther)
 }

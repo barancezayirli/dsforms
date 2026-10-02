@@ -32,7 +32,8 @@ func setupTokens(t *testing.T) (*store.Store, *chi.Mux) {
 	// satisfy an assertion the shipped page would fail.
 	template.Must(tok.New("content").Parse(
 		`{{if .NewToken}}<code id="new-token">{{.NewToken}}</code>{{end}}` +
-			`{{range .Tokens}}<span class="token" data-id="{{.ID}}">{{.Name}}:{{.ScopeList}}:{{.LastUsed}}</span>{{end}}`))
+			`{{range .Tokens}}<span class="token" data-id="{{.ID}}">{{.Name}}:{{.ScopeList}}:{{.LastUsed}}</span>{{end}}` +
+			`{{range .Grants}}<span class="grant" data-id="{{.ID}}">{{.ClientName}}:{{.ScopeList}}:{{.Reach}}:{{.LastUsed}}</span>{{end}}`))
 	nw, _ := baseTmpl.Clone()
 	template.Must(nw.New("content").Parse(
 		`{{if .Error}}<p class="error">{{.Error}}</p>{{end}}` +
@@ -64,6 +65,7 @@ func setupTokens(t *testing.T) (*store.Store, *chi.Mux) {
 		r.Get("/admin/tokens/new", th.NewPage)
 		r.Post("/admin/tokens", th.Create)
 		r.Post("/admin/tokens/{id}/delete", th.Delete)
+		r.Post("/admin/tokens/grants/{id}/delete", th.RevokeGrant)
 	})
 	return s, r
 }
@@ -795,4 +797,94 @@ func checkedRadios(t *testing.T, body, group string) map[string]bool {
 		t.Fatalf("no %q radios in the rendered page", group)
 	}
 	return out
+}
+
+// connect walks one OAuth client through to a grant for a user, the way the
+// authorize and token endpoints do, and returns the access token.
+func connect(t *testing.T, s *store.Store, userID, clientName string, formIDs []string) store.TokenPair {
+	t.Helper()
+	c, err := s.CreateOAuthClient(clientName, []string{"https://client.example/cb"}, []string{"authorization_code", "refresh_token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := s.CreateAuthCode(store.AuthCode{ClientID: c.ID, UserID: userID, RedirectURI: "https://client.example/cb",
+		CodeChallenge: "x", Scopes: []string{"read", "write"}, FormIDs: formIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := s.RedeemAuthCode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := s.IssueGrant(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pair
+}
+
+func TestTokenPageListsYourConnectedApps(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokens(t)
+	admin, _ := s.GetUserByUsername("admin")
+	if err := s.CreateUser("other", "hunter2hunter2"); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := s.GetUserByUsername("other")
+	if err := s.CreateForm(store.Form{ID: "f1", Name: "Careers", EmailTo: "a@b.com"}); err != nil {
+		t.Fatal(err)
+	}
+
+	connect(t, s, admin.ID, "Claude", []string{"f1"})
+	connect(t, s, other.ID, "Someone else's client", nil)
+
+	body := doTokenRequest(t, s, r, "GET", "/admin/tokens", "").Body.String()
+	// Reach in form names, as for tokens; the client's own name, as registered.
+	if !strings.Contains(body, `Claude:read, write:Careers:Never`) {
+		t.Errorf("connected app not listed as expected: %s", body)
+	}
+	if strings.Contains(body, "Someone else's client") {
+		t.Error("another user's connected app is listed")
+	}
+	// The access tokens behind it are not listed as hand-made tokens.
+	if strings.Contains(body, `class="token"`) {
+		t.Errorf("an OAuth access token is listed among the tokens: %s", body)
+	}
+}
+
+func TestRevokeGrantDisconnectsYourApp(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokens(t)
+	admin, _ := s.GetUserByUsername("admin")
+	pair := connect(t, s, admin.ID, "Claude", nil)
+
+	w := doTokenRequest(t, s, r, "POST", "/admin/tokens/grants/"+pair.GrantID+"/delete", "")
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 back to the page", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/admin/tokens" {
+		t.Errorf("Location = %q", loc)
+	}
+	if _, err := s.GetAPIToken(pair.Access); err == nil {
+		t.Error("the app's access token still works after disconnecting")
+	}
+	if grants, _ := s.ListOAuthGrants(admin.ID); len(grants) != 0 {
+		t.Errorf("grants after disconnect = %d", len(grants))
+	}
+}
+
+func TestRevokeGrantCannotDisconnectAnothersApp(t *testing.T) {
+	t.Parallel()
+	s, r := setupTokens(t)
+	if err := s.CreateUser("victim", "hunter2hunter2"); err != nil {
+		t.Fatal(err)
+	}
+	victim, _ := s.GetUserByUsername("victim")
+	pair := connect(t, s, victim.ID, "Theirs", nil)
+
+	// admin is signed in and posts the victim's grant id.
+	doTokenRequest(t, s, r, "POST", "/admin/tokens/grants/"+pair.GrantID+"/delete", "")
+	if _, err := s.GetAPIToken(pair.Access); err != nil {
+		t.Errorf("another user's app was disconnected through the admin page: %v", err)
+	}
 }
