@@ -198,6 +198,12 @@ func (s *Store) RedeemAuthCode(raw string) (AuthCode, error) {
 // IssueGrant turns a redeemed code into a grant and its first tokens, in one
 // transaction: a grant without tokens, or tokens without a grant to revoke
 // them by, is never visible.
+//
+// It replaces any grant the same user already gave the same client. A client
+// that reconnects gets a new grant, and the old one's tokens would otherwise
+// stay live behind it, listed twice under one name with nothing to tell them
+// apart — which is what the checkpoint run found. Another user's grant for the
+// same client is theirs and is left alone.
 func (s *Store) IssueGrant(code AuthCode) (TokenPair, error) {
 	if code.hash == "" {
 		return TokenPair{}, fmt.Errorf("issue grant: the code was not redeemed")
@@ -207,6 +213,10 @@ func (s *Store) IssueGrant(code AuthCode) (TokenPair, error) {
 		return TokenPair{}, fmt.Errorf("issue grant: %w", err)
 	}
 	defer tx.Rollback()
+
+	if err := replaceGrants(tx, code.ClientID, code.UserID); err != nil {
+		return TokenPair{}, fmt.Errorf("issue grant: replacing the earlier grant: %w", err)
+	}
 
 	grantID := uuid.New().String()
 	if _, err := tx.Exec(
@@ -322,6 +332,34 @@ func mintTokens(tx *sql.Tx, grantID string) (TokenPair, error) {
 		ExpiresIn: AccessTokenTTL,
 		Scopes:    splitScopes(scopes),
 	}, nil
+}
+
+// replaceGrants revokes every grant one user gave one client.
+func replaceGrants(tx *sql.Tx, clientID, userID string) error {
+	rows, err := tx.Query("SELECT id FROM oauth_grants WHERE client_id = ? AND user_id = ?", clientID, userID)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, id := range ids {
+		if err := revokeGrant(tx, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // revokeGrant removes a grant and everything it issued. Its refresh tokens go

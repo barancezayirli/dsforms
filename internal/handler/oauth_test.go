@@ -370,11 +370,33 @@ func TestConsentPageShowsWhoAndWhere(t *testing.T) {
 			t.Errorf("consent page does not mention %q", want)
 		}
 	}
-	// The requested scopes come pre-ticked, and nothing more.
-	for scope, want := range map[string]bool{"read": true, "write": true, "delete": false} {
-		ticked := regexp.MustCompile(`name="scopes" value="` + scope + `"[^>]*checked`).MatchString(body)
-		if ticked != want {
-			t.Errorf("scope %s ticked = %v, want %v", scope, ticked, want)
+}
+
+// The consent page starts at read, whatever the client asked for — the rule
+// the token form follows. Found at the checkpoint: a real client asks for
+// every scope the server advertises, and pre-ticking the request made
+// granting delete the path of least resistance. What was asked for is shown,
+// so the operator ticks the rest deliberately.
+func TestConsentStartsAtReadWhateverTheClientAsks(t *testing.T) {
+	t.Parallel()
+	e := setupOAuth(t)
+	clientID := e.client(t)
+
+	for _, asked := range []string{"read write delete", "write", ""} {
+		q := authorizeQuery(clientID)
+		q.Set("scope", asked)
+		req := httptest.NewRequest("GET", oauth.PathAuthorize+"?"+q.Encode(), nil)
+		req.AddCookie(e.cookie(t, "admin"))
+		body := e.do(t, req).Body.String()
+
+		for scope, want := range map[string]bool{"read": true, "write": false, "delete": false} {
+			ticked := regexp.MustCompile(`name="scopes" value="` + scope + `"[^>]*checked`).MatchString(body)
+			if ticked != want {
+				t.Errorf("asked %q: scope %s ticked = %v, want %v", asked, scope, ticked, want)
+			}
+		}
+		if asked == "read write delete" && !strings.Contains(body, "asked for read, write, delete") {
+			t.Errorf("asked %q: the page does not say what the client asked for", asked)
 		}
 	}
 }

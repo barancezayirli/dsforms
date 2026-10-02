@@ -147,6 +147,9 @@ type consentData struct {
 	Username     string
 	ClientName   string
 	RedirectHost string
+	// AskedFor is the scopes the client requested, for the operator to read.
+	// They are not pre-ticked; see AuthorizePage.
+	AskedFor string
 
 	// The request being approved, posted back with its signature.
 	ClientID      string
@@ -176,18 +179,20 @@ func (h *OAuthHandler) AuthorizePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// What the client asked for, limited to what exists, pre-ticks the boxes.
-	// Asking for nothing recognisable starts at read, like a new token.
+	// The boxes start at read, whatever the client asked for — the rule the
+	// token form follows, for the reason it gives: a form that opens with more
+	// ticked makes granting more the path of least resistance. Clients ask for
+	// every scope the server advertises (Claude Code did, at the checkpoint),
+	// so pre-ticking the request would have pre-ticked delete for everyone.
+	// What was asked for is shown instead, and the operator ticks the rest.
 	var asked []string
 	for _, s := range req.Scopes {
-		if slices.Contains(scopeNames(), s) {
+		if slices.Contains(scopeNames(), s) && !slices.Contains(asked, s) {
 			asked = append(asked, s)
 		}
 	}
-	if len(asked) == 0 {
-		asked = []string{string(mcpserver.ScopeRead)}
-	}
-	h.renderConsent(w, r, client, req, accessChoice{Scopes: asked, AllForms: true}, "", http.StatusOK)
+	h.renderConsent(w, r, client, req, accessChoice{Scopes: []string{string(mcpserver.ScopeRead)}, AllForms: true},
+		strings.Join(asked, ", "), "", http.StatusOK)
 }
 
 // AuthorizeSubmit records the operator's decision.
@@ -226,7 +231,7 @@ func (h *OAuthHandler) AuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	choice := readAccessChoice(r)
 	scopes, formIDs, err := choice.validate(h.Store)
 	if err != nil {
-		h.renderConsent(w, r, client, req, choice, capitalise(err.Error())+".", http.StatusOK)
+		h.renderConsent(w, r, client, req, choice, "", capitalise(err.Error())+".", http.StatusOK)
 		return
 	}
 
@@ -285,7 +290,7 @@ func (h *OAuthHandler) redirectError(w http.ResponseWriter, r *http.Request, red
 	http.Redirect(w, r, oauth.RedirectURL(redirectURI, params), http.StatusFound)
 }
 
-func (h *OAuthHandler) renderConsent(w http.ResponseWriter, r *http.Request, client store.OAuthClient, req oauth.AuthorizeRequest, choice accessChoice, errMsg string, status int) {
+func (h *OAuthHandler) renderConsent(w http.ResponseWriter, r *http.Request, client store.OAuthClient, req oauth.AuthorizeRequest, choice accessChoice, askedFor, errMsg string, status int) {
 	user, _ := auth.UserFromContext(r.Context())
 	forms, err := h.Store.ListForms(store.AllForms())
 	if err != nil {
@@ -300,6 +305,7 @@ func (h *OAuthHandler) renderConsent(w http.ResponseWriter, r *http.Request, cli
 		AssetVer:      h.AssetVer,
 		Version:       h.Version,
 		Error:         errMsg,
+		AskedFor:      askedFor,
 		Username:      user.Username,
 		ClientName:    client.Name,
 		RedirectHost:  host,

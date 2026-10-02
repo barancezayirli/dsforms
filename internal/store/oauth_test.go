@@ -513,3 +513,31 @@ func TestCleanExpiredOAuthKeepsManualTokens(t *testing.T) {
 		t.Error("cleanup removed an expired manual token")
 	}
 }
+
+// Approving a client again replaces the connection it already had. Found at
+// the checkpoint: a reconnect left two grants for one client, the first one's
+// tokens still live and nothing in the admin to tell them apart.
+func TestIssueGrantReplacesTheClientsEarlierGrant(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	c := newClient(t, s)
+	u := admin(t, s)
+	other := newUser(t, s, "colleague")
+
+	first := issue(t, s, c, u.ID)
+	theirs := issue(t, s, c, other.ID)
+	second := issue(t, s, c, u.ID)
+
+	mustBeDead(t, s, first.Access, "the replaced grant's access token")
+	if _, err := s.RefreshGrant(first.Refresh, c.ID); err == nil {
+		t.Error("the replaced grant's refresh token still works")
+	}
+	mustBeLive(t, s, second.Access, "the new grant's access token")
+	// Per user: a colleague connecting the same client keeps their own grant.
+	mustBeLive(t, s, theirs.Access, "another user's grant for the same client")
+
+	grants, _ := s.ListOAuthGrants(u.ID)
+	if len(grants) != 1 || grants[0].ID != second.GrantID {
+		t.Errorf("grants = %+v, want only the newest", grants)
+	}
+}
