@@ -374,3 +374,42 @@ func TestMCPTokenTTLDays(t *testing.T) {
 		})
 	}
 }
+
+// TestMCPOAuth. OAuth is a mode of the MCP endpoint, so asking for it without
+// the endpoint is a misconfiguration to stop at boot: the operator believes
+// clients can sign in, and nothing is listening.
+func TestMCPOAuth(t *testing.T) {
+	tests := []struct {
+		name      string
+		enabled   string
+		oauth     string
+		wantPanic bool
+		want      bool
+	}{
+		{"off by default", "true", "", false, false},
+		{"on with MCP", "true", "true", false, true},
+		{"on without MCP refuses to start", "", "true", true, false},
+		{"off without MCP is fine", "", "false", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setAllRequired(t)
+			t.Setenv("BASE_URL", "https://forms.example.com")
+			t.Setenv("MCP_ENABLED", tt.enabled)
+			t.Setenv("MCP_OAUTH", tt.oauth)
+
+			if tt.wantPanic {
+				defer func() {
+					if r := recover(); r == nil {
+						t.Fatal("MCP_OAUTH without MCP_ENABLED started anyway")
+					}
+				}()
+				Load()
+				return
+			}
+			if got := Load().MCPOAuth; got != tt.want {
+				t.Errorf("MCPOAuth = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

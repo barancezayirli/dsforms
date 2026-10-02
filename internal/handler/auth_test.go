@@ -33,6 +33,7 @@ func setupAuth(t *testing.T) (*store.Store, *chi.Mux) {
 		`<!DOCTYPE html><html><body>` +
 			`{{if .LoginError}}<p>Invalid username or password</p>{{end}}` +
 			`<form method="POST" action="/admin/login">` +
+			`{{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}` +
 			`<input name="username"><input name="password" type="password">` +
 			`<button type="submit">Log in</button></form></body></html>`))
 
@@ -392,5 +393,95 @@ func TestLoginPageRendersTheIncompleteLogoutWarning(t *testing.T) {
 	if quiet := render(LoginData{}); strings.Contains(quiet, "could not be ended on the server") {
 		t.Error("the warning renders on an ordinary login, so it will be ignored " +
 			"by the time it matters")
+	}
+}
+
+// The OAuth authorize endpoint sends a signed-out operator through login and
+// needs them back afterwards, so login takes a next. It is an open redirect
+// waiting to happen, and these rows are the ways it happens: each is a value
+// urlsafe.RelativePath has refused before, for a bypass someone found.
+func TestLoginSubmitFollowsOnlyALocalNext(t *testing.T) {
+	t.Parallel()
+
+	const authorize = "/oauth/authorize?client_id=c&redirect_uri=https%3A%2F%2Fclient.example%2Fcb&state=s"
+	cases := []struct {
+		name string
+		next string
+		want string
+	}{
+		{"absent", "", "/admin/forms"},
+		{"the authorize request", authorize, authorize},
+		{"another admin page", "/admin/tokens", "/admin/tokens"},
+		{"absolute url", "https://evil.example/", "/admin/forms"},
+		{"protocol-relative", "//evil.example/", "/admin/forms"},
+		{"encoded backslashes", "/%5c%5cevil.example", "/admin/forms"},
+		{"backslash produced by path.Clean", `/../\evil.example`, "/admin/forms"},
+		{"javascript", "javascript:alert(1)", "/admin/forms"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, r := setupAuth(t)
+			form := url.Values{"username": {"admin"}, "password": {"admin"}, "next": {tc.next}}
+			req := httptest.NewRequest("POST", "/admin/login", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if loc := w.Header().Get("Location"); loc != tc.want {
+				t.Errorf("Location = %q, want %q", loc, tc.want)
+			}
+		})
+	}
+}
+
+// A mistyped password must not lose the authorization the operator was in the
+// middle of; it comes back on the error redirect, and only if it is local.
+func TestLoginSubmitKeepsNextAcrossAFailedAttempt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, next, want string
+	}{
+		{"local next survives", "/oauth/authorize?client_id=c", "/admin/login?error=1&next=%2Foauth%2Fauthorize%3Fclient_id%3Dc"},
+		{"hostile next is dropped", "//evil.example/", "/admin/login?error=1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, r := setupAuth(t)
+			form := url.Values{"username": {"admin"}, "password": {"wrong"}, "next": {tc.next}}
+			req := httptest.NewRequest("POST", "/admin/login", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if loc := w.Header().Get("Location"); loc != tc.want {
+				t.Errorf("Location = %q, want %q", loc, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoginPageCarriesOnlyALocalNext(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, next string
+		want       bool
+	}{
+		{"local", "/oauth/authorize?client_id=c", true},
+		{"hostile", "//evil.example/", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, r := setupAuth(t)
+			req := httptest.NewRequest("GET", "/admin/login?next="+url.QueryEscape(tc.next), nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			got := strings.Contains(w.Body.String(), `name="next"`)
+			if got != tc.want {
+				t.Errorf("next field rendered = %v, want %v; body: %s", got, tc.want, w.Body.String())
+			}
+		})
 	}
 }
