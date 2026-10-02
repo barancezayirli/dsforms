@@ -24,6 +24,11 @@ SMTP — it just has nowhere to send the notification.
 | `BACKUP_LOCAL_DIR` | No | — | Directory for CLI backup snapshots |
 | `BROADCAST_THROTTLE_MS` | No | `200` | Pause in ms between individual waitlist broadcast sends |
 | `BROADCAST_MAX_ATTEMPTS` | No | `3` | Delivery retries before marking a broadcast recipient failed |
+| `MCP_ENABLED` | No | `false` | Serve the MCP endpoint at `/mcp`. Refuses to start unless `BASE_URL` is `https://`. See [MCP](mcp.md). |
+| `MCP_ALLOW_INSECURE` | No | `false` | Allow `MCP_ENABLED` with a non-https `BASE_URL`, for localhost or a trusted private network. Warns on every boot. |
+| `MCP_OAUTH` | No | `false` | Let MCP clients sign in with OAuth and be approved on a consent page, alongside API tokens. Requires `MCP_ENABLED`. |
+| `MCP_TOKEN_TTL_DAYS` | No | `0` | Lifetime of API tokens created in the admin. `0` means they never expire. |
+| `MCP_INCLUDE_IPS` | No | `false` | Return submitters' IP addresses to MCP clients. |
 
 ## SMTP providers
 

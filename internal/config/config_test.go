@@ -3,6 +3,9 @@ package config
 import (
 	"github.com/barancezayirli/dsforms/internal/screen"
 
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -411,5 +414,33 @@ func TestMCPOAuth(t *testing.T) {
 				t.Errorf("MCPOAuth = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestEveryVariableIsDocumented. docs/configuration.md is the reference an
+// operator reads, and it fell behind: every MCP variable shipped without a row
+// there. This reads the names Load actually reads, from this package's source,
+// so a variable added later fails here until it is documented.
+func TestEveryVariableIsDocumented(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile("config.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := regexp.MustCompile(`(?:envOr\w*|os\.Getenv|requireEnv)\("([A-Z_]+)"`).FindAllStringSubmatch(string(src), -1)
+	// A floor, so a pattern that silently matches nothing cannot pass.
+	if len(read) < 15 {
+		t.Fatalf("found only %d variables in config.go; the scan is not seeing them", len(read))
+	}
+
+	doc, err := os.ReadFile("../../docs/configuration.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range read {
+		if !strings.Contains(string(doc), "| `"+m[1]+"` |") {
+			t.Errorf("%s is read by config.go but has no row in docs/configuration.md", m[1])
+		}
 	}
 }
