@@ -98,11 +98,65 @@ WWW-Authenticate: Bearer realm="dsforms", error="invalid_token"
 They are deliberately not distinguished from each other: telling them apart is
 a distinction only useful to someone guessing.
 
-dsforms serves **no** OAuth protected-resource metadata (RFC 9728), because it
-has no authorization server to point at — these are static tokens you mint.
-Advertising a discovery flow that goes nowhere would be worse than not
-advertising one, so a client that insists on completing OAuth discovery will
-not connect. Clients that accept a bearer token you configure will.
+With OAuth off (the default) the challenge points nowhere: there is no
+authorization server to send a client to, so a client that insists on OAuth
+discovery will not connect. Clients that take a bearer token you configure
+will. To let the others sign in instead, turn on OAuth, below.
+
+## Signing in with OAuth
+
+Some MCP clients cannot send a header you configure — hosted connectors in
+particular — and only connect by discovering where to sign in. For those,
+dsforms can act as its own OAuth 2.1 authorization server:
+
+```bash
+MCP_ENABLED=true
+MCP_OAUTH=true
+BASE_URL=https://forms.example.com
+```
+
+`MCP_OAUTH` requires `MCP_ENABLED`, and so the same `https` rule. It is
+**additive**: API tokens keep working exactly as before on the same `/mcp`
+endpoint, and you can use both at once.
+
+Give the client `https://forms.example.com/mcp` and no token. What happens:
+
+1. The client gets the `401`, which now carries
+   `resource_metadata="https://forms.example.com/.well-known/oauth-protected-resource/mcp"`,
+   and reads where to sign in.
+2. It registers itself (dynamic client registration, RFC 7591). Registering
+   grants nothing; a client nobody approves is deleted after a day.
+3. Your browser opens dsforms. Sign in if you are not, and you get a consent
+   page naming the client, the address it receives its sign-in result at, and
+   the same scope and form choices as the token form.
+4. **Only `read` is ticked to start**, whatever the client asked for — the page
+   tells you what it asked for, and you tick the rest deliberately. Clients
+   routinely ask for every scope a server offers.
+5. Allow, and the client receives a token that lasts an hour and refreshes
+   itself. An idle client must sign in again after 30 days.
+
+What you approve is bounded exactly like a hand-made token: the scopes and forms
+you ticked, the same rate limits and lockout, the same tools. The tokens a
+client holds are ordinary API tokens under the hood, so nothing downstream
+treats them differently.
+
+Approved clients are listed under **System → API tokens → Connected apps**,
+with what they can reach and when they were last used. **Disconnect** ends one's
+access at once, refresh included; it has to be approved again to come back.
+Approving the same client again replaces its earlier connection rather than
+adding a second one. Switching `MCP_OAUTH` off stops new sign-ins, but leaves
+existing connections listed so you can still disconnect them.
+
+A few things it deliberately does not do:
+
+- **No client secrets.** Every client is public and proves itself with PKCE
+  (S256 only); a client that asks for a secret is registered without one.
+- **Exact redirect addresses.** A client may only receive results at an
+  `https` address it registered, or a loopback one for desktop clients. A
+  request naming anything else gets an error page and is never redirected.
+- **One use per code.** A sign-in code works once; presenting it again revokes
+  whatever it issued. Presenting a rotated-out refresh token revokes the whole
+  connection, since two parties evidently hold it.
 
 ## Scopes
 

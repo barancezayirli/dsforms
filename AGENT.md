@@ -129,6 +129,8 @@ main.go        config, store, handler construction, routes, CLI — no logic
         ├── mcpserver                   the MCP surface; owns the token scopes
         ├── redact                      what a stranger wrote that is not language
         ├── urlsafe                     which URLs we hand out or call
+        ├── oauth                       the OAuth protocol rules: PKCE, redirects,
+        │                               registration, consent signature, metadata
         └── ratelimit · flash · safe
 ```
 
@@ -141,11 +143,11 @@ Nothing else crosses that edge, and `mcpserver` imports no handler.
 
 Verified with `go list -f '{{join .Imports "\n"}}'`, not from memory:
 
-- `handler` → auth, backup, flash, mcpserver, ratelimit, redact, safe, screen, store, urlsafe
+- `handler` → auth, backup, flash, mcpserver, oauth, ratelimit, redact, safe, screen, store, urlsafe
 - `store` → screen · `config` → screen · `broadcaster` → safe, store
 - `mcpserver` → redact, screen, store
 - `auth`, `mail`, `webhook` → store · `ratelimit` → safe
-- `backup`, `flash`, `redact`, `safe` and `urlsafe` import nothing from `internal/`
+- `backup`, `flash`, `oauth`, `redact`, `safe` and `urlsafe` import nothing from `internal/`
 
 `backup` used to import `store`, for one parameter: `Import(s *store.Store, …)`,
 which called two methods on it. Naming those two in an interface `backup`
@@ -402,6 +404,11 @@ flash cookie — and render with `Render`.
 
 **Mutations are POST-only**, inside the `auth.RequireAuth` group. There is no
 CSRF token; the session cookie is `SameSite=Lax` and that is the whole defence.
+The one exception is the OAuth consent form, which hands a credential to a third
+party: it carries a signature over the request it approves and the operator it
+was shown to (`oauth.ConsentSigner`), so a forged or replayed post approves
+nothing. A new form that grants access to something outside dsforms gets the
+same treatment.
 
 **A permissive rule matches a canonical field; a restrictive rule may scan
 everything.** Submitters choose their own field names. An allow rule that
