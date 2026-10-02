@@ -44,10 +44,13 @@ filter-rule paths, backup export and restore, and the CLI.
 
 One deliberate design decision worth knowing before you report it: `ExtractIP`
 trusts `X-Forwarded-For` unconditionally, because dsforms is meant to run behind
-a proxy that sets it. That makes IP-based *allow* rules only as trustworthy as
-that proxy, and it is recorded as an accepted risk in `SESSION_PROGRESS.md`
-rather than an oversight. If you can show it causing harm in a normal
-deployment, that is a real report.
+a proxy that sets it. This is an accepted risk, not an oversight: an IP or CIDR
+*allow* rule skips the block list and all scoring, so it is only as trustworthy
+as that proxy — an IP allowlist is safe only behind a proxy you control. Email
+and domain allow rules are not affected; they match the sender field, which the
+submit handler validates. Changing how the header is trusted needs a
+proxy-configuration decision of its own. If you can show it causing harm in a
+normal deployment, that is a real report.
 
 ## Supported versions
 

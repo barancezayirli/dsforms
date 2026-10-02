@@ -26,43 +26,93 @@ Default login is `admin` / `admin`; the admin warns until it is changed.
 
 ## 2. Development workflow
 
-Follow this for any change beyond a typo. Steps 3 and 7 are the ones that get
-skipped under time pressure, and the ones that cost most when skipped.
+Every change beyond a typo is one **task**: one GitHub issue, one branch, one
+plan, one PR. The steps are mandatory and in order; none is skipped or
+reordered. Steps 4 and 9 are the ones skipped under time pressure, and the ones
+that cost most when skipped.
 
-**1 — Branch.** From up-to-date `main`, using the prefixes in §9. Never commit to
-`main` directly.
+Tasks are issues in this repo, on the
+[dsforms project board](https://github.com/users/barancezayirli/projects/3)
+(Todo → In Progress → In Review → Done). The project is open source, so issues
+are public: write them for a reader who has never seen the conversation that
+produced them.
 
-**2 — Orient.** Read this file and `SESSION_PROGRESS.md`; check
-`docs/design/specs/` for a spec covering the area. Do not re-implement something
-already merged.
+### Sizing a task: don't split without a reason
 
-**3 — Plan, and get it approved.** For anything feature-sized, enter plan mode,
-research the real code before proposing, and get explicit approval before
-editing. **A design document or a handoff is not approval to start implementing**
-— it settles *what*, not *how*. Silence is not approval.
+Size the task yourself; don't ask whether to split as a routine question. A
+feature that ships together is one task, even when it is large: this repo
+releases on merge, so splitting one feature across PRs ships the first half to
+users on its own.
 
-**4 — Implement test-first.** Per §7. Work in dependency order: leaf packages,
-then `store`, then `handler`, with `main.go` wiring last.
+Propose a split only when the task would carry several **independent** pieces
+of work, each releasable alone and too much to review well at once, and say
+why. Work that shares files, tables or a release stays one task.
 
-**5 — Verify for real.** `go test -race ./... && go vet ./... && gofmt -l .`,
+Steps inside a task are a **checklist in the issue**, not separate issues. A
+checkpoint that must pass before the rest is built is a checklist item marked
+as a checkpoint.
+
+### Writing the issue
+
+```markdown
+## Goal
+Why this is needed, in one or two sentences.
+
+## What it does
+The behaviour in plain language: what changes for an operator or a client.
+No file names, no implementation plan.
+
+## Done when
+- [ ] Observable outcomes, in order, checkpoints marked
+```
+
+No commit hashes, test counts or estimates. **Show the issue text and get a yes
+before creating it**: creating an issue publishes it.
+
+### The steps
+
+**1 — Issue.** Draft it, get it approved, create it. The board picks it up.
+
+**2 — Branch.** From up-to-date `main`, using the prefixes in §9. Never commit to
+`main` directly. Move the card to *In Progress*.
+
+**3 — Orient.** Read this file and check `docs/design/specs/` for a spec covering
+the area. Do not re-implement something already merged.
+
+**4 — Plan, and get it approved.** Enter plan mode, research the real code
+before proposing, and get explicit approval before editing. **The issue — or a
+design document, or a handoff — is not approval to start implementing**: it
+settles *what*, not *how*. Silence is not approval.
+
+**5 — Implement test-first.** Per §7. Work in dependency order: leaf packages,
+then `store`, then `handler`, with `main.go` wiring last. Tick the issue's
+checklist as items land; stop at a checkpoint until it passes.
+
+**6 — Verify for real.** `go test -race ./... && go vet ./... && gofmt -l .`,
 then *run the thing*. Bugs this suite has been green through: a CSS comment that
 silently swallowed the webfont, a timestamp format SQLite could not parse, a
 drawer needing five presses of Back to close, and a login page injected into an
 overlay. Thirty seconds in a browser caught all four.
 
-**6 — Review your own diff** top to bottom, as a stranger, before asking anyone
+**7 — Review your own diff** top to bottom, as a stranger, before asking anyone
 else to.
 
-**7 — Run the PR review.** `/pr-review-toolkit:review-pr` on the branch. **Do not
+**8 — Open the PR** with `Closes #<issue>` in the body. Its title sets the
+release bump. The card moves to *In Review*.
+
+**9 — Run the PR review.** `/pr-review-toolkit:review-pr` on the branch. **Do not
 skip this, including for small changes.** On this repo it once returned ~50
 findings on a branch whose tests were entirely green — one of them a full spam
-bypass. Fix what it finds, or record the finding in `SESSION_PROGRESS.md` with a
-reason for deferring. Never silently drop one.
+bypass. **Fix every finding.** Nothing is deferred on your own judgement: a
+finding you believe is wrong or out of scope goes to the maintainer with your
+reasoning, and the maintainer decides whether it becomes a task, gets fixed, or
+is dropped. An unfixed security finding never goes into a public issue.
 
-**8 — Update `SESSION_PROGRESS.md`:** what landed, what was deferred and why,
-what is still open.
+**10 — Comment on the issue:** bullet points (decisions made, what was
+implemented) and one short paragraph (why, and the effect).
 
-**9 — Propose the merge; do not self-merge.**
+**11 — Propose the merge; do not self-merge.** Merging closes the issue, moves
+the card to *Done*, and releases.
 
 ---
 
@@ -389,7 +439,7 @@ rate-limiting and logging either way.
 
 The consequence to hold onto: an IP or CIDR **allow** rule turns that trust into
 a scoring bypass, since one header then skips the block list and all scoring.
-That is a recorded accepted risk in `SESSION_PROGRESS.md`, not an oversight —
+That is a recorded accepted risk (see `SECURITY.md`), not an oversight —
 but do not add a *new* decision that reads this header, and prefer email or
 domain allow rules, which match the validated sender field instead.
 
