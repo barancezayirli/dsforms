@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -204,9 +205,26 @@ func seedWithToken(t *testing.T, s *store.Store) string {
 	if _, _, err := s.CreateAPIToken(u.ID, "laptop", []string{"read"}, nil, 0); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
+	// One connected OAuth client, so every OAuth table holds a row: the client,
+	// the spent code, the grant and its refresh token.
+	c, err := s.CreateOAuthClient("Claude", []string{"https://claude.example/cb"}, []string{"authorization_code"})
+	if err != nil {
+		t.Fatalf("CreateOAuthClient: %v", err)
+	}
+	raw, err := s.CreateAuthCode(store.AuthCode{ClientID: c.ID, UserID: u.ID, RedirectURI: c.RedirectURIs[0], CodeChallenge: "x"})
+	if err != nil {
+		t.Fatalf("CreateAuthCode: %v", err)
+	}
+	code, err := s.RedeemAuthCode(raw)
+	if err != nil {
+		t.Fatalf("RedeemAuthCode: %v", err)
+	}
+	if _, err := s.IssueGrant(code); err != nil {
+		t.Fatalf("IssueGrant: %v", err)
+	}
 
 	var hash string
-	if err := s.DB().QueryRow("SELECT token_hash FROM api_tokens LIMIT 1").Scan(&hash); err != nil {
+	if err := s.DB().QueryRow("SELECT token_hash FROM api_tokens WHERE grant_id = '' LIMIT 1").Scan(&hash); err != nil {
 		t.Fatalf("reading the stored hash: %v", err)
 	}
 	if len(hash) != 64 {
@@ -406,6 +424,60 @@ func TestEveryCredentialTableIsEmptyInASnapshot(t *testing.T) {
 		if n != 0 {
 			t.Errorf("snapshot holds %d %s rows, want none", n, table)
 		}
+	}
+}
+
+// dataTables are the tables a backup exists to keep. Together with
+// credentialTables they must name every table in the schema.
+var dataTables = []string{
+	"users", "forms", "submissions", "spam_signals", "filter_rules",
+	"waitlists", "waitlist_entries", "broadcasts", "deliveries", "submissions_fts",
+}
+
+// TestEverySchemaTableIsClassified closes the gap the test above admits to: a
+// table added to the schema and to neither list fails here, so whoever adds a
+// table has to decide whether a backup may carry it. Every credential table in
+// this file so far was added after the list it belonged in.
+func TestEverySchemaTableIsClassified(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+
+	rows, err := s.DB().Query("SELECT name FROM sqlite_master WHERE type = 'table'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var seen int
+	present := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		// SQLite's own tables and the full-text index's shadow tables belong to
+		// their owners, not to the schema.
+		if strings.HasPrefix(name, "sqlite_") || (strings.HasPrefix(name, "submissions_fts_") && name != "submissions_fts") {
+			continue
+		}
+		seen++
+		present[name] = true
+		if !slices.Contains(credentialTables, name) && !slices.Contains(dataTables, name) {
+			t.Errorf("table %q is in neither credentialTables nor dataTables: decide whether a backup may carry it", name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	// And the other way: a listed name that is not a table is a typo or a
+	// rename, and would leave the real table unclassified behind it.
+	for _, name := range append(slices.Clone(credentialTables), dataTables...) {
+		if !present[name] {
+			t.Errorf("%q is listed but is not a table in the schema", name)
+		}
+	}
+	// A floor, so a query that silently matches nothing cannot pass.
+	if seen < len(credentialTables)+3 {
+		t.Fatalf("saw only %d tables; the scan is not seeing the schema", seen)
 	}
 }
 
