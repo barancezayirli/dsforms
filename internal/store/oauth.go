@@ -123,6 +123,19 @@ func (s *Store) GetOAuthClient(id string) (OAuthClient, error) {
 	return c, nil
 }
 
+// CountPendingOAuthClients counts registered clients nobody has approved yet.
+// Registration is open, so this is what bounds it.
+func (s *Store) CountPendingOAuthClients() (int, error) {
+	var n int
+	err := s.conn().QueryRow(
+		"SELECT COUNT(*) FROM oauth_clients WHERE id NOT IN (SELECT client_id FROM oauth_grants)",
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count pending oauth clients: %w", err)
+	}
+	return n, nil
+}
+
 // CreateAuthCode records an approved authorization request and returns the
 // code, which is the only time it exists outside the client.
 func (s *Store) CreateAuthCode(c AuthCode) (string, error) {

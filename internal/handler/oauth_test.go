@@ -652,3 +652,45 @@ func TestTokenRefreshForAClientThatDidNotRegisterForIt(t *testing.T) {
 		t.Error("a refresh token was issued to a client that did not register for one")
 	}
 }
+
+// Registration is open to anyone, and the per-IP rate limit trusts
+// X-Forwarded-For, so it is not a bound on its own. A cap on clients nobody has
+// approved is: past it, registration is refused until approvals or the daily
+// prune bring the count down. An approved client never counts.
+func TestRegistrationIsRefusedPastThePendingCap(t *testing.T) {
+	t.Parallel()
+	e := setupOAuth(t)
+	for i := 0; i < MaxPendingOAuthClients; i++ {
+		if _, err := e.s.CreateOAuthClient("filler", []string{oauthRedirect}, []string{"authorization_code"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	w := e.do(t, httptest.NewRequest("POST", oauth.PathRegister, strings.NewReader(`{"redirect_uris":["`+oauthRedirect+`"]}`)))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Code)
+	}
+	var body map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["error"] != oauth.CodeTemporarilyUnavailable {
+		t.Errorf("error = %q", body["error"])
+	}
+}
+
+// RFC 6749 §5.2: a client that authenticated with the Authorization header and
+// failed gets a 401 with a challenge naming the scheme it used.
+func TestTokenUnknownClientChallengesBasicAuth(t *testing.T) {
+	t.Parallel()
+	e := setupOAuth(t)
+
+	req := httptest.NewRequest("POST", oauth.PathToken, strings.NewReader("grant_type=authorization_code&code=x"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth("no-such-client", "")
+	w := e.do(t, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if got := w.Header().Get("WWW-Authenticate"); !strings.HasPrefix(got, "Basic") {
+		t.Errorf("WWW-Authenticate = %q, want a Basic challenge", got)
+	}
+}

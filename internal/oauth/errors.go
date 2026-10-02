@@ -18,6 +18,7 @@ const (
 	CodeAccessDenied            = "access_denied"
 	CodeUnsupportedResponseType = "unsupported_response_type"
 	CodeServerError             = "server_error"
+	CodeTemporarilyUnavailable  = "temporarily_unavailable"
 	CodeInvalidTarget           = "invalid_target"
 	CodeInvalidRedirectURI      = "invalid_redirect_uri"
 	CodeInvalidClientMetadata   = "invalid_client_metadata"

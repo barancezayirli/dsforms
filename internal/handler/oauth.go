@@ -24,6 +24,7 @@ type OAuthStore interface {
 	RedeemAuthCode(raw string) (store.AuthCode, error)
 	IssueGrant(code store.AuthCode) (store.TokenPair, error)
 	RefreshGrant(raw, clientID string) (store.TokenPair, error)
+	CountPendingOAuthClients() (int, error)
 
 	// ListForms is for the consent page's form picker, as on the token form.
 	ListForms(forms store.FormScope) ([]store.FormSummary, error)
@@ -100,10 +101,32 @@ type registrationResponse struct {
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 }
 
+// MaxPendingOAuthClients caps registered clients nobody has approved yet.
+// Registration is open to anyone and the per-IP rate limit trusts
+// X-Forwarded-For, so on its own it bounds nothing; this does. A real
+// deployment approves a handful of clients, ever.
+const MaxPendingOAuthClients = 500
+
 // Register is open dynamic client registration. Registering grants nothing: a
 // client can do nothing until an operator approves it on the consent page, and
 // one nobody approves is pruned after a day.
 func (h *OAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	pending, err := h.Store.CountPendingOAuthClients()
+	if err != nil {
+		log.Printf("oauth: counting pending clients: %v", err)
+		oauth.WriteError(w, &oauth.Error{Code: oauth.CodeServerError, Status: http.StatusInternalServerError})
+		return
+	}
+	if pending >= MaxPendingOAuthClients {
+		log.Printf("oauth: refusing a registration: %d clients are waiting for approval", pending)
+		oauth.WriteError(w, &oauth.Error{
+			Code:        oauth.CodeTemporarilyUnavailable,
+			Description: "too many clients are waiting for approval; try again later",
+			Status:      http.StatusServiceUnavailable,
+		})
+		return
+	}
+
 	reg, err := oauth.ParseRegistration(r.Body)
 	if err != nil {
 		var oe *oauth.Error
@@ -355,12 +378,18 @@ func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clientID := r.PostForm.Get("client_id")
+	_, _, usedBasic := r.BasicAuth()
 	if clientID == "" {
 		// Public clients, but some send their id the client_secret_basic way.
 		clientID, _, _ = r.BasicAuth()
 	}
 	client, err := h.Store.GetOAuthClient(clientID)
 	if err != nil {
+		// RFC 6749 §5.2: a client that authenticated with the Authorization
+		// header is told which scheme failed.
+		if usedBasic {
+			w.Header().Set("WWW-Authenticate", `Basic realm="dsforms"`)
+		}
 		oauth.WriteError(w, &oauth.Error{Code: oauth.CodeInvalidClient, Status: http.StatusUnauthorized})
 		return
 	}

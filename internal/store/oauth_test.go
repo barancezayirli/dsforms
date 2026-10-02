@@ -541,3 +541,21 @@ func TestIssueGrantReplacesTheClientsEarlierGrant(t *testing.T) {
 		t.Errorf("grants = %+v, want only the newest", grants)
 	}
 }
+
+func TestCountPendingOAuthClients(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	u := admin(t, s)
+
+	newClient(t, s)
+	newClient(t, s)
+	issue(t, s, newClient(t, s), u.ID) // approved, so no longer pending
+
+	n, err := s.CountPendingOAuthClients()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("pending = %d, want 2", n)
+	}
+}
