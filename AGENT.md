@@ -32,10 +32,13 @@ reordered. Steps 4 and 9 are the ones skipped under time pressure, and the ones
 that cost most when skipped.
 
 Tasks are issues in this repo, on the
-[dsforms project board](https://github.com/users/barancezayirli/projects/3)
-(Todo → In Progress → In Review → Done). The project is open source, so issues
-are public: write them for a reader who has never seen the conversation that
-produced them.
+[DSForms Roadmap board](https://github.com/users/barancezayirli/projects/3):
+**Backlog → Ready → In progress → In review → Done**. A new issue lands in
+*Backlog*; the maintainer moves it to *Ready* to mean "do this next", and only a
+*Ready* task is picked up. Priority (P0–P2) is set when the issue is created;
+Size, Estimate and the dates are the maintainer's to fill or leave. The project
+is open source, so issues are public: write them for a reader who has never
+seen the conversation that produced them.
 
 ### Sizing a task: don't split without a reason
 
@@ -61,10 +64,10 @@ before creating it**: creating an issue publishes it.
 
 ### The steps
 
-**1 — Issue.** Draft it, get it approved, create it. The board picks it up.
+**1 — Issue.** Draft it, get it approved, create it. It lands in *Backlog*.
 
 **2 — Branch.** From up-to-date `main`, using the prefixes in §9. Never commit to
-`main` directly. Move the card to *In Progress*.
+`main` directly. Move the card from *Ready* to *In progress*.
 
 **3 — Orient.** Read this file and check `docs/design/specs/` for a spec covering
 the area. Do not re-implement something already merged.
@@ -88,7 +91,7 @@ overlay. Thirty seconds in a browser caught all four.
 else to.
 
 **8 — Open the PR** with `Closes #<issue>` in the body. Its title sets the
-release bump. The card moves to *In Review*.
+release bump. Move the card to *In review*.
 
 **9 — Run the PR review.** `/pr-review-toolkit:review-pr` on the branch. **Do not
 skip this, including for small changes.** On this repo it once returned ~50

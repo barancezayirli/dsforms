@@ -48,19 +48,28 @@ The observable result that means the task is finished.
 
 Label: `enhancement` for new behaviour, `bug` for a defect, `documentation` for docs only.
 
+Priority on the board: `P0` (urgent), `P1` (next up), `P2` (later). Default `P1`. Leave Size,
+Estimate and the dates empty; they are the maintainer's.
+
 ## Procedure
 
 1. Check the plan is not already a task:
    `gh issue list -R barancezayirli/dsforms --state open --search "<key words>"`.
    If it is, propose an update to that issue instead.
-2. Show the draft (title, label, body) in chat and **wait for a yes**. Creating an issue publishes it.
+2. Show the draft (title, label, priority, body) in chat and **wait for a yes**. Creating an issue
+   publishes it.
 3. Write the body to a file in the scratchpad, then create exactly one issue:
    `gh issue create -R barancezayirli/dsforms --title "<title>" --label <label> --body-file <file>`.
    No loops, no batch creation.
-4. Add it to the board (skip if the board's auto-add already did):
-   `gh project item-add 3 --owner barancezayirli --url <issue-url>`.
-5. Verify on GitHub (`gh issue view <n>`) before reporting. A command that was interrupted may
-   still have run.
-6. Report the issue number and URL (`#<n>`).
+4. Get its board item id. `item-add` is safe when auto-add already added it; it returns the same item:
+   `gh project item-add 3 --owner barancezayirli --url <issue-url> --format json --jq .id`.
+5. Set Priority. Resolve ids by name each time, never from cached ids:
+   - project id: `gh project view 3 --owner barancezayirli --format json --jq .id`
+   - field and option ids: `gh project field-list 3 --owner barancezayirli --format json --jq '.fields[] | select(.name=="Priority")'`
+   - `gh project item-edit --id <item-id> --project-id <project-id> --field-id <field-id> --single-select-option-id <option-id>`
+6. Verify on GitHub before reporting: `gh issue view <n>`, and `gh project item-list 3 --owner barancezayirli --format json`
+   shows the issue in *Backlog* with its Priority. A command that was interrupted may still have run.
+7. Report the issue number and URL (`#<n>`). The task stays in *Backlog* until the maintainer moves
+   it to *Ready*.
 
 The workflow that picks the task up afterwards is in `AGENT.md` §2.
