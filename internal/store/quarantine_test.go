@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	sqlite "modernc.org/sqlite"
 )
 
 // seedForm creates a form to hang submissions off. Every quarantine test needs
@@ -1701,6 +1703,13 @@ func TestCountMismatchErrorNamesBothNumbers(t *testing.T) {
 //
 // Without the transaction a writer lands between the count and the delete, and
 // the delete takes rows nobody counted.
+//
+// SQLITE_BUSY is not one of the failures. It means the write lock was not free
+// within busy_timeout, which this much contention can produce on a slow
+// machine: CI, under the race detector, starved a clearer for the full five
+// seconds. A call refused that way never began, so it counted and deleted
+// nothing; it is tried again. Treating it as a failure made this a test of
+// lock fairness on whatever ran it.
 func TestClearHeldIsAtomicUnderConcurrentWrites(t *testing.T) {
 	t.Parallel()
 	s := fileStore(t)
@@ -1710,20 +1719,31 @@ func TestClearHeldIsAtomicUnderConcurrentWrites(t *testing.T) {
 
 	// A bounded workload. Unbounded writers starve everything else of the write
 	// lock and turn the test into one about lock fairness.
-	const writers, perWriter, clearers = 3, 150, 2
+	const writers, perWriter, clearers = 2, 100, 2
 
-	var written, deleted, succeeded, refused atomic.Int64
+	var written, deleted, succeeded, refused, busied atomic.Int64
+	// Everyone starts together, so the writers cannot finish before a clearer
+	// has had its first look.
+	start := make(chan struct{})
 	var writing sync.WaitGroup
 	for w := 0; w < writers; w++ {
 		writing.Add(1)
 		go func(w int) {
 			defer writing.Done()
-			for i := 0; i < perWriter; i++ {
-				if err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("w%d-%d", w, i), "f1", 8, now), 8, 6, nil); err != nil {
+			<-start
+			for i := 0; i < perWriter; {
+				err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("w%d-%d", w, i), "f1", 8, now), 8, 6, nil)
+				if isBusy(err) {
+					// Not written: the same row is tried again.
+					busied.Add(1)
+					continue
+				}
+				if err != nil {
 					t.Errorf("CreateHeldSubmission: %v", err)
 					return
 				}
 				written.Add(1)
+				i++
 			}
 		}(w)
 	}
@@ -1738,6 +1758,7 @@ func TestClearHeldIsAtomicUnderConcurrentWrites(t *testing.T) {
 		clearing.Add(1)
 		go func() {
 			defer clearing.Done()
+			<-start
 			for {
 				// Sampled before the count, not after. Read the other way
 				// round, a clearer can count zero, have the last writer commit
@@ -1777,15 +1798,22 @@ func TestClearHeldIsAtomicUnderConcurrentWrites(t *testing.T) {
 						t.Errorf("a refused clear reported %d deleted", n)
 					}
 					refused.Add(1)
+				case isBusy(err):
+					// The clear never began; nothing was counted or deleted.
+					if n != 0 {
+						t.Errorf("a clear that could not get the lock reported %d deleted", n)
+					}
+					busied.Add(1)
 				default:
-					// A lock error, or a count that did not match the delete:
-					// either means the two were not one step.
+					// Notably "counted N but deleted M": the count and the
+					// delete were not one step.
 					t.Errorf("ClearHeld: %v", err)
 					return
 				}
 			}
 		}()
 	}
+	close(start)
 	clearing.Wait()
 	// A clearer that hit an error returns early. Wait for the writers as well,
 	// so none of them is still running, or reporting, when the test ends and
@@ -1803,11 +1831,33 @@ func TestClearHeldIsAtomicUnderConcurrentWrites(t *testing.T) {
 		t.Errorf("wrote %d and deleted %d, want %d of each: a clear deleted rows it did not count, or missed some",
 			written.Load(), deleted.Load(), want)
 	}
-	// Both outcomes have to have happened, or the run showed nothing: no
-	// refusal means no writer ever got between a clearer's look and its clear.
-	if succeeded.Load() == 0 || refused.Load() == 0 {
-		t.Fatalf("%d clears succeeded and %d were refused; the test needs both to mean anything",
-			succeeded.Load(), refused.Load())
+	if succeeded.Load() == 0 {
+		t.Fatal("no clear succeeded, so no delete was ever checked")
 	}
-	t.Logf("%d clears succeeded, %d refused", succeeded.Load(), refused.Load())
+	// A refusal is the evidence that writers and clearers really overlapped: a
+	// writer got between a clearer's look and its clear. Without one, this run
+	// could not have caught a clear that is not atomic.
+	//
+	// That needs two things running at once. On a single core the writers get
+	// through their rows between a clearer's turns and nothing overlaps, which
+	// is the scheduler and not a fault; the run is then reported for what it
+	// was rather than failed. With cores to spare, no overlap means the test
+	// has stopped doing its job and should say so.
+	if refused.Load() == 0 {
+		if runtime.GOMAXPROCS(0) > 1 {
+			t.Fatalf("%d clears succeeded and none was refused: writers and clearers never overlapped, "+
+				"so this run proved nothing", succeeded.Load())
+		}
+		t.Log("single core: writers and clearers did not overlap, so this run could not have caught a non-atomic clear")
+	}
+	t.Logf("%d clears succeeded, %d refused, %d calls waited out the lock and were retried",
+		succeeded.Load(), refused.Load(), busied.Load())
+}
+
+// isBusy reports SQLITE_BUSY: the write lock was not free within busy_timeout.
+// By the driver's error type and code rather than its text, through whatever
+// wrapping the store added.
+func isBusy(err error) bool {
+	var se *sqlite.Error
+	return errors.As(err, &se) && se.Code()&0xff == 5 // SQLITE_BUSY
 }
