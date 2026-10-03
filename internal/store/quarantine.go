@@ -67,7 +67,16 @@ func (s *Store) classifyMissingHeld(id string) error {
 
 // heldColumns is the shared select list for held submissions. Kept in one place
 // so the column order can never drift between the list and single-row scans.
-const heldColumns = `id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, notified`
+const heldColumns = `id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, notified, held_at`
+
+// heldSinceExpr is when a submission's time in quarantine started, in SQL:
+// held_at, or created_at where none was recorded. Submission.HeldSince is the
+// same rule in Go.
+//
+// The fallback is not optional. An empty held_at sorts before every timestamp,
+// so a bare "held_at < ?" would select such a row for any cutoff at all and the
+// sweep would delete it at once.
+const heldSinceExpr = `(CASE WHEN held_at = '' THEN created_at ELSE held_at END)`
 
 // heldColumnsFor is heldColumns qualified with a table alias, for the queries
 // that join forms and would otherwise have an ambiguous "id".
@@ -117,11 +126,16 @@ func scanHeldExtra(sc rowScanner, extra ...any) (Submission, error) {
 		heldInt  int
 		notified int
 	)
+	// held_at is scanned into any for the reason scanAPIToken gives: the driver
+	// hands back a time.Time for a real value and a plain string for the ''
+	// that means "not held".
+	var heldAt any
 	dest := []any{&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt,
-		&heldInt, &sub.SpamScore, &sub.HeldThreshold, &notified}
+		&heldInt, &sub.SpamScore, &sub.HeldThreshold, &notified, &heldAt}
 	if err := sc.Scan(append(dest, extra...)...); err != nil {
 		return Submission{}, err
 	}
+	sub.HeldAt = sqliteTimeValue(heldAt)
 	sub.RawData = rawData
 	sub.Read = readInt == 1
 	sub.IsHeld = heldInt == 1
@@ -223,12 +237,40 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 
 // HeldSubmissions returns a page of the quarantine queue, newest first.
 func (s *Store) HeldSubmissions(forms FormScope, limit, offset int) ([]Submission, error) {
-	scopeClause, scopeArgs := forms.clause("form_id")
-	args := append(scopeArgs, limit, offset)
+	return s.HeldSubmissionsWhere(HeldFilter{Forms: forms}, limit, offset)
+}
+
+// HeldSubmissionsWhere lists the held submissions f selects, most recently
+// held first, so the last row is the one closest to the retention sweep.
+//
+// It takes the same filter ClearHeld does, built by the same where(): what is
+// listed here is exactly what a clear with that filter would delete.
+func (s *Store) HeldSubmissionsWhere(f HeldFilter, limit, offset int) ([]Submission, error) {
+	where, args := f.where()
+	args = append(args, limit, offset)
 	return s.querySubmissions("held submissions",
-		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1"+scopeClause+
-			" ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+		"SELECT "+heldColumns+" FROM submissions"+where+
+			" ORDER BY "+heldSinceExpr+" DESC, id LIMIT ? OFFSET ?",
 		args...)
+}
+
+// CountHeld counts the held submissions f selects: the number ClearHeld must
+// be given to delete them.
+func (s *Store) CountHeld(f HeldFilter) (int, error) {
+	n, err := countHeldWhere(s.conn(), f)
+	if err != nil {
+		return 0, fmt.Errorf("count held: %w", err)
+	}
+	return n, nil
+}
+
+func countHeldWhere(q execQuerier, f HeldFilter) (int, error) {
+	where, args := f.where()
+	var n int
+	if err := q.QueryRow("SELECT COUNT(*) FROM submissions"+where, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // GetHeldSubmission returns one held submission by id.
@@ -480,26 +522,20 @@ func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 type HeldFilter struct {
 	Forms FormScope
 	// HeldBefore, when set, keeps only spam that entered quarantine strictly
-	// before it. Age is counted from held_at — when the message was held, on
-	// arrival or by someone marking it as spam — and not from when it was
-	// submitted. That is the one definition of a held message's age: the
-	// retention sweep and the MCP clear both read it through this field, so
-	// they cannot come to disagree about the same message.
+	// before it, by heldSinceExpr: when the message was held, on arrival or by
+	// someone marking it as spam, and not when it was submitted.
 	HeldBefore time.Time
 }
 
-// where is the one place a held-delete's WHERE clause is built, so the admin's
-// empty-quarantine, the retention sweep and the MCP clear cannot drift apart
-// on what "held" means.
+// where is the one place a set-based held query's WHERE clause is built, so the
+// admin's empty-quarantine, the retention sweep, the MCP clear and the listing
+// a client reads before clearing cannot drift apart on what "held" or "older
+// than" means. (DeleteHeld, which deletes by id, builds its own.)
 func (f HeldFilter) where() (string, []any) {
 	clause, args := f.Forms.clause("form_id")
 	clause = " WHERE is_held = 1" + clause
 	if !f.HeldBefore.IsZero() {
-		// held_at, with created_at standing in when none was recorded. The
-		// fallback is not optional: an empty held_at sorts before every
-		// timestamp, so a bare "held_at < ?" would select such a row for any
-		// cutoff at all and the sweep would delete it at once.
-		clause += " AND (CASE WHEN held_at = '' THEN created_at ELSE held_at END) < ?"
+		clause += " AND " + heldSinceExpr + " < ?"
 		args = append(args, sqliteTimestamp(f.HeldBefore))
 	}
 	return clause, args
@@ -533,30 +569,38 @@ func (e *CountMismatchError) Error() string {
 // exactly expected of them, and reports how many went.
 //
 // The count and the delete share one transaction, which is the point of the
-// guard: spam held after the caller looked cannot be deleted unseen, because
-// the count it brings no longer matches. Quarantine can hold false positives;
-// a caller clearing it should delete what it saw and nothing newer.
+// guard: if spam was held, restored or deleted after the caller counted, the
+// number it brings no longer matches and nothing goes. It is a check on the
+// count, not on identity — one restore and one arrival in between leave the
+// number unchanged — so it narrows the window; it does not prove the caller
+// saw every row. Quarantine can hold false positives, which is why a caller
+// should list with the same filter before clearing.
 func (s *Store) ClearHeld(f HeldFilter, expected int) (int, error) {
 	tx, err := s.conn().Begin()
 	if err != nil {
-		return 0, fmt.Errorf("clear held: %w", err)
+		return 0, fmt.Errorf("clear held: begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck // no-op once Commit succeeds
 
-	where, args := f.where()
-	var actual int
-	if err := tx.QueryRow("SELECT COUNT(*) FROM submissions"+where, args...).Scan(&actual); err != nil {
-		return 0, fmt.Errorf("clear held: %w", err)
+	actual, err := countHeldWhere(tx, f)
+	if err != nil {
+		return 0, fmt.Errorf("clear held: count: %w", err)
 	}
 	if actual != expected {
 		return 0, &CountMismatchError{Expected: expected, Actual: actual}
 	}
 	n, err := deleteHeldWhere(tx, f)
 	if err != nil {
-		return 0, fmt.Errorf("clear held: %w", err)
+		return 0, fmt.Errorf("clear held: delete: %w", err)
+	}
+	// The transaction holds the write lock from BEGIN, so these cannot differ.
+	// That rests on one DSN flag (_txlock=immediate); if it is ever lost, this
+	// refuses and rolls back rather than deleting a number nobody agreed to.
+	if n != actual {
+		return 0, fmt.Errorf("clear held: counted %d but deleted %d; nothing was committed", actual, n)
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("clear held: %w", err)
+		return 0, fmt.Errorf("clear held: commit: %w", err)
 	}
 	return n, nil
 }
@@ -578,8 +622,10 @@ func (s *Store) DeleteAllHeld() (int, error) {
 
 // PurgeHeldOlderThan deletes held submissions that entered quarantine before
 // cutoff and returns how many went. A message marked as spam gets the full
-// retention window from the day it was marked, however old the message is. The caller supplies the cutoff rather than a duration so the
-// sweep is testable without sleeping.
+// retention window from the day it was marked, however old the message is.
+// Rows with no held_at recorded fall back to created_at; see heldSinceExpr.
+// The caller supplies the cutoff rather than a duration so the sweep is
+// testable without sleeping.
 func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
 	n, err := deleteHeldWhere(s.conn(), HeldFilter{Forms: AllForms(), HeldBefore: cutoff})
 	if err != nil {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1309,14 +1311,19 @@ func TestClearHeld(t *testing.T) {
 			t.Parallel()
 			s := clearFixture(t)
 
+			// The count guard must not be what makes this pass: a filter that
+			// reached more than it should would be refused, and a refusal looks
+			// the same as "nothing to delete". So the filter's reach is counted
+			// first, on its own, and the clear must then succeed outright.
+			reach, err := s.CountHeld(tc.filter)
+			if err != nil {
+				t.Fatalf("CountHeld: %v", err)
+			}
+			if reach != len(tc.deleted) {
+				t.Fatalf("the filter reaches %d held submissions, want %d", reach, len(tc.deleted))
+			}
 			n, err := s.ClearHeld(tc.filter, len(tc.deleted))
-			if len(tc.deleted) == 0 {
-				// Nothing in reach: the only count that can match is zero.
-				var mm *CountMismatchError
-				if err != nil && !errors.As(err, &mm) {
-					t.Fatalf("ClearHeld: %v", err)
-				}
-			} else if err != nil {
+			if err != nil {
 				t.Fatalf("ClearHeld: %v", err)
 			}
 			if n != len(tc.deleted) {
@@ -1379,9 +1386,9 @@ func TestClearHeldTakesTheSignalsWithIt(t *testing.T) {
 // when it was submitted — one definition, read by the retention sweep and by
 // ClearHeld alike through HeldFilter.HeldBefore.
 //
-// It used to be the submission date, which made the 30-day review promise false
-// for exactly the messages a person had just looked at: an inbox message older
-// than 30 days, marked as spam, was deleted at the next sweep.
+// If it were the submission date, the 30-day review promise would be false for
+// exactly the messages a person had just looked at: an inbox message older than
+// 30 days, marked as spam, would be deleted at the next sweep.
 func TestHeldAgeIsCountedFromEnteringQuarantine(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()
@@ -1463,9 +1470,324 @@ func TestHeldAgeFallsBackToSubmissionWhenHeldAtIsMissing(t *testing.T) {
 			if _, err := s.conn().Exec("UPDATE submissions SET held_at = '' WHERE id = 'h'"); err != nil {
 				t.Fatal(err)
 			}
+			if n, err := s.CountHeld(HeldFilter{Forms: AllForms(), HeldBefore: cutoff}); err != nil || n != tc.swept {
+				t.Errorf("the filter counts %d (%v), want %d", n, err, tc.swept)
+			}
 			if n, err := s.PurgeHeldOlderThan(cutoff); err != nil || n != tc.swept {
 				t.Errorf("the sweep deleted %d (%v), want %d", n, err, tc.swept)
 			}
 		})
+	}
+}
+
+// The unguarded delete, which the admin's empty-quarantine and the sweep use:
+// a filter with no scope must reach nothing here too, where no count guard
+// would stop it.
+func TestDeleteHeldWhereWithNoScopeDeletesNothing(t *testing.T) {
+	t.Parallel()
+	s := clearFixture(t)
+	for _, f := range []HeldFilter{{}, {Forms: OnlyForms(nil)}} {
+		n, err := deleteHeldWhere(s.conn(), f)
+		if err != nil || n != 0 {
+			t.Errorf("deleted %d (%v), want 0", n, err)
+		}
+	}
+	if left := remaining(t, s); len(left) != 5 {
+		t.Errorf("%d rows left, want all 5", len(left))
+	}
+}
+
+// "Strictly before": a message held at exactly the cutoff is not yet past it.
+func TestHeldBeforeIsStrict(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	cutoff := time.Now().UTC().Truncate(time.Second).Add(-30 * 24 * time.Hour)
+	if err := s.CreateHeldSubmission(heldFixture("edge", "f1", 8, cutoff), 8, 6, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateHeldSubmission(heldFixture("past", "f1", 8, cutoff.Add(-time.Second)), 8, 6, nil); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.PurgeHeldOlderThan(cutoff)
+	if err != nil || n != 1 {
+		t.Fatalf("swept %d (%v), want only the one past the cutoff", n, err)
+	}
+	if _, err := s.GetHeldSubmission("edge"); err != nil {
+		t.Errorf("the message held exactly at the cutoff was swept: %v", err)
+	}
+}
+
+// Restoring a message and marking it as spam again starts its time in
+// quarantine over: MarkSpam overwrites held_at.
+func TestReMarkingAsSpamRestartsTheClock(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	now := time.Now().UTC()
+	if err := s.CreateHeldSubmission(heldFixture("m", "f1", 8, now.Add(-40*24*time.Hour)), 8, 6, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RestoreSubmission("m"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSpam("m", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.PurgeHeldOlderThan(now.Add(-30 * 24 * time.Hour)); err != nil || n != 0 {
+		t.Errorf("the sweep deleted %d (%v); a message held again today is not 30 days in quarantine", n, err)
+	}
+}
+
+// Every way the store puts a submission in quarantine records when. The
+// created_at fallback in HeldFilter is for rows that predate held_at; a writer
+// that forgot to set it would silently age its rows by their submission date.
+func TestEveryHoldRecordsWhen(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := s.CreateHeldSubmission(heldFixture("arrived", "f1", 8, now.Add(-2*time.Hour)), 8, 6, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateSubmission(Submission{ID: "marked", FormID: "f1", RawData: `{"m":"hi"}`, CreatedAt: now.Add(-48 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSpam("marked", "admin"); err != nil {
+		t.Fatal(err)
+	}
+
+	arrived, err := s.GetHeldSubmission("arrived")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Held on arrival: in quarantine since it was submitted.
+	if !arrived.HeldAt.Equal(now.Add(-2 * time.Hour)) {
+		t.Errorf("arrived.HeldAt = %v, want its submission time", arrived.HeldAt)
+	}
+	marked, err := s.GetHeldSubmission("marked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked.HeldAt.IsZero() || marked.HeldAt.Before(now.Add(-time.Minute)) {
+		t.Errorf("marked.HeldAt = %v, want about now", marked.HeldAt)
+	}
+	if !marked.HeldSince().Equal(marked.HeldAt) {
+		t.Errorf("HeldSince = %v, want HeldAt", marked.HeldSince())
+	}
+
+	// Restored: no longer held, and the time is cleared with it.
+	back, err := s.RestoreSubmission("marked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.HeldAt.IsZero() {
+		t.Errorf("a restored submission still has HeldAt = %v", back.HeldAt)
+	}
+}
+
+// HeldSince is the Go side of the one definition: held_at, or the submission
+// time when none was recorded. It must agree with the SQL in HeldFilter.
+func TestHeldSinceFallsBackToCreatedAt(t *testing.T) {
+	t.Parallel()
+	created := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	held := created.Add(72 * time.Hour)
+	if got := (Submission{CreatedAt: created, HeldAt: held}).HeldSince(); !got.Equal(held) {
+		t.Errorf("HeldSince = %v, want HeldAt", got)
+	}
+	if got := (Submission{CreatedAt: created}).HeldSince(); !got.Equal(created) {
+		t.Errorf("HeldSince with no HeldAt = %v, want CreatedAt", got)
+	}
+}
+
+// The listing and the count take the same filter the clear does, so what a
+// client lists and counts is exactly what a clear with that filter deletes.
+func TestHeldSubmissionsWhereAndCountHeldMatchTheClear(t *testing.T) {
+	t.Parallel()
+	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	for _, f := range []HeldFilter{
+		{Forms: AllForms()},
+		{Forms: OnlyForms([]string{"f1"})},
+		{Forms: AllForms(), HeldBefore: cutoff},
+		{Forms: OnlyForms([]string{"f2"}), HeldBefore: cutoff},
+		{},
+	} {
+		s := clearFixture(t)
+		listed, err := s.HeldSubmissionsWhere(f, 100, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count, err := s.CountHeld(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count != len(listed) {
+			t.Errorf("filter %+v: CountHeld = %d but %d were listed", f, count, len(listed))
+		}
+		deleted, err := s.ClearHeld(f, count)
+		if err != nil {
+			t.Fatalf("filter %+v: ClearHeld: %v", f, err)
+		}
+		if deleted != count {
+			t.Errorf("filter %+v: counted %d, deleted %d", f, count, deleted)
+		}
+		left := remaining(t, s)
+		for _, sub := range listed {
+			if left[sub.ID] {
+				t.Errorf("filter %+v: %s was listed but not deleted", f, sub.ID)
+			}
+		}
+	}
+}
+
+// The list is ordered by time in quarantine, most recently held first, so the
+// last row is the one closest to being swept.
+func TestHeldSubmissionsAreOrderedByTimeInQuarantine(t *testing.T) {
+	t.Parallel()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	now := time.Now().UTC()
+	// Submitted long ago, but marked as spam just now: newest in quarantine.
+	if err := s.CreateSubmission(Submission{ID: "marked-now", FormID: "f1", RawData: `{"m":"hi"}`, CreatedAt: now.Add(-40 * 24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSpam("marked-now", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateHeldSubmission(heldFixture("held-10d", "f1", 8, now.Add(-10*24*time.Hour)), 8, 6, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateHeldSubmission(heldFixture("held-20d", "f1", 8, now.Add(-20*24*time.Hour)), 8, 6, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	held, err := s.HeldSubmissions(AllForms(), 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, h := range held {
+		ids = append(ids, h.ID)
+	}
+	want := []string{"marked-now", "held-10d", "held-20d"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("order = %v, want %v", ids, want)
+	}
+}
+
+func TestCountMismatchErrorNamesBothNumbers(t *testing.T) {
+	t.Parallel()
+	msg := (&CountMismatchError{Expected: 3, Actual: 7}).Error()
+	if !strings.Contains(msg, "7") || !strings.Contains(msg, "3") || !strings.Contains(msg, "nothing was deleted") {
+		t.Errorf("message = %q", msg)
+	}
+}
+
+// Two clears of the same quarantine at once, on a real file database. One
+// deletes; the other finds the count gone and deletes nothing — never a lock
+// error, and never both.
+func TestConcurrentClearsOfOneQuarantine(t *testing.T) {
+	t.Parallel()
+	s := fileStore(t)
+	seedForm(t, s, "f1")
+	now := time.Now().UTC()
+	for i := 0; i < 4; i++ {
+		if err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("h%d", i), "f1", 8, now), 8, 6, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var mu sync.Mutex
+	var deleted []int
+	var errs []error
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			n, err := s.ClearHeld(HeldFilter{Forms: AllForms()}, 4)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				deleted = append(deleted, n)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if len(deleted) != 1 || deleted[0] != 4 {
+		t.Fatalf("successful clears = %v, want exactly one deleting 4 (errors: %v)", deleted, errs)
+	}
+	for _, err := range errs {
+		var mm *CountMismatchError
+		if !errors.As(err, &mm) || mm.Actual != 0 {
+			t.Errorf("a losing clear returned %v, want a mismatch reporting 0 held", err)
+		}
+	}
+}
+
+// A clear racing new spam arriving. Whatever the interleaving, a clear either
+// deletes exactly the number it was told to expect or deletes nothing: the
+// count and the delete can never straddle an arrival.
+func TestClearRacingNewArrivals(t *testing.T) {
+	t.Parallel()
+	s := fileStore(t)
+	seedForm(t, s, "f1")
+	now := time.Now().UTC()
+	const seeded, arriving = 4, 6
+	for i := 0; i < seeded; i++ {
+		if err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("h%d", i), "f1", 8, now), 8, 6, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	var cleared int
+	var clearErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		cleared, clearErr = s.ClearHeld(HeldFilter{Forms: AllForms()}, seeded)
+	}()
+	for i := 0; i < arriving; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			if err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("new%d", i), "f1", 8, now), 8, 6, nil); err != nil {
+				t.Errorf("CreateHeldSubmission: %v", err)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	var mm *CountMismatchError
+	switch {
+	case clearErr == nil:
+		if cleared != seeded {
+			t.Errorf("cleared %d, want exactly the %d it expected", cleared, seeded)
+		}
+	case errors.As(clearErr, &mm):
+		if cleared != 0 {
+			t.Errorf("a refused clear deleted %d", cleared)
+		}
+	default:
+		t.Fatalf("ClearHeld: %v", clearErr)
+	}
+	left, err := s.CountHeld(HeldFilter{Forms: AllForms()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := seeded + arriving - cleared; left != want {
+		t.Errorf("%d held afterwards, want %d (seeded %d + arrived %d - cleared %d)", left, want, seeded, arriving, cleared)
 	}
 }
