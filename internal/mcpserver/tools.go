@@ -782,7 +782,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 			}
 			out.Submissions = append(out.Submissions, heldOut{
 				submissionOut: s.toSubmission(sub, names[sub.FormID]),
-				HeldAt:        rfc3339(sub.HeldSince()),
+				HeldAt:        rfc3339(sub.QuarantinedSince()),
 				Signals:       s.toSignals(signals),
 			})
 		}

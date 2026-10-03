@@ -1575,8 +1575,8 @@ func TestEveryHoldRecordsWhen(t *testing.T) {
 	if marked.HeldAt.IsZero() || marked.HeldAt.Before(now.Add(-time.Minute)) {
 		t.Errorf("marked.HeldAt = %v, want about now", marked.HeldAt)
 	}
-	if !marked.HeldSince().Equal(marked.HeldAt) {
-		t.Errorf("HeldSince = %v, want HeldAt", marked.HeldSince())
+	if !marked.QuarantinedSince().Equal(marked.HeldAt) {
+		t.Errorf("QuarantinedSince = %v, want HeldAt", marked.QuarantinedSince())
 	}
 
 	// Restored: no longer held, and the time is cleared with it.
@@ -1589,17 +1589,17 @@ func TestEveryHoldRecordsWhen(t *testing.T) {
 	}
 }
 
-// HeldSince is the Go side of the one definition: held_at, or the submission
+// QuarantinedSince is the Go side of the one definition: held_at, or the submission
 // time when none was recorded. It must agree with the SQL in HeldFilter.
-func TestHeldSinceFallsBackToCreatedAt(t *testing.T) {
+func TestQuarantinedSinceFallsBackToCreatedAt(t *testing.T) {
 	t.Parallel()
 	created := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	held := created.Add(72 * time.Hour)
-	if got := (Submission{CreatedAt: created, HeldAt: held}).HeldSince(); !got.Equal(held) {
-		t.Errorf("HeldSince = %v, want HeldAt", got)
+	if got := (Submission{CreatedAt: created, HeldAt: held}).QuarantinedSince(); !got.Equal(held) {
+		t.Errorf("QuarantinedSince = %v, want HeldAt", got)
 	}
-	if got := (Submission{CreatedAt: created}).HeldSince(); !got.Equal(created) {
-		t.Errorf("HeldSince with no HeldAt = %v, want CreatedAt", got)
+	if got := (Submission{CreatedAt: created}).QuarantinedSince(); !got.Equal(created) {
+		t.Errorf("QuarantinedSince with no HeldAt = %v, want CreatedAt", got)
 	}
 }
 

@@ -57,14 +57,14 @@ type User struct {
 	passwordHash      string
 }
 
-// HeldSince is when this submission's time in quarantine started: HeldAt, or
+// QuarantinedSince is when this submission's time in quarantine started: HeldAt, or
 // CreatedAt when none was recorded.
 //
 // It is the Go side of the one definition of a held message's age; the SQL
-// side is heldSinceExpr. The retention sweep, the MCP clear, the listing order
+// side is quarantinedSinceExpr. The retention sweep, the MCP clear, the listing order
 // and the age the admin shows all read one of the two, so they cannot disagree
 // about how long the same message has been held.
-func (s Submission) HeldSince() time.Time {
+func (s Submission) QuarantinedSince() time.Time {
 	if s.HeldAt.IsZero() {
 		return s.CreatedAt
 	}
@@ -143,8 +143,8 @@ type Submission struct {
 
 	// HeldAt is when the submission entered quarantine: on arrival for spam the
 	// filter held, or when someone marked it as spam. Zero when it is not held,
-	// or for a row held before this was recorded. Read it through HeldSince,
-	// which owns the fallback.
+	// or for a row held before this was recorded. Read it through
+	// QuarantinedSince, which owns the fallback.
 	HeldAt time.Time
 }
 

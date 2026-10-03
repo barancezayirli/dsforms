@@ -69,14 +69,14 @@ func (s *Store) classifyMissingHeld(id string) error {
 // so the column order can never drift between the list and single-row scans.
 const heldColumns = `id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, notified, held_at`
 
-// heldSinceExpr is when a submission's time in quarantine started, in SQL:
-// held_at, or created_at where none was recorded. Submission.HeldSince is the
+// quarantinedSinceExpr is when a submission's time in quarantine started, in SQL:
+// held_at, or created_at where none was recorded. Submission.QuarantinedSince is the
 // same rule in Go.
 //
 // The fallback is not optional. An empty held_at sorts before every timestamp,
 // so a bare "held_at < ?" would select such a row for any cutoff at all and the
 // sweep would delete it at once.
-const heldSinceExpr = `(CASE WHEN held_at = '' THEN created_at ELSE held_at END)`
+const quarantinedSinceExpr = `(CASE WHEN held_at = '' THEN created_at ELSE held_at END)`
 
 // heldColumnsFor is heldColumns qualified with a table alias, for the queries
 // that join forms and would otherwise have an ambiguous "id".
@@ -250,7 +250,7 @@ func (s *Store) HeldSubmissionsWhere(f HeldFilter, limit, offset int) ([]Submiss
 	args = append(args, limit, offset)
 	return s.querySubmissions("held submissions",
 		"SELECT "+heldColumns+" FROM submissions"+where+
-			" ORDER BY "+heldSinceExpr+" DESC, id LIMIT ? OFFSET ?",
+			" ORDER BY "+quarantinedSinceExpr+" DESC, id LIMIT ? OFFSET ?",
 		args...)
 }
 
@@ -522,7 +522,7 @@ func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 type HeldFilter struct {
 	Forms FormScope
 	// HeldBefore, when set, keeps only spam that entered quarantine strictly
-	// before it, by heldSinceExpr: when the message was held, on arrival or by
+	// before it, by quarantinedSinceExpr: when the message was held, on arrival or by
 	// someone marking it as spam, and not when it was submitted.
 	HeldBefore time.Time
 }
@@ -535,7 +535,7 @@ func (f HeldFilter) where() (string, []any) {
 	clause, args := f.Forms.clause("form_id")
 	clause = " WHERE is_held = 1" + clause
 	if !f.HeldBefore.IsZero() {
-		clause += " AND " + heldSinceExpr + " < ?"
+		clause += " AND " + quarantinedSinceExpr + " < ?"
 		args = append(args, sqliteTimestamp(f.HeldBefore))
 	}
 	return clause, args
@@ -623,7 +623,7 @@ func (s *Store) DeleteAllHeld() (int, error) {
 // PurgeHeldOlderThan deletes held submissions that entered quarantine before
 // cutoff and returns how many went. A message marked as spam gets the full
 // retention window from the day it was marked, however old the message is.
-// Rows with no held_at recorded fall back to created_at; see heldSinceExpr.
+// Rows with no held_at recorded fall back to created_at; see quarantinedSinceExpr.
 // The caller supplies the cutoff rather than a duration so the sweep is
 // testable without sleeping.
 func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {

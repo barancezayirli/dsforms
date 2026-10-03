@@ -158,7 +158,7 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 			// Time in quarantine, not time since it was submitted: this is
 			// read against "Auto-deleted after N days", and it is the age
 			// the retention sweep counts.
-			Age:           Age(sub.HeldSince()),
+			Age:           Age(sub.QuarantinedSince()),
 			SignalsFailed: signalsFailed,
 		})
 	}
