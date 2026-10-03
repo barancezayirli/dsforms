@@ -474,6 +474,84 @@ func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 	return total, nil
 }
 
+// HeldFilter selects quarantined submissions for a set-based delete. The zero
+// value selects nothing: Forms is a FormScope, whose zero value matches no form,
+// so a filter built without a scope can never mean "all of them".
+type HeldFilter struct {
+	Forms FormScope
+	// Before, when set, keeps only spam created strictly before it.
+	Before time.Time
+}
+
+// where is the one place a held-delete's WHERE clause is built, so the admin's
+// empty-quarantine, the retention sweep and the MCP clear cannot drift apart
+// on what "held" means.
+func (f HeldFilter) where() (string, []any) {
+	clause, args := f.Forms.clause("form_id")
+	clause = " WHERE is_held = 1" + clause
+	if !f.Before.IsZero() {
+		clause += " AND created_at < ?"
+		args = append(args, sqliteTimestamp(f.Before))
+	}
+	return clause, args
+}
+
+// deleteHeldWhere deletes everything f selects on q and reports how many went.
+func deleteHeldWhere(q execQuerier, f HeldFilter) (int, error) {
+	where, args := f.where()
+	res, err := q.Exec("DELETE FROM submissions"+where, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
+// CountMismatchError is ClearHeld refusing: the quarantine does not hold the
+// number of submissions the caller expected, so nothing was deleted.
+type CountMismatchError struct {
+	Expected, Actual int
+}
+
+func (e *CountMismatchError) Error() string {
+	return fmt.Sprintf("quarantine holds %d matching submissions, not %d; nothing was deleted", e.Actual, e.Expected)
+}
+
+// ClearHeld deletes every held submission f selects, but only if there are
+// exactly expected of them, and reports how many went.
+//
+// The count and the delete share one transaction, which is the point of the
+// guard: spam held after the caller looked cannot be deleted unseen, because
+// the count it brings no longer matches. Quarantine can hold false positives;
+// a caller clearing it should delete what it saw and nothing newer.
+func (s *Store) ClearHeld(f HeldFilter, expected int) (int, error) {
+	tx, err := s.conn().Begin()
+	if err != nil {
+		return 0, fmt.Errorf("clear held: %w", err)
+	}
+	defer tx.Rollback()
+
+	where, args := f.where()
+	var actual int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM submissions"+where, args...).Scan(&actual); err != nil {
+		return 0, fmt.Errorf("clear held: %w", err)
+	}
+	if actual != expected {
+		return 0, &CountMismatchError{Expected: expected, Actual: actual}
+	}
+	n, err := deleteHeldWhere(tx, f)
+	if err != nil {
+		return 0, fmt.Errorf("clear held: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("clear held: %w", err)
+	}
+	return n, nil
+}
+
 // DeleteAllHeld empties the quarantine in one statement and reports how many
 // rows went.
 //
@@ -482,30 +560,22 @@ func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 // what the operator is shown, so it must be the real RowsAffected rather than
 // the length of a list we happened to fetch first.
 func (s *Store) DeleteAllHeld() (int, error) {
-	res, err := s.conn().Exec("DELETE FROM submissions WHERE is_held = 1")
+	n, err := deleteHeldWhere(s.conn(), HeldFilter{Forms: AllForms()})
 	if err != nil {
 		return 0, fmt.Errorf("delete all held: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("delete all held: %w", err)
-	}
-	return int(n), nil
+	return n, nil
 }
 
 // PurgeHeldOlderThan deletes held submissions created before cutoff and returns
 // how many went. The caller supplies the cutoff rather than a duration so the
 // sweep is testable without sleeping.
 func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
-	res, err := s.conn().Exec("DELETE FROM submissions WHERE is_held = 1 AND created_at < ?", sqliteTimestamp(cutoff))
+	n, err := deleteHeldWhere(s.conn(), HeldFilter{Forms: AllForms(), Before: cutoff})
 	if err != nil {
 		return 0, fmt.Errorf("purge held: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("purge held: %w", err)
-	}
-	return int(n), nil
+	return n, nil
 }
 
 // NavCounts returns the sidebar badge numbers in one round trip. It runs on

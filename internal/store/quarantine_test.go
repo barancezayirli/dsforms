@@ -1239,3 +1239,138 @@ func TestMarkSpamMarksUnread(t *testing.T) {
 		t.Error("Read = true; a quarantined submission has not been read by anyone")
 	}
 }
+
+// clearFixture seeds two forms with held spam of two ages, an accepted
+// submission, and a signal, so each ClearHeld bound has something on both
+// sides of it.
+func clearFixture(t *testing.T) *Store {
+	t.Helper()
+	s := mustNew(t)
+	seedForm(t, s, "f1")
+	seedForm(t, s, "f2")
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.Add(-40 * 24 * time.Hour)
+	sig := []SpamSignal{{Check: "markup", Field: "message", Match: "[url=", Weight: 6}}
+	for _, h := range []struct {
+		id, form string
+		at       time.Time
+	}{
+		{"f1-new", "f1", now}, {"f1-old", "f1", old}, {"f2-new", "f2", now}, {"f2-old", "f2", old},
+	} {
+		if err := s.CreateHeldSubmission(heldFixture(h.id, h.form, 8, h.at), 8, 6, sig); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// An accepted submission in the same form: the inbox is never in reach.
+	if err := s.CreateSubmission(Submission{ID: "inbox", FormID: "f1", RawData: `{"m":"hi"}`, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func remaining(t *testing.T, s *Store) map[string]bool {
+	t.Helper()
+	rows, err := s.conn().Query("SELECT id FROM submissions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		out[id] = true
+	}
+	return out
+}
+
+func TestClearHeld(t *testing.T) {
+	t.Parallel()
+
+	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	cases := []struct {
+		name    string
+		filter  HeldFilter
+		deleted []string
+	}{
+		{"every form", HeldFilter{Forms: AllForms()}, []string{"f1-new", "f1-old", "f2-new", "f2-old"}},
+		// A form-bound token clears its own forms and nothing else.
+		{"one form", HeldFilter{Forms: OnlyForms([]string{"f1"})}, []string{"f1-new", "f1-old"}},
+		{"older than a cutoff", HeldFilter{Forms: AllForms(), Before: cutoff}, []string{"f1-old", "f2-old"}},
+		{"one form and older", HeldFilter{Forms: OnlyForms([]string{"f2"}), Before: cutoff}, []string{"f2-old"}},
+		// A scope naming no forms reaches nothing — never everything.
+		{"no forms", HeldFilter{Forms: OnlyForms(nil)}, nil},
+		{"zero scope", HeldFilter{}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := clearFixture(t)
+
+			n, err := s.ClearHeld(tc.filter, len(tc.deleted))
+			if len(tc.deleted) == 0 {
+				// Nothing in reach: the only count that can match is zero.
+				var mm *CountMismatchError
+				if err != nil && !errors.As(err, &mm) {
+					t.Fatalf("ClearHeld: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("ClearHeld: %v", err)
+			}
+			if n != len(tc.deleted) {
+				t.Errorf("deleted %d, want %d", n, len(tc.deleted))
+			}
+			left := remaining(t, s)
+			for _, id := range tc.deleted {
+				if left[id] {
+					t.Errorf("%s survived", id)
+				}
+			}
+			if !left["inbox"] {
+				t.Fatal("an accepted submission was deleted")
+			}
+			if want := 5 - len(tc.deleted); len(left) != want {
+				t.Errorf("%d rows left, want %d: %v", len(left), want, left)
+			}
+		})
+	}
+}
+
+// The guard. The count and the delete run in one transaction, so spam that
+// arrived after the client looked cannot be deleted unseen: a count that does
+// not match deletes nothing and says what the real count is.
+func TestClearHeldRefusesAMismatchedCount(t *testing.T) {
+	t.Parallel()
+	s := clearFixture(t)
+
+	for _, expected := range []int{3, 5, 0} {
+		n, err := s.ClearHeld(HeldFilter{Forms: AllForms()}, expected)
+		var mm *CountMismatchError
+		if !errors.As(err, &mm) {
+			t.Fatalf("expected %d: err = %v, want CountMismatchError", expected, err)
+		}
+		if mm.Actual != 4 || n != 0 {
+			t.Errorf("expected %d: actual = %d, deleted = %d; want 4 and 0", expected, mm.Actual, n)
+		}
+	}
+	if len(remaining(t, s)) != 5 {
+		t.Error("a refused clear deleted something")
+	}
+}
+
+func TestClearHeldTakesTheSignalsWithIt(t *testing.T) {
+	t.Parallel()
+	s := clearFixture(t)
+	if _, err := s.ClearHeld(HeldFilter{Forms: AllForms()}, 4); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.conn().QueryRow("SELECT COUNT(*) FROM spam_signals").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("%d signals outlived their submissions", n)
+	}
+}
