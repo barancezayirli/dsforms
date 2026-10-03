@@ -151,11 +151,14 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 			name = sub.FormID
 		}
 		rows = append(rows, heldRow{
-			Submission:    sub,
-			FormName:      name,
-			Signals:       signals,
-			From:          senderLabel(sub.Data),
-			Age:           Age(sub.CreatedAt),
+			Submission: sub,
+			FormName:   name,
+			Signals:    signals,
+			From:       senderLabel(sub.Data),
+			// Time in quarantine, not time since it was submitted: this is
+			// read against "Auto-deleted after N days", and it is the age
+			// the retention sweep counts.
+			Age:           Age(sub.QuarantinedSince()),
 			SignalsFailed: signalsFailed,
 		})
 	}

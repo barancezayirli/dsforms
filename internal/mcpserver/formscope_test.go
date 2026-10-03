@@ -80,6 +80,12 @@ var scopedToolArgs = map[string]map[string]any{
 	"mark_spam":          {"submission_id": "mspam"},
 	"delete_submission":  {"submission_id": "mdel"},
 	"delete_quarantined": {"submission_ids": []any{"mdelh"}},
+	// A count that cannot match: the call answers with what it can see and
+	// deletes nothing, so the tools called after it still have quarantine to
+	// read. This test checks the reply for the other form's words and ids;
+	// that its count covers only the token's own forms is asserted by
+	// TestEmptyQuarantineStaysInsideTheTokensForms.
+	"empty_quarantine": {"expected_count": 999},
 }
 
 // TestAScopedTokenNeverSeesAnotherForm is the property the whole feature is

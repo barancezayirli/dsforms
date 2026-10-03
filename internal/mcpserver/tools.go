@@ -506,18 +506,21 @@ type searchIn struct {
 }
 
 type listQuarantineIn struct {
-	Limit  int `json:"limit,omitempty" jsonschema:"1-100, default 25"`
-	Offset int `json:"offset,omitempty"`
+	Limit         int    `json:"limit,omitempty" jsonschema:"1-100, default 25"`
+	Offset        int    `json:"offset,omitempty"`
+	FormID        string `json:"form_id,omitempty" jsonschema:"only one form's quarantine; omit for every form this token reaches"`
+	OlderThanDays int    `json:"older_than_days,omitempty" jsonschema:"only spam that has been in quarantine more than this many days, 1-365; omit or 0 for every age"`
 }
 
 type heldOut struct {
 	submissionOut
+	HeldAt  string      `json:"held_at" jsonschema:"RFC 3339; when it entered quarantine, which is what older_than_days and the retention sweep count from"`
 	Signals []signalOut `json:"signals"`
 }
 
 type listQuarantineOut struct {
 	Submissions []heldOut `json:"submissions"`
-	Total       int       `json:"total" jsonschema:"how many submissions are in quarantine altogether"`
+	Total       int       `json:"total" jsonschema:"how many quarantined submissions match the filters given, all of them when none are; this is the expected_count for empty_quarantine with the same filters"`
 }
 
 type listRulesOut struct {
@@ -740,18 +743,25 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:  "list_quarantine",
 		Title: "List quarantined submissions",
-		Description: "List submissions held for spam review, newest first, each with " +
-			"the recorded reasons it was held." + untrustedNote,
+		Description: "List submissions held for spam review, most recently held first, each with " +
+			"the recorded reasons it was held. form_id and older_than_days narrow the list; " +
+			"total counts everything the filters match, not just this page." + untrustedNote,
 		Annotations: readOnly(),
 	}, func(_ context.Context, req *mcp.CallToolRequest, in listQuarantineIn) (*mcp.CallToolResult, listQuarantineOut, error) {
 		if err := requireScope(req, ScopeRead); err != nil {
 			return nil, listQuarantineOut{}, err
 		}
-		subs, err := s.store.HeldSubmissions(tokenForms(req), clampLimit(in.Limit), clampOffset(in.Offset))
+		// The same filter empty_quarantine builds from the same two arguments,
+		// so this list and its total are exactly what that tool would delete.
+		filter, _, err := s.heldFilter(req, in.FormID, in.OlderThanDays)
+		if err != nil {
+			return nil, listQuarantineOut{}, err
+		}
+		subs, err := s.store.HeldSubmissionsWhere(filter, clampLimit(in.Limit), clampOffset(in.Offset))
 		if err != nil {
 			return nil, listQuarantineOut{}, fmt.Errorf("listing quarantine: %w", err)
 		}
-		counts, err := s.store.NavCounts(tokenForms(req))
+		total, err := s.store.CountHeld(filter)
 		if err != nil {
 			return nil, listQuarantineOut{}, fmt.Errorf("counting quarantine: %w", err)
 		}
@@ -760,7 +770,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 			return nil, listQuarantineOut{}, err
 		}
 
-		out := listQuarantineOut{Total: counts.Held, Submissions: make([]heldOut, 0, len(subs))}
+		out := listQuarantineOut{Total: total, Submissions: make([]heldOut, 0, len(subs))}
 		for _, sub := range subs {
 			signals, err := s.store.SubmissionSignals(sub.ID)
 			if err != nil {
@@ -772,6 +782,7 @@ func (s *Server) registerReadTools(srv *mcp.Server) {
 			}
 			out.Submissions = append(out.Submissions, heldOut{
 				submissionOut: s.toSubmission(sub, names[sub.FormID]),
+				HeldAt:        rfc3339(sub.QuarantinedSince()),
 				Signals:       s.toSignals(signals),
 			})
 		}
@@ -1009,6 +1020,18 @@ type deleteQuarantinedIn struct {
 	SubmissionIDs []string `json:"submission_ids"`
 }
 
+type emptyQuarantineIn struct {
+	ExpectedCount int    `json:"expected_count" jsonschema:"how many quarantined submissions you expect to delete: the total from list_quarantine called with the same form_id and older_than_days; nothing is deleted unless it matches"`
+	FormID        string `json:"form_id,omitempty" jsonschema:"clear one form's quarantine only; omit for every form this token reaches"`
+	OlderThanDays int    `json:"older_than_days,omitempty" jsonschema:"only spam that has been in quarantine more than this many days, 1-365; omit or 0 for every age"`
+}
+
+// maxOlderThanDays bounds older_than_days. Age is counted from when a message
+// entered quarantine, the same measure the retention sweep uses, so anything
+// past the retention window is already gone and this is only a ceiling that
+// catches typos.
+const maxOlderThanDays = 365
+
 type deleteCountOut struct {
 	OK      bool   `json:"ok"`
 	Deleted int    `json:"deleted"`
@@ -1072,6 +1095,85 @@ func (s *Server) registerDeleteTools(srv *mcp.Server) {
 		}
 		return nil, deleteCountOut{OK: true, Deleted: n, Message: msg}, nil
 	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:  "empty_quarantine",
+		Title: "Empty spam quarantine",
+		Description: "Permanently delete every quarantined submission this token reaches, " +
+			"optionally narrowed to one form and/or to those in quarantine more than a number of days. " +
+			"expected_count is required and must equal how many will be deleted: call list_quarantine " +
+			"with the same form_id and older_than_days first and pass its total. If a different number " +
+			"is held by then, nothing is deleted and the reply has ok false — check ok, not just that " +
+			"the call returned. Submissions in an inbox are never touched. This cannot be undone.",
+		Annotations: destructive(),
+	}, func(_ context.Context, req *mcp.CallToolRequest, in emptyQuarantineIn) (*mcp.CallToolResult, deleteCountOut, error) {
+		if err := requireScope(req, ScopeDelete); err != nil {
+			return nil, deleteCountOut{}, err
+		}
+		// Never "however many there are". The count is what ties this delete
+		// to something the client looked at; without one it would be a blind
+		// wipe. A missing count and a zero are the same thing on the wire.
+		if in.ExpectedCount < 1 {
+			return nil, deleteCountOut{}, fmt.Errorf("expected_count must be at least 1. If quarantine is empty there is " +
+				"nothing to delete; otherwise pass the total from list_quarantine called with the same filters")
+		}
+		filter, scope, err := s.heldFilter(req, in.FormID, in.OlderThanDays)
+		if err != nil {
+			return nil, deleteCountOut{}, err
+		}
+
+		n, err := s.store.ClearHeld(filter, in.ExpectedCount)
+		var mismatch *store.CountMismatchError
+		if errors.As(err, &mismatch) {
+			// Not a tool error: the call was well-formed and the answer is
+			// "not now". It sends the client back to list with the same
+			// filters rather than inviting it to retry with the number below,
+			// which would delete rows it never looked at.
+			return nil, deleteCountOut{OK: false, Message: fmt.Sprintf(
+				"Nothing was deleted: quarantine holds %d matching submissions (%s), not %d. "+
+					"Call list_quarantine with the same form_id and older_than_days to see what "+
+					"would be deleted, then call again with its total.",
+				mismatch.Actual, scope, mismatch.Expected)}, nil
+		}
+		if err != nil {
+			return nil, deleteCountOut{}, fmt.Errorf("emptying quarantine: %w", err)
+		}
+		return nil, deleteCountOut{OK: true, Deleted: n,
+			Message: fmt.Sprintf("Deleted %d quarantined submissions (%s).", n, scope)}, nil
+	})
+}
+
+// heldFilter turns a tool's form_id and older_than_days into the filter over
+// quarantine, and a description of it for the reply.
+//
+// list_quarantine and empty_quarantine both build theirs here, from the same
+// two arguments, so what a client lists is what a clear with those arguments
+// deletes. The filter always starts from the token's own forms; form_id can
+// only narrow it, and is looked up among those forms so that one outside the
+// token's bound answers exactly as one that does not exist.
+func (s *Server) heldFilter(req *mcp.CallToolRequest, formID string, olderThanDays int) (store.HeldFilter, string, error) {
+	if olderThanDays < 0 || olderThanDays > maxOlderThanDays {
+		return store.HeldFilter{}, "", fmt.Errorf("older_than_days must be between 1 and %d; omit it or pass 0 for every age", maxOlderThanDays)
+	}
+	filter := store.HeldFilter{Forms: tokenForms(req)}
+	scope := "every form this token reaches"
+	if formID != "" {
+		names, err := s.formNames(tokenForms(req))
+		if err != nil {
+			return store.HeldFilter{}, "", err
+		}
+		name, ok := names[formID]
+		if !ok {
+			return store.HeldFilter{}, "", fmt.Errorf("no form with id %q", formID)
+		}
+		filter.Forms = store.OnlyForms([]string{formID})
+		scope = name
+	}
+	if olderThanDays > 0 {
+		filter.HeldBefore = s.now().UTC().AddDate(0, 0, -olderThanDays)
+		scope += fmt.Sprintf(", in quarantine more than %d days", olderThanDays)
+	}
+	return filter, scope, nil
 }
 
 // registerInstanceWideTools adds the two tools that reach state no form owns.

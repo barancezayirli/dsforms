@@ -54,7 +54,8 @@ func setupQuarantineWithMailer(t *testing.T, m *mail.MockMailer) (*store.Store, 
 
 	base := template.Must(template.New("base").Parse(`{{define "base"}}{{template "content" .}}{{end}}`))
 	page := template.Must(template.Must(base.Clone()).Parse(
-		`{{define "content"}}{{range .Rows}}<span class="held">{{.ID}}</span>{{end}}` +
+		`{{define "content"}}{{range .Rows}}<span class="held">{{.ID}}</span>` +
+			`<span class="age" data-id="{{.ID}}">{{.Age}}</span>{{end}}` +
 			`{{if .Selected}}<span class="sel">{{.Selected.ID}}</span>` +
 			`<span class="meter">{{$.MeterPercent}}</span>{{end}}{{end}}` +
 			`{{define "held-panel"}}<span class="panel">{{if .Selected}}{{.Selected.ID}}{{end}}</span>{{end}}`))
@@ -814,5 +815,33 @@ func TestRulesPageOffersANoteWhereItRendersOne(t *testing.T) {
 	if !strings.Contains(src, `name="note"`) {
 		t.Error("rules.html renders {{.Note}} but no form on the page posts a note, " +
 			"so it is always empty and the render is dead markup")
+	}
+}
+
+// The age on the quarantine page is time in quarantine, because it is read
+// against "Auto-deleted after 30 days" beside it. A 40-day-old inbox message
+// marked as spam a moment ago has 30 days left, not minus ten: showing "40d"
+// there would make the sweep look broken, and it is the age the sweep uses.
+func TestQuarantinePageShowsTimeInQuarantine(t *testing.T) {
+	t.Parallel()
+	s, _, r := setupQuarantine(t)
+	now := time.Now().UTC()
+
+	if err := s.CreateSubmission(store.Submission{ID: "marked", FormID: "f1", RawData: `{"message":"hi"}`, CreatedAt: now.Add(-40 * 24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSpam("marked", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	// Held on arrival ten days ago: its age is unchanged by any of this.
+	if err := s.CreateHeldSubmission(store.Submission{ID: "arrived", FormID: "f1", RawData: `{"message":"x"}`, CreatedAt: now.Add(-10 * 24 * time.Hour)}, 8, 6, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	body := doAdminRequest(t, s, r, "GET", "/admin/quarantine", "").Body.String()
+	for id, want := range map[string]string{"marked": "just now", "arrived": "10d"} {
+		if !strings.Contains(body, `<span class="age" data-id="`+id+`">`+want+`</span>`) {
+			t.Errorf("age of %s is not %q in: %s", id, want, body)
+		}
 	}
 }

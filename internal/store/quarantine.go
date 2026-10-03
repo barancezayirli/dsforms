@@ -67,7 +67,16 @@ func (s *Store) classifyMissingHeld(id string) error {
 
 // heldColumns is the shared select list for held submissions. Kept in one place
 // so the column order can never drift between the list and single-row scans.
-const heldColumns = `id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, notified`
+const heldColumns = `id, form_id, data, ip, read, created_at, is_held, spam_score, held_threshold, notified, held_at`
+
+// quarantinedSinceExpr is when a submission's time in quarantine started, in SQL:
+// held_at, or created_at where none was recorded. Submission.QuarantinedSince is the
+// same rule in Go.
+//
+// The fallback is not optional. An empty held_at sorts before every timestamp,
+// so a bare "held_at < ?" would select such a row for any cutoff at all and the
+// sweep would delete it at once.
+const quarantinedSinceExpr = `(CASE WHEN held_at = '' THEN created_at ELSE held_at END)`
 
 // heldColumnsFor is heldColumns qualified with a table alias, for the queries
 // that join forms and would otherwise have an ambiguous "id".
@@ -117,11 +126,16 @@ func scanHeldExtra(sc rowScanner, extra ...any) (Submission, error) {
 		heldInt  int
 		notified int
 	)
+	// held_at is scanned into any for the reason scanAPIToken gives: the driver
+	// hands back a time.Time for a real value and a plain string for the ''
+	// that means "not held".
+	var heldAt any
 	dest := []any{&sub.ID, &sub.FormID, &rawData, &sub.IP, &readInt, &sub.CreatedAt,
-		&heldInt, &sub.SpamScore, &sub.HeldThreshold, &notified}
+		&heldInt, &sub.SpamScore, &sub.HeldThreshold, &notified, &heldAt}
 	if err := sc.Scan(append(dest, extra...)...); err != nil {
 		return Submission{}, err
 	}
+	sub.HeldAt = sqliteTimeValue(heldAt)
 	sub.RawData = rawData
 	sub.Read = readInt == 1
 	sub.IsHeld = heldInt == 1
@@ -221,14 +235,44 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 	return nil
 }
 
-// HeldSubmissions returns a page of the quarantine queue, newest first.
+// HeldSubmissions returns a page of the quarantine queue, most recently held
+// first. A message marked as spam today sorts above spam held on arrival last
+// week, however long ago it was submitted.
 func (s *Store) HeldSubmissions(forms FormScope, limit, offset int) ([]Submission, error) {
-	scopeClause, scopeArgs := forms.clause("form_id")
-	args := append(scopeArgs, limit, offset)
+	return s.HeldSubmissionsWhere(HeldFilter{Forms: forms}, limit, offset)
+}
+
+// HeldSubmissionsWhere lists the held submissions f selects, most recently
+// held first, so the last row is the one closest to the retention sweep.
+//
+// It takes the same filter ClearHeld does, built by the same where(): what is
+// listed here is exactly what a clear with that filter would delete.
+func (s *Store) HeldSubmissionsWhere(f HeldFilter, limit, offset int) ([]Submission, error) {
+	where, args := f.where()
+	args = append(args, limit, offset)
 	return s.querySubmissions("held submissions",
-		"SELECT "+heldColumns+" FROM submissions WHERE is_held = 1"+scopeClause+
-			" ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+		"SELECT "+heldColumns+" FROM submissions"+where+
+			" ORDER BY "+quarantinedSinceExpr+" DESC, id LIMIT ? OFFSET ?",
 		args...)
+}
+
+// CountHeld counts the held submissions f selects: the number ClearHeld must
+// be given to delete them.
+func (s *Store) CountHeld(f HeldFilter) (int, error) {
+	n, err := countHeldWhere(s.conn(), f)
+	if err != nil {
+		return 0, fmt.Errorf("count held: %w", err)
+	}
+	return n, nil
+}
+
+func countHeldWhere(q execQuerier, f HeldFilter) (int, error) {
+	where, args := f.where()
+	var n int
+	if err := q.QueryRow("SELECT COUNT(*) FROM submissions"+where, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // GetHeldSubmission returns one held submission by id.
@@ -474,6 +518,95 @@ func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 	return total, nil
 }
 
+// HeldFilter selects quarantined submissions for a set-based delete. The zero
+// value selects nothing: Forms is a FormScope, whose zero value matches no form,
+// so a filter built without a scope can never mean "all of them".
+type HeldFilter struct {
+	Forms FormScope
+	// HeldBefore, when set, keeps only spam that entered quarantine strictly
+	// before it, by quarantinedSinceExpr: when the message was held, on arrival or by
+	// someone marking it as spam, and not when it was submitted.
+	HeldBefore time.Time
+}
+
+// where is the one place a set-based held query's WHERE clause is built, so the
+// admin's empty-quarantine, the retention sweep, the MCP clear and the listing
+// a client reads before clearing cannot drift apart on what "held" or "older
+// than" means. (DeleteHeld, which deletes by id, builds its own.)
+func (f HeldFilter) where() (string, []any) {
+	clause, args := f.Forms.clause("form_id")
+	clause = " WHERE is_held = 1" + clause
+	if !f.HeldBefore.IsZero() {
+		clause += " AND " + quarantinedSinceExpr + " < ?"
+		args = append(args, sqliteTimestamp(f.HeldBefore))
+	}
+	return clause, args
+}
+
+// deleteHeldWhere deletes everything f selects on q and reports how many went.
+func deleteHeldWhere(q execQuerier, f HeldFilter) (int, error) {
+	where, args := f.where()
+	res, err := q.Exec("DELETE FROM submissions"+where, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
+// CountMismatchError is ClearHeld refusing: the quarantine does not hold the
+// number of submissions the caller expected, so nothing was deleted.
+type CountMismatchError struct {
+	Expected, Actual int
+}
+
+func (e *CountMismatchError) Error() string {
+	return fmt.Sprintf("quarantine holds %d matching submissions, not %d; nothing was deleted", e.Actual, e.Expected)
+}
+
+// ClearHeld deletes every held submission f selects, but only if there are
+// exactly expected of them, and reports how many went.
+//
+// The count and the delete share one transaction, which is the point of the
+// guard: if spam was held, restored or deleted after the caller counted, the
+// number it brings no longer matches and nothing goes. It is a check on the
+// count, not on identity — one restore and one arrival in between leave the
+// number unchanged — so it narrows the window; it does not prove the caller
+// saw every row. Quarantine can hold false positives, which is why a caller
+// should list with the same filter before clearing.
+func (s *Store) ClearHeld(f HeldFilter, expected int) (int, error) {
+	tx, err := s.conn().Begin()
+	if err != nil {
+		return 0, fmt.Errorf("clear held: begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once Commit succeeds
+
+	actual, err := countHeldWhere(tx, f)
+	if err != nil {
+		return 0, fmt.Errorf("clear held: count: %w", err)
+	}
+	if actual != expected {
+		return 0, &CountMismatchError{Expected: expected, Actual: actual}
+	}
+	n, err := deleteHeldWhere(tx, f)
+	if err != nil {
+		return 0, fmt.Errorf("clear held: delete: %w", err)
+	}
+	// The transaction holds the write lock from BEGIN, so these cannot differ.
+	// That rests on one DSN flag (_txlock=immediate); if it is ever lost, this
+	// refuses and rolls back rather than deleting a number nobody agreed to.
+	if n != actual {
+		return 0, fmt.Errorf("clear held: counted %d but deleted %d; nothing was committed", actual, n)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("clear held: commit: %w", err)
+	}
+	return n, nil
+}
+
 // DeleteAllHeld empties the quarantine in one statement and reports how many
 // rows went.
 //
@@ -482,30 +615,25 @@ func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 // what the operator is shown, so it must be the real RowsAffected rather than
 // the length of a list we happened to fetch first.
 func (s *Store) DeleteAllHeld() (int, error) {
-	res, err := s.conn().Exec("DELETE FROM submissions WHERE is_held = 1")
+	n, err := deleteHeldWhere(s.conn(), HeldFilter{Forms: AllForms()})
 	if err != nil {
 		return 0, fmt.Errorf("delete all held: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("delete all held: %w", err)
-	}
-	return int(n), nil
+	return n, nil
 }
 
-// PurgeHeldOlderThan deletes held submissions created before cutoff and returns
-// how many went. The caller supplies the cutoff rather than a duration so the
-// sweep is testable without sleeping.
+// PurgeHeldOlderThan deletes held submissions that entered quarantine before
+// cutoff and returns how many went. A message marked as spam gets the full
+// retention window from the day it was marked, however old the message is.
+// Rows with no held_at recorded fall back to created_at; see quarantinedSinceExpr.
+// The caller supplies the cutoff rather than a duration so the sweep is
+// testable without sleeping.
 func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
-	res, err := s.conn().Exec("DELETE FROM submissions WHERE is_held = 1 AND created_at < ?", sqliteTimestamp(cutoff))
+	n, err := deleteHeldWhere(s.conn(), HeldFilter{Forms: AllForms(), HeldBefore: cutoff})
 	if err != nil {
 		return 0, fmt.Errorf("purge held: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("purge held: %w", err)
-	}
-	return int(n), nil
+	return n, nil
 }
 
 // NavCounts returns the sidebar badge numbers in one round trip. It runs on
