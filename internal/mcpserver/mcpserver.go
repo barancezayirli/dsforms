@@ -68,6 +68,7 @@ type Store interface {
 
 	// Destructive.
 	DeleteHeld(ids []string, forms store.FormScope) (int, error)
+	ClearHeld(f store.HeldFilter, expected int) (int, error)
 	DeleteSubmission(id string) error
 }
 

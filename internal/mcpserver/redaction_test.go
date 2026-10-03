@@ -280,6 +280,9 @@ var toolArgs = map[string]map[string]any{
 	"add_block_rule":     {"type": "email", "value": "blocked@example.invalid"},
 	"delete_submission":  {"submission_id": "delvictim"},
 	"delete_quarantined": {"submission_ids": []any{"heldvictim"}},
+	// Counts only, never submitted text. A count that cannot match, so it
+	// deletes nothing and the quarantine tools called after it still see it.
+	"empty_quarantine": {"expected_count": 999},
 }
 
 // seedBoundary gives every tool something to return, with the payload in every

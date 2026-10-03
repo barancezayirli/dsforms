@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"time"
 
 	"github.com/barancezayirli/dsforms/internal/redact"
 	"github.com/barancezayirli/dsforms/internal/screen"
@@ -1009,6 +1010,16 @@ type deleteQuarantinedIn struct {
 	SubmissionIDs []string `json:"submission_ids"`
 }
 
+type emptyQuarantineIn struct {
+	ExpectedCount int    `json:"expected_count" jsonschema:"how many quarantined submissions you expect to delete, from list_quarantine or get_stats; nothing is deleted unless it matches"`
+	FormID        string `json:"form_id,omitempty" jsonschema:"clear one form's quarantine only; omit for every form this token reaches"`
+	OlderThanDays int    `json:"older_than_days,omitempty" jsonschema:"only spam held more than this many days ago, 1-365; omit or 0 for every age"`
+}
+
+// maxOlderThanDays bounds older_than_days. A year past the 30-day retention
+// sweep already matches nothing, so anything larger is a mistake worth naming.
+const maxOlderThanDays = 365
+
 type deleteCountOut struct {
 	OK      bool   `json:"ok"`
 	Deleted int    `json:"deleted"`
@@ -1071,6 +1082,67 @@ func (s *Server) registerDeleteTools(srv *mcp.Server) {
 			msg += " The rest were not in quarantine — already deleted, restored, or never held."
 		}
 		return nil, deleteCountOut{OK: true, Deleted: n, Message: msg}, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:  "empty_quarantine",
+		Title: "Empty spam quarantine",
+		Description: "Permanently delete every quarantined submission this token reaches, " +
+			"optionally only one form's or only those held more than a number of days. " +
+			"expected_count is required and must equal how many will be deleted — take it " +
+			"from list_quarantine (total) or get_stats; if more or fewer are held now, " +
+			"nothing is deleted. Submissions in an inbox are never touched. This cannot be undone.",
+		Annotations: destructive(),
+	}, func(_ context.Context, req *mcp.CallToolRequest, in emptyQuarantineIn) (*mcp.CallToolResult, deleteCountOut, error) {
+		if err := requireScope(req, ScopeDelete); err != nil {
+			return nil, deleteCountOut{}, err
+		}
+		// Never "however many there are". The count is what makes this delete
+		// only what the client saw; without one it would be a blind wipe.
+		if in.ExpectedCount < 1 {
+			return nil, deleteCountOut{}, fmt.Errorf("expected_count is required and must be at least 1; " +
+				"take it from list_quarantine or get_stats")
+		}
+		if in.OlderThanDays < 0 || in.OlderThanDays > maxOlderThanDays {
+			return nil, deleteCountOut{}, fmt.Errorf("older_than_days must be between 1 and %d", maxOlderThanDays)
+		}
+
+		filter := store.HeldFilter{Forms: tokenForms(req)}
+		scope := "every form this token reaches"
+		if in.FormID != "" {
+			// Looked up in the token's own forms, so a form outside its bound
+			// answers exactly as one that does not exist.
+			names, err := s.formNames(tokenForms(req))
+			if err != nil {
+				return nil, deleteCountOut{}, err
+			}
+			name, ok := names[in.FormID]
+			if !ok {
+				return nil, deleteCountOut{}, fmt.Errorf("no form with id %q", in.FormID)
+			}
+			filter.Forms = store.OnlyForms([]string{in.FormID})
+			scope = name
+		}
+		if in.OlderThanDays > 0 {
+			filter.Before = time.Now().UTC().AddDate(0, 0, -in.OlderThanDays)
+			scope += fmt.Sprintf(", held more than %d days ago", in.OlderThanDays)
+		}
+
+		n, err := s.store.ClearHeld(filter, in.ExpectedCount)
+		var mismatch *store.CountMismatchError
+		if errors.As(err, &mismatch) {
+			// Not a tool error: the call was well-formed and the answer is
+			// "not now", with the number the client needs to look again.
+			return nil, deleteCountOut{OK: false, Message: fmt.Sprintf(
+				"Nothing was deleted: quarantine holds %d matching submissions (%s), not %d. "+
+					"Call list_quarantine to see what is held now, then call again with that count.",
+				mismatch.Actual, scope, mismatch.Expected)}, nil
+		}
+		if err != nil {
+			return nil, deleteCountOut{}, fmt.Errorf("emptying quarantine: %w", err)
+		}
+		return nil, deleteCountOut{OK: true, Deleted: n,
+			Message: fmt.Sprintf("Deleted %d quarantined submissions (%s).", n, scope)}, nil
 	})
 }
 
