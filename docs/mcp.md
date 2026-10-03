@@ -246,7 +246,8 @@ hides the normalisation — a `cidr` rule for `45.155.204.7/24` is stored as
 
 **Reading.** `list_submissions` defaults to unread and never includes
 quarantined submissions — `list_quarantine` is for those, and it carries the
-recorded reasons each was held. `get_stats` answers the "what is in the
+recorded reasons each was held and when. It can be narrowed to one form or to
+spam that has been in quarantine more than a number of days. `get_stats` answers the "what is in the
 database" question: unread, quarantined, waitlist entries, totals, per-form and
 per-day breakdowns, and which spam checks are firing most.
 
@@ -270,18 +271,26 @@ you can see what you are doing.
 match nothing, and it reports how many actually went rather than how many you
 asked for. It refuses an empty list rather than reading it as "all of them".
 
-**`empty_quarantine` deletes only what the client counted.** It clears
-quarantine in one call instead of a hundred ids at a time, so it takes a
-required `expected_count`: the number the client expects to delete, from
-`list_quarantine` or `get_stats`. The count and the delete happen together, and
-if quarantine holds a different number by then, nothing is deleted and the
-answer says how many there are. Quarantine can hold messages that were held by
-mistake; this is what stops spam that arrived after the client looked from
-being deleted unseen. It can be narrowed with `form_id` or with
-`older_than_days`, which counts from when a message entered quarantine, the
-same way the 30-day retention does: a message marked as spam today is one day
-old to both, however long ago it was submitted. It reaches only the forms the
-token does, and like `delete_quarantined` it never touches an inbox.
+**`empty_quarantine` checks a count before it deletes.** It clears quarantine
+in one call instead of a hundred ids at a time, so it takes a required
+`expected_count`. The client gets that number by calling `list_quarantine` with
+the same `form_id` and `older_than_days` it means to clear with, and passing the
+`total` that comes back; the list is exactly what the clear would delete. The
+count and the delete happen together, and if quarantine holds a different
+number by then, nothing is deleted and the reply has `ok: false`.
+
+That is a check on the number, not on which messages they are: one message
+restored and one arriving in between leave the count the same. It narrows the
+window in which spam held after the client looked can be deleted unseen; it
+does not close it. Quarantine can hold messages that were held by mistake, so
+a client should read the list before it clears.
+
+`older_than_days` counts from when a message entered quarantine, the same way
+the 30-day retention does. A message marked as spam today has been in
+quarantine for less than a day to both, however long ago it was submitted, and
+`held_at` on each listed row says when that was. `empty_quarantine` reaches
+only the forms the token does, and like `delete_quarantined` it never touches
+an inbox.
 
 ## What can go wrong
 

@@ -82,7 +82,9 @@ var scopedToolArgs = map[string]map[string]any{
 	"delete_quarantined": {"submission_ids": []any{"mdelh"}},
 	// A count that cannot match: the call answers with what it can see and
 	// deletes nothing, so the tools called after it still have quarantine to
-	// read. The mismatch message is where another form's spam count would leak.
+	// read. This test checks the reply for the other form's words and ids;
+	// that its count covers only the token's own forms is asserted by
+	// TestEmptyQuarantineStaysInsideTheTokensForms.
 	"empty_quarantine": {"expected_count": 999},
 }
 

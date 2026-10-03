@@ -69,6 +69,8 @@ type Store interface {
 	// Destructive.
 	DeleteHeld(ids []string, forms store.FormScope) (int, error)
 	ClearHeld(f store.HeldFilter, expected int) (int, error)
+	HeldSubmissionsWhere(f store.HeldFilter, limit, offset int) ([]store.Submission, error)
+	CountHeld(f store.HeldFilter) (int, error)
 	DeleteSubmission(id string) error
 }
 
@@ -99,6 +101,11 @@ type Options struct {
 	// shipping every submitter's address into it is a decision an operator
 	// should make rather than inherit. The admin UI shows IPs either way.
 	IncludeIPs bool
+
+	// Now is the clock the tools read, for the ones whose answer depends on
+	// the time (an age cutoff). Nil means time.Now. It is here so that
+	// behaviour can be tested without waiting for it.
+	Now func() time.Time
 }
 
 // Server builds the per-scope MCP servers and the HTTP handler in front of them.
@@ -131,6 +138,14 @@ func New(st Store, version string, opts Options) *Server {
 		}
 	}
 	return s
+}
+
+// now is the server's clock: Options.Now, or the wall clock.
+func (s *Server) now() time.Time {
+	if s.opts.Now != nil {
+		return s.opts.Now()
+	}
+	return time.Now()
 }
 
 // serverKey identifies a prebuilt server. Both axes, because which tools a
