@@ -137,14 +137,29 @@ func TestEmptyQuarantineOlderThanDays(t *testing.T) {
 	}, 8, 6, nil); err != nil {
 		t.Fatal(err)
 	}
+	// An inbox message from 40 days ago, marked as spam just now. It has been
+	// in quarantine for seconds, so "older than 30 days" must not reach it.
+	if err := h.store.CreateSubmission(store.Submission{
+		ID: "oldreal", FormID: "contact", RawData: `{"message":"hello"}`,
+		CreatedAt: time.Now().UTC().Add(-40 * 24 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.MarkSpam("oldreal", "admin"); err != nil {
+		t.Fatal(err)
+	}
 	session := h.connect(t)
 
 	out := decode[deleteCountOut](t, call(t, session, "empty_quarantine", map[string]any{"expected_count": 1, "older_than_days": 30}))
 	if !out.OK || out.Deleted != 1 {
 		t.Fatalf("out = %+v, want the one old message deleted", out)
 	}
-	if left := heldIDs(t, h); slices.Contains(left, "oldspam") || !slices.Contains(left, "spam1") {
+	left := heldIDs(t, h)
+	if slices.Contains(left, "oldspam") || !slices.Contains(left, "spam1") {
 		t.Errorf("held after clearing old spam = %v, want spam1 kept and oldspam gone", left)
+	}
+	if !slices.Contains(left, "oldreal") {
+		t.Errorf("held = %v; a message marked as spam just now was deleted as old", left)
 	}
 
 	// 0 is the same as leaving it out: every age.

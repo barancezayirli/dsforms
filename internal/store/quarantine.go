@@ -479,12 +479,13 @@ func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 // so a filter built without a scope can never mean "all of them".
 type HeldFilter struct {
 	Forms FormScope
-	// Before, when set, keeps only spam submitted strictly before it. Age is
-	// measured from created_at — when the message was submitted — and not from
-	// when it entered quarantine. That is the product's one definition of a
-	// held message's age: the retention sweep and the MCP clear both use it,
-	// through this field, so they cannot come to disagree.
-	Before time.Time
+	// HeldBefore, when set, keeps only spam that entered quarantine strictly
+	// before it. Age is counted from held_at — when the message was held, on
+	// arrival or by someone marking it as spam — and not from when it was
+	// submitted. That is the one definition of a held message's age: the
+	// retention sweep and the MCP clear both read it through this field, so
+	// they cannot come to disagree about the same message.
+	HeldBefore time.Time
 }
 
 // where is the one place a held-delete's WHERE clause is built, so the admin's
@@ -493,9 +494,13 @@ type HeldFilter struct {
 func (f HeldFilter) where() (string, []any) {
 	clause, args := f.Forms.clause("form_id")
 	clause = " WHERE is_held = 1" + clause
-	if !f.Before.IsZero() {
-		clause += " AND created_at < ?"
-		args = append(args, sqliteTimestamp(f.Before))
+	if !f.HeldBefore.IsZero() {
+		// held_at, with created_at standing in when none was recorded. The
+		// fallback is not optional: an empty held_at sorts before every
+		// timestamp, so a bare "held_at < ?" would select such a row for any
+		// cutoff at all and the sweep would delete it at once.
+		clause += " AND (CASE WHEN held_at = '' THEN created_at ELSE held_at END) < ?"
+		args = append(args, sqliteTimestamp(f.HeldBefore))
 	}
 	return clause, args
 }
@@ -571,11 +576,12 @@ func (s *Store) DeleteAllHeld() (int, error) {
 	return n, nil
 }
 
-// PurgeHeldOlderThan deletes held submissions created before cutoff and returns
-// how many went. The caller supplies the cutoff rather than a duration so the
+// PurgeHeldOlderThan deletes held submissions that entered quarantine before
+// cutoff and returns how many went. A message marked as spam gets the full
+// retention window from the day it was marked, however old the message is. The caller supplies the cutoff rather than a duration so the
 // sweep is testable without sleeping.
 func (s *Store) PurgeHeldOlderThan(cutoff time.Time) (int, error) {
-	n, err := deleteHeldWhere(s.conn(), HeldFilter{Forms: AllForms(), Before: cutoff})
+	n, err := deleteHeldWhere(s.conn(), HeldFilter{Forms: AllForms(), HeldBefore: cutoff})
 	if err != nil {
 		return 0, fmt.Errorf("purge held: %w", err)
 	}

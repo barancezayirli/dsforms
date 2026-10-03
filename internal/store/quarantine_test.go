@@ -1298,8 +1298,8 @@ func TestClearHeld(t *testing.T) {
 		{"every form", HeldFilter{Forms: AllForms()}, []string{"f1-new", "f1-old", "f2-new", "f2-old"}},
 		// A form-bound token clears its own forms and nothing else.
 		{"one form", HeldFilter{Forms: OnlyForms([]string{"f1"})}, []string{"f1-new", "f1-old"}},
-		{"older than a cutoff", HeldFilter{Forms: AllForms(), Before: cutoff}, []string{"f1-old", "f2-old"}},
-		{"one form and older", HeldFilter{Forms: OnlyForms([]string{"f2"}), Before: cutoff}, []string{"f2-old"}},
+		{"older than a cutoff", HeldFilter{Forms: AllForms(), HeldBefore: cutoff}, []string{"f1-old", "f2-old"}},
+		{"one form and older", HeldFilter{Forms: OnlyForms([]string{"f2"}), HeldBefore: cutoff}, []string{"f2-old"}},
 		// A scope naming no forms reaches nothing — never everything.
 		{"no forms", HeldFilter{Forms: OnlyForms(nil)}, nil},
 		{"zero scope", HeldFilter{}, nil},
@@ -1375,36 +1375,97 @@ func TestClearHeldTakesTheSignalsWithIt(t *testing.T) {
 	}
 }
 
-// A held message's age is counted from when it was submitted, not from when it
-// entered quarantine. This is deliberate, and it is one definition: the
-// retention sweep and ClearHeld both read it through HeldFilter.Before. A
-// message submitted 40 days ago and marked as spam today is therefore "older
-// than 30 days" to both. Changing one of them to count from held_at would make
-// the sweep and the MCP tool disagree about the same message.
-func TestHeldAgeIsCountedFromSubmissionForSweepAndClearAlike(t *testing.T) {
+// A held message's age is counted from when it entered quarantine, not from
+// when it was submitted — one definition, read by the retention sweep and by
+// ClearHeld alike through HeldFilter.HeldBefore.
+//
+// It used to be the submission date, which made the 30-day review promise false
+// for exactly the messages a person had just looked at: an inbox message older
+// than 30 days, marked as spam, was deleted at the next sweep.
+func TestHeldAgeIsCountedFromEnteringQuarantine(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()
 	cutoff := now.Add(-30 * 24 * time.Hour)
 
-	seed := func(t *testing.T) *Store {
+	// seed builds one held message: submitted at `submitted`, and in
+	// quarantine since `held` (zero means marked as spam just now).
+	seed := func(t *testing.T, submitted, held time.Time) *Store {
 		t.Helper()
 		s := mustNew(t)
 		seedForm(t, s, "f1")
-		if err := s.CreateSubmission(Submission{ID: "old", FormID: "f1", RawData: `{"m":"hi"}`, CreatedAt: now.Add(-40 * 24 * time.Hour)}); err != nil {
+		if err := s.CreateSubmission(Submission{ID: "m", FormID: "f1", RawData: `{"m":"hi"}`, CreatedAt: submitted}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.MarkSpam("old", "admin"); err != nil {
+		if _, err := s.MarkSpam("m", "admin"); err != nil {
 			t.Fatal(err)
+		}
+		if !held.IsZero() {
+			if _, err := s.conn().Exec("UPDATE submissions SET held_at = ? WHERE id = 'm'", sqliteTimestamp(held)); err != nil {
+				t.Fatal(err)
+			}
 		}
 		return s
 	}
 
-	sweep := seed(t)
-	if n, err := sweep.PurgeHeldOlderThan(cutoff); err != nil || n != 1 {
-		t.Errorf("the sweep deleted %d (%v), want 1", n, err)
+	cases := []struct {
+		name            string
+		submitted, held time.Time
+		swept           bool
+	}{
+		// The bug: 40 days old, but in quarantine for seconds.
+		{"old message marked as spam today", now.Add(-40 * 24 * time.Hour), time.Time{}, false},
+		{"marked as spam 29 days ago", now.Add(-50 * 24 * time.Hour), now.Add(-29 * 24 * time.Hour), false},
+		{"marked as spam 31 days ago", now.Add(-50 * 24 * time.Hour), now.Add(-31 * 24 * time.Hour), true},
 	}
-	clear := seed(t)
-	if n, err := clear.ClearHeld(HeldFilter{Forms: AllForms(), Before: cutoff}, 1); err != nil || n != 1 {
-		t.Errorf("ClearHeld deleted %d (%v), want 1", n, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			want := 0
+			if tc.swept {
+				want = 1
+			}
+
+			sweep := seed(t, tc.submitted, tc.held)
+			if n, err := sweep.PurgeHeldOlderThan(cutoff); err != nil || n != want {
+				t.Errorf("the sweep deleted %d (%v), want %d", n, err, want)
+			}
+			clear := seed(t, tc.submitted, tc.held)
+			if n, err := clear.ClearHeld(HeldFilter{Forms: AllForms(), HeldBefore: cutoff}, want); err != nil || n != want {
+				t.Errorf("ClearHeld deleted %d (%v), want %d", n, err, want)
+			}
+		})
+	}
+}
+
+// A held row with no held_at recorded falls back to its submission date. An
+// empty held_at compares as earlier than every cutoff, so without the fallback
+// such a row would be swept the moment the sweep ran, however new it was.
+func TestHeldAgeFallsBackToSubmissionWhenHeldAtIsMissing(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	cutoff := now.Add(-30 * 24 * time.Hour)
+
+	for _, tc := range []struct {
+		name      string
+		submitted time.Time
+		swept     int
+	}{
+		{"recent", now.Add(-time.Hour), 0},
+		{"old", now.Add(-40 * 24 * time.Hour), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := mustNew(t)
+			seedForm(t, s, "f1")
+			if err := s.CreateHeldSubmission(heldFixture("h", "f1", 8, tc.submitted), 8, 6, nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.conn().Exec("UPDATE submissions SET held_at = '' WHERE id = 'h'"); err != nil {
+				t.Fatal(err)
+			}
+			if n, err := s.PurgeHeldOlderThan(cutoff); err != nil || n != tc.swept {
+				t.Errorf("the sweep deleted %d (%v), want %d", n, err, tc.swept)
+			}
+		})
 	}
 }
