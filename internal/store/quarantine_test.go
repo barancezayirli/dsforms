@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1684,110 +1686,117 @@ func TestCountMismatchErrorNamesBothNumbers(t *testing.T) {
 	}
 }
 
-// Two clears of the same quarantine at once, on a real file database. One
-// deletes; the other finds the count gone and deletes nothing — never a lock
-// error, and never both.
-func TestConcurrentClearsOfOneQuarantine(t *testing.T) {
+// ClearHeld's count and delete are one atomic step with respect to every other
+// writer. Shown on a real file database, under sustained pressure: writers keep
+// holding new spam while clearers keep counting and clearing.
+//
+// A single race does not show this. Released once, the first goroutine runs
+// both of its statements on the warm connection before the others have opened
+// theirs, and the calls never overlap: an earlier version of this test passed
+// forty times in a row against a ClearHeld with no transaction at all. So the
+// overlap is manufactured by volume, and three things are held to account:
+//   - a clear that succeeds deleted exactly the number it was told to expect
+//   - a clear that is refused deleted nothing
+//   - at the end, every row written was deleted by a clear that counted it
+//
+// Without the transaction a writer lands between the count and the delete, and
+// the delete takes rows nobody counted.
+func TestClearHeldIsAtomicUnderConcurrentWrites(t *testing.T) {
 	t.Parallel()
 	s := fileStore(t)
 	seedForm(t, s, "f1")
 	now := time.Now().UTC()
-	for i := 0; i < 4; i++ {
-		if err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("h%d", i), "f1", 8, now), 8, 6, nil); err != nil {
-			t.Fatal(err)
-		}
-	}
+	all := HeldFilter{Forms: AllForms()}
 
-	var mu sync.Mutex
-	var deleted []int
-	var errs []error
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	for i := 0; i < 6; i++ {
-		wg.Add(1)
+	// A bounded workload. Unbounded writers starve everything else of the write
+	// lock and turn the test into one about lock fairness.
+	const writers, perWriter, clearers = 3, 150, 2
+
+	var written, deleted, succeeded, refused atomic.Int64
+	var writing sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		writing.Add(1)
+		go func(w int) {
+			defer writing.Done()
+			for i := 0; i < perWriter; i++ {
+				if err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("w%d-%d", w, i), "f1", 8, now), 8, 6, nil); err != nil {
+					t.Errorf("CreateHeldSubmission: %v", err)
+					return
+				}
+				written.Add(1)
+			}
+		}(w)
+	}
+	writersDone := make(chan struct{})
+	go func() {
+		writing.Wait()
+		close(writersDone)
+	}()
+
+	var clearing sync.WaitGroup
+	for c := 0; c < clearers; c++ {
+		clearing.Add(1)
 		go func() {
-			defer wg.Done()
-			<-start
-			n, err := s.ClearHeld(HeldFilter{Forms: AllForms()}, 4)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				errs = append(errs, err)
-			} else {
-				deleted = append(deleted, n)
+			defer clearing.Done()
+			for {
+				want, err := s.CountHeld(all)
+				if err != nil {
+					t.Errorf("CountHeld: %v", err)
+					return
+				}
+				if want == 0 {
+					// Nothing to clear yet, or nothing left. An empty queue is
+					// not an attempt: keep going until the writers have
+					// finished and it is still empty.
+					select {
+					case <-writersDone:
+						return
+					default:
+						runtime.Gosched()
+						continue
+					}
+				}
+				n, err := s.ClearHeld(all, want)
+				var mismatch *CountMismatchError
+				switch {
+				case err == nil:
+					if n != want {
+						t.Errorf("a clear expecting %d deleted %d", want, n)
+					}
+					deleted.Add(int64(n))
+					succeeded.Add(1)
+				case errors.As(err, &mismatch):
+					if n != 0 {
+						t.Errorf("a refused clear reported %d deleted", n)
+					}
+					refused.Add(1)
+				default:
+					// A lock error, or a count that did not match the delete:
+					// either means the two were not one step.
+					t.Errorf("ClearHeld: %v", err)
+					return
+				}
 			}
 		}()
 	}
-	close(start)
-	wg.Wait()
+	clearing.Wait()
 
-	if len(deleted) != 1 || deleted[0] != 4 {
-		t.Fatalf("successful clears = %v, want exactly one deleting 4 (errors: %v)", deleted, errs)
-	}
-	for _, err := range errs {
-		var mm *CountMismatchError
-		if !errors.As(err, &mm) || mm.Actual != 0 {
-			t.Errorf("a losing clear returned %v, want a mismatch reporting 0 held", err)
-		}
-	}
-}
-
-// A clear racing new spam arriving. Whatever the interleaving, a clear either
-// deletes exactly the number it was told to expect or deletes nothing: the
-// count and the delete can never straddle an arrival.
-func TestClearRacingNewArrivals(t *testing.T) {
-	t.Parallel()
-	s := fileStore(t)
-	seedForm(t, s, "f1")
-	now := time.Now().UTC()
-	const seeded, arriving = 4, 6
-	for i := 0; i < seeded; i++ {
-		if err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("h%d", i), "f1", 8, now), 8, 6, nil); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	var cleared int
-	var clearErr error
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-start
-		cleared, clearErr = s.ClearHeld(HeldFilter{Forms: AllForms()}, seeded)
-	}()
-	for i := 0; i < arriving; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			if err := s.CreateHeldSubmission(heldFixture(fmt.Sprintf("new%d", i), "f1", 8, now), 8, 6, nil); err != nil {
-				t.Errorf("CreateHeldSubmission: %v", err)
-			}
-		}(i)
-	}
-	close(start)
-	wg.Wait()
-
-	var mm *CountMismatchError
-	switch {
-	case clearErr == nil:
-		if cleared != seeded {
-			t.Errorf("cleared %d, want exactly the %d it expected", cleared, seeded)
-		}
-	case errors.As(clearErr, &mm):
-		if cleared != 0 {
-			t.Errorf("a refused clear deleted %d", cleared)
-		}
-	default:
-		t.Fatalf("ClearHeld: %v", clearErr)
-	}
-	left, err := s.CountHeld(HeldFilter{Forms: AllForms()})
+	left, err := s.CountHeld(all)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := seeded + arriving - cleared; left != want {
-		t.Errorf("%d held afterwards, want %d (seeded %d + arrived %d - cleared %d)", left, want, seeded, arriving, cleared)
+	if left != 0 {
+		t.Errorf("%d still held after the clearers finished", left)
 	}
+	if want := int64(writers * perWriter); written.Load() != want || deleted.Load() != want {
+		t.Errorf("wrote %d and deleted %d, want %d of each: a clear deleted rows it did not count, or missed some",
+			written.Load(), deleted.Load(), want)
+	}
+	// Both outcomes have to have happened, or the run showed nothing: no
+	// refusal means no writer ever got between a clearer's look and its clear.
+	if succeeded.Load() == 0 || refused.Load() == 0 {
+		t.Fatalf("%d clears succeeded and %d were refused; the test needs both to mean anything",
+			succeeded.Load(), refused.Load())
+	}
+	t.Logf("%d clears succeeded, %d refused", succeeded.Load(), refused.Load())
 }
