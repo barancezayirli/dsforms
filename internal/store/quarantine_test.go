@@ -1739,22 +1739,29 @@ func TestClearHeldIsAtomicUnderConcurrentWrites(t *testing.T) {
 		go func() {
 			defer clearing.Done()
 			for {
+				// Sampled before the count, not after. Read the other way
+				// round, a clearer can count zero, have the last writer commit
+				// and finish behind it, and then leave a row nobody clears.
+				// Zero counted after the writers are known to be done is final.
+				done := false
+				select {
+				case <-writersDone:
+					done = true
+				default:
+				}
 				want, err := s.CountHeld(all)
 				if err != nil {
 					t.Errorf("CountHeld: %v", err)
 					return
 				}
 				if want == 0 {
-					// Nothing to clear yet, or nothing left. An empty queue is
-					// not an attempt: keep going until the writers have
-					// finished and it is still empty.
-					select {
-					case <-writersDone:
+					// An empty queue is not an attempt: nothing to clear yet,
+					// or nothing left.
+					if done {
 						return
-					default:
-						runtime.Gosched()
-						continue
 					}
+					runtime.Gosched()
+					continue
 				}
 				n, err := s.ClearHeld(all, want)
 				var mismatch *CountMismatchError
@@ -1780,6 +1787,10 @@ func TestClearHeldIsAtomicUnderConcurrentWrites(t *testing.T) {
 		}()
 	}
 	clearing.Wait()
+	// A clearer that hit an error returns early. Wait for the writers as well,
+	// so none of them is still running, or reporting, when the test ends and
+	// the store under them is closed.
+	writing.Wait()
 
 	left, err := s.CountHeld(all)
 	if err != nil {

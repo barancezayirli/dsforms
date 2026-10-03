@@ -48,7 +48,6 @@ type Store interface {
 	GetSubmission(id string) (store.Submission, error)
 	GetUserByID(id string) (store.User, error)
 	HeldSince(days int, forms store.FormScope) (held, total int, err error)
-	HeldSubmissions(forms store.FormScope, limit, offset int) ([]store.Submission, error)
 	ListFilterRules() ([]screen.Rule, error)
 	ListForms(forms store.FormScope) ([]store.FormSummary, error)
 	ListSubmissionsFiltered(formID string, read store.ReadFilter, forms store.FormScope, limit, offset int) ([]store.Submission, error)

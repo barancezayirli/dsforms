@@ -235,7 +235,9 @@ func (s *Store) CreateHeldSubmission(sub Submission, score, threshold int, signa
 	return nil
 }
 
-// HeldSubmissions returns a page of the quarantine queue, newest first.
+// HeldSubmissions returns a page of the quarantine queue, most recently held
+// first. A message marked as spam today sorts above spam held on arrival last
+// week, however long ago it was submitted.
 func (s *Store) HeldSubmissions(forms FormScope, limit, offset int) ([]Submission, error) {
 	return s.HeldSubmissionsWhere(HeldFilter{Forms: forms}, limit, offset)
 }
