@@ -69,7 +69,8 @@ That park is not an undo — it is deleted once the new database answers, so a
 restore that succeeds on the wrong snapshot has nothing to go back to. Take
 your own copy first.
 
-**API tokens and login sessions are not in a snapshot.** They are cleared from
+**API tokens, login sessions and OAuth connections are not in a snapshot.**
+They are cleared from
 the copy, and the copy is rewritten so the hashes are gone from the file rather
 than merely unlinked. Two reasons: a backup gets copied to laptops and object
 stores and had no business carrying credential material, and — the sharper one —
@@ -116,7 +117,8 @@ restore safe to run without looking at what the snapshot predates.
 
 The cost is the other side of that. **After restoring, your API tokens are gone
 and everyone is signed out, including you.** MCP clients stop working until you
-mint new tokens. That is deliberate: a client or a person visibly stopping is a
+mint new tokens, and clients connected through OAuth sign in and are approved
+again. That is deliberate: a client or a person visibly stopping is a
 better failure than a revoked credential quietly working again — and the
 operator performing a restore was always signed out by it anyway, since their
 own session postdates the snapshot.

@@ -1,8 +1,6 @@
 package store
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -17,9 +15,6 @@ import (
 // recognisable as a credential by a human and by a secret scanner, which is how
 // a leaked one gets revoked before it is used.
 const APITokenPrefix = "dsf_"
-
-// apiTokenBytes is the size of the random part, before hex encoding.
-const apiTokenBytes = 32
 
 // APIToken is one API credential, as read back. It deliberately has no field for
 // the token itself: the raw value exists only in the return of CreateAPIToken
@@ -167,18 +162,29 @@ func joinScopes(scopes []string) string {
 // formIDs bounds the token to those forms; nil or empty means every form, and
 // the admin form sends nil when the operator leaves it at "All forms".
 func (s *Store) CreateAPIToken(userID, name string, scopes, formIDs []string, expiry time.Duration) (string, APIToken, error) {
+	raw, tok, err := insertAPIToken(s.conn(), userID, name, scopes, formIDs, expiry, "")
+	if err != nil {
+		return "", APIToken{}, fmt.Errorf("create api token: %w", err)
+	}
+	return raw, tok, nil
+}
+
+// insertAPIToken is the one way an api_tokens row is written, by hand or by an
+// OAuth grant, so a token from either path is the same thing to everything
+// that reads it. q is the database or a transaction. grantID is "" for a token
+// minted by hand.
+func insertAPIToken(q execQuerier, userID, name string, scopes, formIDs []string, expiry time.Duration, grantID string) (string, APIToken, error) {
 	if userID == "" {
 		// The foreign key would not catch this: '' is a value, not a missing
 		// one, and no users row has it — but neither does anything else, so the
 		// token would be unrevokable by deleting any account.
-		return "", APIToken{}, fmt.Errorf("create api token: userID must not be empty")
+		return "", APIToken{}, fmt.Errorf("userID must not be empty")
 	}
 
-	b := make([]byte, apiTokenBytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", APIToken{}, fmt.Errorf("create api token: %w", err)
+	raw, err := newSecret(APITokenPrefix)
+	if err != nil {
+		return "", APIToken{}, err
 	}
-	raw := APITokenPrefix + hex.EncodeToString(b)
 
 	tok := APIToken{
 		ID:        uuid.New().String(),
@@ -196,14 +202,14 @@ func (s *Store) CreateAPIToken(userID, name string, scopes, formIDs []string, ex
 		expiresAt = sqliteTimestamp(tok.ExpiresAt)
 	}
 
-	_, err := s.conn().Exec(
-		"INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, form_ids, created_at, expires_at) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+	_, err = q.Exec(
+		"INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, form_ids, created_at, expires_at, grant_id) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		tok.ID, tok.UserID, tok.Name, hashToken(raw), joinScopes(scopes), joinScopes(formIDs),
-		sqliteTimestamp(tok.CreatedAt), expiresAt,
+		sqliteTimestamp(tok.CreatedAt), expiresAt, grantID,
 	)
 	if err != nil {
-		return "", APIToken{}, fmt.Errorf("create api token: %w", err)
+		return "", APIToken{}, err
 	}
 	return raw, tok, nil
 }
@@ -233,11 +239,15 @@ func (s *Store) GetAPIToken(raw string) (APIToken, error) {
 	return tok, nil
 }
 
-// ListAPITokens returns one user's tokens, newest first. It cannot return
-// another user's, and there is no unscoped variant on purpose.
+// ListAPITokens returns one user's hand-made tokens, newest first. It cannot
+// return another user's, and there is no unscoped variant on purpose.
+//
+// Access tokens issued through OAuth are left out: one is minted every hour a
+// connected client refreshes, and they would bury the operator's own. Their
+// grant is listed instead, by ListOAuthGrants.
 func (s *Store) ListAPITokens(userID string) ([]APIToken, error) {
 	rows, err := s.conn().Query(
-		"SELECT "+apiTokenColumns+" FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC, id",
+		"SELECT "+apiTokenColumns+" FROM api_tokens WHERE user_id = ? AND grant_id = '' ORDER BY created_at DESC, id",
 		userID,
 	)
 	if err != nil {
@@ -283,13 +293,20 @@ func (s *Store) DeleteAPIToken(userID, id string) (bool, error) {
 // Callers treat a failure here as a log line, never as a failed request: the
 // request was already authenticated, and refusing it because a bookkeeping
 // column would not write turns a cosmetic problem into an outage.
+//
+// An OAuth access token also stamps its grant. The token itself rotates out
+// within the hour, taking its own last_used_at with it; the grant is what the
+// operator looks at to tell a connection in use from a forgotten one.
 func (s *Store) TouchAPIToken(id string) error {
-	_, err := s.conn().Exec(
-		"UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
-		sqliteTimestamp(time.Now()), id,
-	)
-	if err != nil {
+	now := sqliteTimestamp(time.Now())
+	if _, err := s.conn().Exec("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", now, id); err != nil {
 		return fmt.Errorf("touch api token: %w", err)
+	}
+	if _, err := s.conn().Exec(
+		"UPDATE oauth_grants SET last_used_at = ? WHERE id = (SELECT grant_id FROM api_tokens WHERE id = ? AND grant_id != '')",
+		now, id,
+	); err != nil {
+		return fmt.Errorf("touch api token grant: %w", err)
 	}
 	return nil
 }

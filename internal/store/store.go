@@ -320,6 +320,65 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 
+-- OAuth: the authorization server MCP clients sign in through when MCP_OAUTH is
+-- on. Every secret is stored as a hash, like sessions and api_tokens. The access
+-- tokens it issues are api_tokens rows (grant_id set), so nothing here is ever
+-- presented to /mcp directly.
+--
+-- oauth_clients are self-registered (RFC 7591) and public: no secret, PKCE
+-- instead. redirect_uris is newline-separated, a character a valid URI cannot
+-- hold unescaped. A client with no live grant is pruned after an hour.
+CREATE TABLE IF NOT EXISTS oauth_clients (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    redirect_uris TEXT NOT NULL,
+    grant_types   TEXT NOT NULL DEFAULT '',
+    created_at    DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+-- A code lives a minute and is redeemed once. The row is kept for a day past
+-- its expiry with used_at and grant_id set, so a replay within that day is
+-- recognised and revokes what the code issued.
+CREATE TABLE IF NOT EXISTS oauth_auth_codes (
+    code_hash      TEXT PRIMARY KEY,
+    client_id      TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    redirect_uri   TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    resource       TEXT NOT NULL DEFAULT '',
+    scopes         TEXT NOT NULL DEFAULT '',
+    form_ids       TEXT NOT NULL DEFAULT '',
+    expires_at     DATETIME NOT NULL,
+    used_at        DATETIME NOT NULL DEFAULT '',
+    grant_id       TEXT NOT NULL DEFAULT ''
+);
+
+-- A grant is one approved connection: what the operator consented to, for which
+-- client. It outlives its tokens and is what Connected apps lists and revokes.
+-- form_ids follows api_tokens: empty is every form.
+CREATE TABLE IF NOT EXISTS oauth_grants (
+    id           TEXT PRIMARY KEY,
+    client_id    TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- The address the approved code went to, which Connected apps shows.
+    redirect_uri TEXT NOT NULL DEFAULT '',
+    scopes       TEXT NOT NULL DEFAULT '',
+    form_ids     TEXT NOT NULL DEFAULT '',
+    created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+    last_used_at DATETIME NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_grants_user_id ON oauth_grants(user_id);
+
+-- Refresh tokens rotate on every use. A used one is kept until it would have
+-- expired, because seeing it again is how a stolen copy is detected.
+CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
+    token_hash TEXT PRIMARY KEY,
+    grant_id   TEXT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+    expires_at DATETIME NOT NULL,
+    used_at    DATETIME NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_refresh_tokens_grant ON oauth_refresh_tokens(grant_id);
+
 CREATE TABLE IF NOT EXISTS waitlists (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
@@ -394,6 +453,11 @@ func runAlterMigrations(db *sql.DB) error {
 		"ALTER TABLE submissions ADD COLUMN notified INTEGER NOT NULL DEFAULT 1",
 		// Empty is every form, so existing tokens keep the access they have.
 		"ALTER TABLE api_tokens ADD COLUMN form_ids TEXT NOT NULL DEFAULT ''",
+		// Empty is a token minted by hand. An OAuth access token carries the
+		// grant that issued it, so revoking the grant can find it.
+		// TestUpgradeFromAnUnscopedTokenTable covers this too: ListAPITokens
+		// filters on the column, so a missing ALTER fails it on a legacy table.
+		"ALTER TABLE api_tokens ADD COLUMN grant_id TEXT NOT NULL DEFAULT ''",
 	}
 	for _, q := range alters {
 		_, err := db.Exec(q)
@@ -408,6 +472,7 @@ func runAlterMigrations(db *sql.DB) error {
 	indexes := []string{
 		"CREATE INDEX IF NOT EXISTS idx_submissions_form_held ON submissions(form_id, is_held)",
 		"CREATE INDEX IF NOT EXISTS idx_submissions_held ON submissions(is_held)",
+		"CREATE INDEX IF NOT EXISTS idx_api_tokens_grant_id ON api_tokens(grant_id)",
 	}
 	for _, q := range indexes {
 		if _, err := db.Exec(q); err != nil {
@@ -428,9 +493,23 @@ func runSearchMigrations(db execQuerier) error {
 	return syncSearchIndex(db)
 }
 
+// fileDSN is the connection string for a database file, used by New and
+// Reopen alike so the two cannot drift.
+//
+// busy_timeout and _txlock=immediate are what make concurrent writers queue
+// instead of failing. In WAL mode with a pool, two deferred transactions can
+// both read, and the second to write then gets SQLITE_BUSY at once — no wait,
+// no retry. An OAuth code presented twice at once turned that into a replay
+// that revoked nothing, and a form submission arriving mid-exchange into a 500.
+// Immediate transactions take the write lock at BEGIN, and the timeout makes
+// a waiting writer wait rather than fail.
+func fileDSN(path string) string {
+	return path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate"
+}
+
 // New opens a SQLite database and runs migrations.
 func New(path string) (*Store, error) {
-	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+	dsn := fileDSN(path)
 	if path == ":memory:" {
 		// Use file URI for in-memory so pragmas apply correctly.
 		dsn = "file::memory:?_pragma=foreign_keys(1)"
@@ -522,8 +601,7 @@ func (s *Store) conn() *sql.DB {
 // old connection. If the old connection was already closed (e.g. by Import),
 // that close error is intentionally ignored.
 func (s *Store) Reopen(path string) error {
-	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
-	newDB, err := sql.Open("sqlite", dsn)
+	newDB, err := sql.Open("sqlite", fileDSN(path))
 	if err != nil {
 		return fmt.Errorf("reopen: open new db: %w", err)
 	}
@@ -1101,23 +1179,37 @@ func hashToken(token string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// secretBytes is the size of every bearer secret's random part, before hex
+// encoding: sessions, API tokens, and the OAuth codes and refresh tokens.
+const secretBytes = 32
+
+// newSecret returns prefix followed by 256 random bits in hex. It is the one
+// place a credential is generated, so all of them share one entropy floor and
+// one source.
+func newSecret(prefix string) (string, error) {
+	b := make([]byte, secretBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return prefix + hex.EncodeToString(b), nil
+}
+
 // CreateSession creates a new session for the given user and returns the raw token.
 func (s *Store) CreateSession(userID string, expiry time.Duration) (string, error) {
 	if userID == "" {
 		return "", fmt.Errorf("create session: userID must not be empty")
 	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	token, err := newSecret("")
+	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)
 	}
-	token := hex.EncodeToString(b)
 	tokenHash := hashToken(token)
 	// Formatted, not bound as a time.Time. The driver stringifies one with an
 	// offset ("2026-09-09T17:22:21.69-07:00"), which datetime('now') — UTC, no
 	// offset — neither parses nor compares against correctly, so expires_at is
 	// read as a plain string that sorts by the wrong digits.
 	expiresAt := sqliteTimestamp(time.Now().Add(expiry))
-	_, err := s.conn().Exec(
+	_, err = s.conn().Exec(
 		"INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
 		tokenHash, userID, expiresAt,
 	)

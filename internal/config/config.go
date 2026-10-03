@@ -64,6 +64,12 @@ type Config struct {
 	// Sending every submitter's address there should be a decision, not a
 	// default. The admin UI shows IPs either way.
 	MCPIncludeIPs bool
+
+	// MCPOAuth lets MCP clients sign in through OAuth as well as present an API
+	// token. Off by default: it opens a registration endpoint to the internet,
+	// and an instance whose clients all take a token has no use for one. It
+	// requires MCPEnabled, and so inherits the https rule above.
+	MCPOAuth bool
 }
 
 // Load reads configuration from environment variables.
@@ -73,6 +79,14 @@ func Load() Config {
 	mcpEnabled := envOrBool("MCP_ENABLED", false)
 	mcpAllowInsecure := envOrBool("MCP_ALLOW_INSECURE", false)
 	requireMCPTransportSecurity(mcpEnabled, mcpAllowInsecure, baseURL)
+	mcpOAuth := envOrBool("MCP_OAUTH", false)
+	if mcpOAuth && !mcpEnabled {
+		// A panic for the reason the transport check is one: the operator
+		// believes clients can sign in, and nothing would be listening.
+		panic("MCP_OAUTH is set but MCP_ENABLED is not. OAuth is how clients sign " +
+			"in to the MCP endpoint, so it needs the endpoint: set MCP_ENABLED=true, " +
+			"or unset MCP_OAUTH.")
+	}
 
 	return Config{
 		ListenAddr:           envOr("LISTEN_ADDR", ":8080"),
@@ -103,6 +117,7 @@ func Load() Config {
 		// with no message attached to it.
 		MCPTokenTTLDays: max(envOrInt("MCP_TOKEN_TTL_DAYS", 0), 0),
 		MCPIncludeIPs:   envOrBool("MCP_INCLUDE_IPS", false),
+		MCPOAuth:        mcpOAuth,
 	}
 }
 

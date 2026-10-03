@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +25,11 @@ type TokensStore interface {
 	CreateAPIToken(userID, name string, scopes, formIDs []string, expiry time.Duration) (string, store.APIToken, error)
 	DeleteAPIToken(userID, id string) (bool, error)
 	ListAPITokens(userID string) ([]store.APIToken, error)
+
+	// The OAuth clients this user approved, and disconnecting one. Owner-scoped
+	// for the same reason the token methods are.
+	ListOAuthGrants(userID string) ([]store.OAuthGrant, error)
+	RevokeOAuthGrant(userID, id string) (bool, error)
 
 	// ListForms is the exception to the scoping above, and it reads no personal
 	// data: the picker has to offer the forms that exist, and the list has to
@@ -46,6 +52,24 @@ type TokensHandler struct {
 	// revoke one after switching it off — but it says which it is, because a
 	// token that silently does nothing is a confusing afternoon.
 	MCPEnabled bool
+
+	// OAuthEnabled reflects MCP_OAUTH. Connected apps are listed whenever any
+	// exist, so one approved while it was on can still be disconnected after
+	// it is switched off; the empty state is only shown while it is on.
+	OAuthEnabled bool
+}
+
+// grantRow is one connected app as the page renders it.
+type grantRow struct {
+	ID         string
+	ClientName string
+	// RedirectHost is where the client receives codes. The name is whatever
+	// the client registered itself as; the host is the part that identifies it.
+	RedirectHost string
+	ScopeList    string
+	Reach        string
+	Connected    string
+	LastUsed     string
 }
 
 // tokenRow is one token as the page renders it.
@@ -92,6 +116,10 @@ type tokensData struct {
 	// form pages use for the endpoints they print.
 	BaseURL string
 
+	// Grants are the OAuth clients this user approved.
+	Grants       []grantRow
+	OAuthEnabled bool
+
 	// NewToken is the raw token, rendered once immediately after creation and
 	// never again.
 	//
@@ -107,23 +135,103 @@ type tokensData struct {
 // both an overlay and an ordinary page.
 type tokenFormData struct {
 	PageData
-	Scopes  []scopeOption
+	accessFields
 	Error   string
 	Enabled bool
 	TTLDays int
 
-	// Name and Ticked keep the operator's input when creation is refused, so a
-	// rejected form does not also lose what they typed.
-	Name   string
+	// Name keeps the operator's input when creation is refused, so a rejected
+	// form does not also lose what they typed.
+	Name string
+}
+
+// accessFields is what the access-fields template renders: which scopes and
+// which forms a credential gets. The token form and the OAuth consent page
+// embed it, so both offer the same choices and read them back the same way.
+type accessFields struct {
+	Scopes []scopeOption
 	Ticked map[string]bool
 
-	// Forms are the forms this operator can bind a token to, and TickedForms is
-	// which of them were chosen. AllForms is the radio's state: true is the
-	// default, because a picker that starts at "none" mints a token that can
-	// read nothing.
+	// Forms are the forms access can be bound to, and TickedForms is which of
+	// them were chosen. AllForms is the radio's state: true is the default,
+	// because a picker that starts at "none" grants access to nothing.
 	Forms       []store.FormSummary
 	TickedForms map[string]bool
 	AllForms    bool
+
+	// FormsUnavailable means the list of forms could not be read. The picker
+	// then says so, rather than "no forms yet" — which on a consent page reads
+	// as "this will reach every form you ever create".
+	FormsUnavailable bool
+}
+
+// newAccessFields renders a choice back onto the form.
+func newAccessFields(c accessChoice, forms []store.FormSummary) accessFields {
+	f := accessFields{
+		Scopes:      scopeOptions(),
+		Ticked:      map[string]bool{},
+		Forms:       forms,
+		TickedForms: map[string]bool{},
+		AllForms:    c.AllForms,
+	}
+	for _, s := range c.Scopes {
+		f.Ticked[s] = true
+	}
+	for _, id := range c.Forms {
+		f.TickedForms[id] = true
+	}
+	return f
+}
+
+// accessChoice is what a person ticked in the access fields.
+type accessChoice struct {
+	Scopes   []string
+	Forms    []string
+	AllForms bool
+}
+
+// readAccessChoice reads the access fields from a parsed form.
+//
+// Ticking a form binds access, whatever the radio says. The radio and the
+// checkboxes can disagree — there is no JavaScript coupling them, and a browser
+// submits boxes ticked before the radio moved. Reading the radio alone meant a
+// person who ticked "Careers" and forgot to move it got access to everything,
+// which is the one direction this must not fail in: granting more than was
+// asked for, silently. Binding instead can only grant less than intended, which
+// the list shows and a revoke undoes.
+func readAccessChoice(r *http.Request) accessChoice {
+	forms := r.Form["form_ids"]
+	return accessChoice{
+		Scopes:   r.Form["scopes"],
+		Forms:    forms,
+		AllForms: r.FormValue("reach") != "listed" && len(forms) == 0,
+	}
+}
+
+// formLister is the one store capability validating a choice needs.
+type formLister interface {
+	ListForms(forms store.FormScope) ([]store.FormSummary, error)
+}
+
+// validate turns a choice into the scopes and form ids to store. formIDs is
+// nil for every form.
+//
+// ValidateScopes rather than ParseScopes: this is a person stating an intent,
+// and silently granting less than they ticked is how someone spends an hour
+// debugging a refusal the form could have named.
+func (c accessChoice) validate(fl formLister) (mcpserver.Scopes, []string, error) {
+	scopes, err := mcpserver.ValidateScopes(c.Scopes)
+	if err != nil {
+		return nil, nil, err
+	}
+	if c.AllForms {
+		return scopes, nil, nil
+	}
+	formIDs, err := validateForms(fl, c.Forms)
+	if err != nil {
+		return nil, nil, err
+	}
+	return scopes, formIDs, nil
 }
 
 // scopeOptions builds the checkbox list from the package that owns the value
@@ -158,7 +266,7 @@ func (h *TokensHandler) Page(w http.ResponseWriter, r *http.Request) {
 // the rejected-form path below re-renders their actual choice, because
 // re-ticking a box they cleared would be the handler overruling them.
 func (h *TokensHandler) NewPage(w http.ResponseWriter, r *http.Request) {
-	h.renderForm(w, r, "", "", []string{string(mcpserver.ScopeRead)}, nil, true)
+	h.renderForm(w, r, "", "", accessChoice{Scopes: []string{string(mcpserver.ScopeRead)}, AllForms: true})
 }
 
 // renderForm draws the create form, as a fragment when the drawer asked for it
@@ -166,23 +274,13 @@ func (h *TokensHandler) NewPage(w http.ResponseWriter, r *http.Request) {
 //
 // Both presentations are defined in one template and share one body, so they
 // cannot drift into offering different scopes.
-func (h *TokensHandler) renderForm(w http.ResponseWriter, r *http.Request, errMsg, name string, ticked, tickedForms []string, allForms bool) {
+func (h *TokensHandler) renderForm(w http.ResponseWriter, r *http.Request, errMsg, name string, choice accessChoice) {
 	data := tokenFormData{
-		PageData:    h.Shell(w, r, "New API token", "tokens"),
-		Scopes:      scopeOptions(),
-		Error:       errMsg,
-		Enabled:     h.MCPEnabled,
-		TTLDays:     h.TTLDays,
-		Name:        name,
-		Ticked:      map[string]bool{},
-		TickedForms: map[string]bool{},
-		AllForms:    allForms,
-	}
-	for _, s := range ticked {
-		data.Ticked[s] = true
-	}
-	for _, f := range tickedForms {
-		data.TickedForms[f] = true
+		PageData: h.Shell(w, r, "New API token", "tokens"),
+		Error:    errMsg,
+		Enabled:  h.MCPEnabled,
+		TTLDays:  h.TTLDays,
+		Name:     name,
 	}
 
 	// A failure here loses the picker, not the page: the operator can still
@@ -192,7 +290,8 @@ func (h *TokensHandler) renderForm(w http.ResponseWriter, r *http.Request, errMs
 		log.Printf("tokens: listing forms for the picker: %v", err)
 		data.Degraded = true
 	}
-	data.Forms = forms
+	data.accessFields = newAccessFields(choice, forms)
+	data.FormsUnavailable = err != nil
 
 	if r.Header.Get("X-Fragment") != "" {
 		tmpl := h.Templates["token_new.html"]
@@ -213,10 +312,11 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 	user, _ := auth.UserFromContext(r.Context())
 
 	data := tokensData{
-		PageData: h.Shell(w, r, "API tokens", "tokens"),
-		Enabled:  h.MCPEnabled,
-		BaseURL:  h.Base.BaseURL,
-		NewToken: newToken,
+		PageData:     h.Shell(w, r, "API tokens", "tokens"),
+		Enabled:      h.MCPEnabled,
+		OAuthEnabled: h.OAuthEnabled,
+		BaseURL:      h.Base.BaseURL,
+		NewToken:     newToken,
 	}
 
 	tokens, err := h.Store.ListAPITokens(user.ID)
@@ -244,9 +344,35 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 		data.Tokens = append(data.Tokens, tokenRow{
 			APIToken:  t,
 			ScopeList: strings.Join(t.Scopes, ", "),
-			Reach:     describeReach(t, names),
+			Reach:     describeReach(t.Scope(), t.FormIDs, names),
 			LastUsed:  humanTime(t.LastUsedAt, "Never"),
 			Expires:   humanTime(t.ExpiresAt, "Never"),
+		})
+	}
+
+	grants, err := h.Store.ListOAuthGrants(user.ID)
+	if err != nil {
+		// Degraded for the reason the token list is: an empty section must not
+		// read as "nothing is connected" when it could not be read.
+		log.Printf("tokens: listing connected apps for %s: %v", user.ID, err)
+		data.Degraded = true
+	}
+	for _, g := range grants {
+		// The address the approved code went to, not the client's first
+		// registered one: a client may register several, and the one the
+		// operator saw on the consent page is the one to show.
+		host := g.RedirectURI
+		if u, err := url.Parse(g.RedirectURI); err == nil {
+			host = u.Host
+		}
+		data.Grants = append(data.Grants, grantRow{
+			ID:           g.ID,
+			ClientName:   g.ClientName,
+			RedirectHost: host,
+			ScopeList:    strings.Join(g.Scopes, ", "),
+			Reach:        describeReach(g.Scope(), g.FormIDs, names),
+			Connected:    humanTime(g.CreatedAt, "Unknown"),
+			LastUsed:     humanTime(g.LastUsedAt, "Never"),
 		})
 	}
 
@@ -287,24 +413,12 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
-	ticked := r.Form["scopes"]
-	tickedForms := r.Form["form_ids"]
-
-	// Ticking a form binds the token, whatever the radio says.
-	//
-	// The radio and the checkboxes can disagree — there is no JavaScript
-	// coupling them, and a browser submits boxes ticked before the radio moved.
-	// Reading the radio alone meant a person who ticked "Careers" and forgot to
-	// move it got a token reaching everything, which is the one direction this
-	// must not fail in: granting more than was asked for, silently. Binding
-	// instead can only grant less than intended, which the list shows and a
-	// revoke undoes.
-	allForms := r.FormValue("reach") != "listed" && len(tickedForms) == 0
+	choice := readAccessChoice(r)
 
 	// A refusal comes back on the form, carrying what was typed. Sending someone
 	// to the list on a typo drops them somewhere the form is not.
 	fail := func(msg string) {
-		h.renderForm(w, r, msg, name, ticked, tickedForms, allForms)
+		h.renderForm(w, r, msg, name, choice)
 	}
 
 	if name == "" {
@@ -316,22 +430,10 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ValidateScopes rather than ParseScopes: creating a token is a person
-	// stating an intent, and silently granting them less than they ticked is how
-	// someone spends an hour debugging a refusal the form could have named here.
-	scopes, err := mcpserver.ValidateScopes(ticked)
+	scopes, formIDs, err := choice.validate(h.Store)
 	if err != nil {
 		fail(capitalise(err.Error()) + ".")
 		return
-	}
-
-	var formIDs []string
-	if !allForms {
-		var err error
-		if formIDs, err = h.validateForms(tickedForms); err != nil {
-			fail(capitalise(err.Error()) + ".")
-			return
-		}
 	}
 
 	var expiry time.Duration
@@ -353,17 +455,17 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, raw)
 }
 
-// describeReach says what a token can see, in form names.
+// describeReach says what a token or a connected app can see, in form names.
 //
 // A form that has since been deleted keeps its id here rather than vanishing:
-// the token still names it, and a reach that silently shortened would tell an
-// operator the token is narrower than it is.
-func describeReach(t store.APIToken, names map[string]string) string {
-	if t.Scope().All() {
+// the credential still names it, and a reach that silently shortened would tell
+// an operator it is narrower than it is.
+func describeReach(scope store.FormScope, formIDs []string, names map[string]string) string {
+	if scope.All() {
 		return "All forms"
 	}
-	out := make([]string, 0, len(t.FormIDs))
-	for _, id := range t.FormIDs {
+	out := make([]string, 0, len(formIDs))
+	for _, id := range formIDs {
 		if name, ok := names[id]; ok {
 			out = append(out, name)
 			continue
@@ -376,14 +478,14 @@ func describeReach(t store.APIToken, names map[string]string) string {
 // validateForms checks the ids a person ticked against the forms that exist.
 //
 // Named rather than dropped, for the reason ValidateScopes gives: these arrive
-// from a person stating an intent, and silently discarding one produces a token
-// that reaches less than they asked for — or, if all of them go, nothing at
-// all, which would look like the feature is broken rather than like a typo.
-func (h *TokensHandler) validateForms(ids []string) ([]string, error) {
-	forms, err := h.Store.ListForms(store.AllForms())
+// from a person stating an intent, and silently discarding one produces access
+// to less than they asked for — or, if all of them go, nothing at all, which
+// would look like the feature is broken rather than like a typo.
+func validateForms(fl formLister, ids []string) ([]string, error) {
+	forms, err := fl.ListForms(store.AllForms())
 	if err != nil {
-		log.Printf("tokens: listing forms to validate a token's reach: %v", err)
-		return nil, fmt.Errorf("the list of forms could not be read, so this token cannot be limited to one")
+		log.Printf("access: listing forms to validate a choice: %v", err)
+		return nil, fmt.Errorf("the list of forms could not be read, so access cannot be limited to one")
 	}
 	known := make(map[string]bool, len(forms))
 	for _, f := range forms {
@@ -408,7 +510,7 @@ func (h *TokensHandler) validateForms(ids []string) ([]string, error) {
 		return nil, fmt.Errorf("no form with id %s", strings.Join(unknown, ", "))
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("choose at least one form, or give the token every form")
+		return nil, fmt.Errorf("choose at least one form, or allow every form")
 	}
 	return out, nil
 }
@@ -434,6 +536,27 @@ func (h *TokensHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	default:
 		log.Printf("tokens: revoked %s for user %s", id, user.Username)
 		flash.Set(w, h.SecretKey, "success", "Token revoked. Any client using it is refused from now on.")
+	}
+	http.Redirect(w, r, "/admin/tokens", http.StatusSeeOther)
+}
+
+// RevokeGrant disconnects one of the signed-in user's OAuth clients: its grant,
+// access tokens and refresh tokens go together. Scoped by owner in the store,
+// as Delete is.
+func (h *TokensHandler) RevokeGrant(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.UserFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+
+	removed, err := h.Store.RevokeOAuthGrant(user.ID, id)
+	switch {
+	case err != nil:
+		log.Printf("tokens: disconnecting grant %s for %s: %v", id, user.ID, err)
+		flash.Set(w, h.SecretKey, "error", "That app could not be disconnected.")
+	case !removed:
+		flash.Set(w, h.SecretKey, "success", "That app is already disconnected.")
+	default:
+		log.Printf("tokens: disconnected grant %s for user %s", id, user.Username)
+		flash.Set(w, h.SecretKey, "success", "App disconnected. It is refused from now on and has to be approved again to reconnect.")
 	}
 	http.Redirect(w, r, "/admin/tokens", http.StatusSeeOther)
 }

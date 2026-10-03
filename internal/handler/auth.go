@@ -3,11 +3,13 @@ package handler
 import (
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/auth"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/barancezayirli/dsforms/internal/store"
+	"github.com/barancezayirli/dsforms/internal/urlsafe"
 )
 
 // AuthStore is what login and logout need from storage.
@@ -41,6 +43,22 @@ type LoginData struct {
 	AssetVer         string
 	Version          string
 	Host             string
+	// Next is where to go after signing in, already checked to be a path on
+	// this server. Empty means the default landing page.
+	Next string
+}
+
+// loginNext returns raw if it is a path on this server and "" otherwise.
+//
+// next exists so the OAuth authorize endpoint can send a signed-out operator
+// through login and get them back. Everything else about it is an open
+// redirect, so the check is urlsafe.RelativePath — the guard that already
+// survived the known bypasses on _redirect — rather than a second one.
+func loginNext(raw string) string {
+	if raw == "" || !urlsafe.RelativePath(raw) {
+		return ""
+	}
+	return raw
 }
 
 // LoginPage renders the login form.
@@ -56,6 +74,7 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 		AssetVer:         h.AssetVer,
 		Version:          h.Version,
 		Host:             r.Host,
+		Next:             loginNext(r.URL.Query().Get("next")),
 	}
 	if err := h.Templates["login.html"].Execute(w, data); err != nil {
 		log.Printf("login template error: %v", err)
@@ -70,9 +89,17 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 //  3. Parse form: username, password
 //  4. Call store.CheckPassword(username, password)
 //  5. On failure: guard.RecordFailure(ip), redirect to /admin/login?error=1
-//  6. On success: guard.RecordSuccess(ip), create session cookie, redirect to /admin/forms
+//  6. On success: guard.RecordSuccess(ip), create session cookie, redirect to
+//     next if it is a local path, else /admin/forms
 func (h *AuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	ip := ExtractIP(r)
+	next := loginNext(r.FormValue("next"))
+	// A failed attempt keeps next, so a mistyped password does not lose the
+	// authorization the operator was in the middle of.
+	failed := "/admin/login?error=1"
+	if next != "" {
+		failed += "&next=" + url.QueryEscape(next)
+	}
 
 	if h.LoginGuard.IsLocked(ip) {
 		http.Error(w, "Too many failed attempts. Try again in 15 minutes.", http.StatusTooManyRequests)
@@ -85,7 +112,7 @@ func (h *AuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	user, err := h.Store.CheckPassword(username, password)
 	if err != nil {
 		h.LoginGuard.RecordFailure(ip)
-		http.Redirect(w, r, "/admin/login?error=1", http.StatusFound)
+		http.Redirect(w, r, failed, http.StatusFound)
 		return
 	}
 
@@ -93,12 +120,15 @@ func (h *AuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	token, err := h.Store.CreateSession(user.ID, 30*24*time.Hour)
 	if err != nil {
 		log.Printf("login: failed to create session: %v", err)
-		http.Redirect(w, r, "/admin/login?error=1", http.StatusFound)
+		http.Redirect(w, r, failed, http.StatusFound)
 		return
 	}
 	cookie := auth.CreateSessionCookie(token, h.BaseURL)
 	http.SetCookie(w, cookie)
-	http.Redirect(w, r, "/admin/forms", http.StatusFound)
+	if next == "" {
+		next = "/admin/forms"
+	}
+	http.Redirect(w, r, next, http.StatusFound)
 }
 
 // Logout clears the session cookie and redirects to the login page.

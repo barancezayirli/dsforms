@@ -3,6 +3,9 @@ package config
 import (
 	"github.com/barancezayirli/dsforms/internal/screen"
 
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -372,5 +375,72 @@ func TestMCPTokenTTLDays(t *testing.T) {
 				t.Errorf("MCPTokenTTLDays = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestMCPOAuth. OAuth is a mode of the MCP endpoint, so asking for it without
+// the endpoint is a misconfiguration to stop at boot: the operator believes
+// clients can sign in, and nothing is listening.
+func TestMCPOAuth(t *testing.T) {
+	tests := []struct {
+		name      string
+		enabled   string
+		oauth     string
+		wantPanic bool
+		want      bool
+	}{
+		{"off by default", "true", "", false, false},
+		{"on with MCP", "true", "true", false, true},
+		{"on without MCP refuses to start", "", "true", true, false},
+		{"off without MCP is fine", "", "false", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setAllRequired(t)
+			t.Setenv("BASE_URL", "https://forms.example.com")
+			t.Setenv("MCP_ENABLED", tt.enabled)
+			t.Setenv("MCP_OAUTH", tt.oauth)
+
+			if tt.wantPanic {
+				defer func() {
+					if r := recover(); r == nil {
+						t.Fatal("MCP_OAUTH without MCP_ENABLED started anyway")
+					}
+				}()
+				Load()
+				return
+			}
+			if got := Load().MCPOAuth; got != tt.want {
+				t.Errorf("MCPOAuth = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryVariableIsDocumented. docs/configuration.md is the reference an
+// operator reads, and it fell behind: every MCP variable shipped without a row
+// there. This reads the names Load actually reads, from this package's source,
+// so a variable added later fails here until it is documented.
+func TestEveryVariableIsDocumented(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile("config.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := regexp.MustCompile(`(?:envOr\w*|os\.Getenv|requireEnv)\("([A-Z_]+)"`).FindAllStringSubmatch(string(src), -1)
+	// A floor, so a pattern that silently matches nothing cannot pass.
+	if len(read) < 15 {
+		t.Fatalf("found only %d variables in config.go; the scan is not seeing them", len(read))
+	}
+
+	doc, err := os.ReadFile("../../docs/configuration.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range read {
+		if !strings.Contains(string(doc), "| `"+m[1]+"` |") {
+			t.Errorf("%s is read by config.go but has no row in docs/configuration.md", m[1])
+		}
 	}
 }

@@ -46,7 +46,8 @@ delete. No per-submission fee, no vendor, no Redis, no Postgres.
 - **MCP endpoint** (optional) — point an MCP client at your instance to list
   unread messages, read one, mark it as spam, or ask what is in the database.
   Revocable bearer tokens, scoped by permission and limitable to particular
-  forms; off unless you turn it on.
+  forms, or OAuth sign-in with a consent page for clients that need it; off
+  unless you turn it on.
 - **CLI** for user management, API tokens and snapshots from inside the container.
 - **~20MB image**, health check included.
 

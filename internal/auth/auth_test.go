@@ -244,3 +244,39 @@ func TestRequireAuthAnswers401ToFragmentRequests(t *testing.T) {
 		})
 	}
 }
+
+// TestRequireAuthRemembersWhereAGetWasGoing. A signed-out GET is sent to login
+// with the page it asked for, so signing in lands back on it. The OAuth
+// authorize endpoint depends on this: an operator who clicks "connect" in a
+// client while signed out must come back to the consent page, not the inbox.
+//
+// Only GETs: a POST's URL replayed as a GET after login is a different request,
+// so a POST goes to the plain login page as before.
+func TestRequireAuthRemembersWhereAGetWasGoing(t *testing.T) {
+	t.Parallel()
+	s, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	handler := RequireAuth(s)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	cases := []struct {
+		method, target, want string
+	}{
+		{"GET", "/oauth/authorize?client_id=c&state=a%20b", "/admin/login?next=%2Foauth%2Fauthorize%3Fclient_id%3Dc%26state%3Da%2520b"},
+		{"GET", "/admin/forms", "/admin/login?next=%2Fadmin%2Fforms"},
+		{"POST", "/admin/forms", "/admin/login"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.target, func(t *testing.T) {
+			t.Parallel()
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, httptest.NewRequest(tc.method, tc.target, nil))
+			if loc := w.Header().Get("Location"); loc != tc.want {
+				t.Errorf("Location = %q, want %q", loc, tc.want)
+			}
+		})
+	}
+}

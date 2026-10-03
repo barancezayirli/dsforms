@@ -546,6 +546,15 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
           </p>
         </div>
         <div class="card">
+          <div style="font-weight:500">Or let it sign in</div>
+          <p class="muted" style="font-size:13.5px;margin-top:4px">
+            For clients that cannot carry a token, turn on OAuth: the client
+            finds where to sign in, you approve it on a consent page that starts
+            at read only, and it shows up under Connected apps until you
+            disconnect it.
+          </p>
+        </div>
+        <div class="card">
           <div style="font-weight:500">Bound to the forms you pick</div>
           <p class="muted" style="font-size:13.5px;margin-top:4px">
             A bound token does not see the others at all — not refused, absent.
@@ -624,7 +633,7 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         <div class="card">
           <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-cloud-arrow-up"/></svg></span>
           <div style="font-size:14.5px;font-weight:500;margin-top:10px">Backup and restore</div>
-          <p class="muted" style="font-size:12.5px;margin-top:4px">A consistent snapshot while the server keeps running. API tokens and sessions are stripped both ways.</p>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">A consistent snapshot while the server keeps running. API tokens, sessions and OAuth connections are stripped both ways.</p>
           <div class="mono dim" style="font-size:10.5px;margin-top:6px">/admin/backups</div>
         </div>
         <div class="card">
@@ -671,8 +680,8 @@ footer{padding:34px 0 44px;background-image:linear-gradient(to right,transparent
         <div class="card">
           <span class="tile" style="margin:0"><svg class="i" style="font-size:15px"><use href="#ph-brackets-curly"/></svg></span>
           <div style="font-size:14.5px;font-weight:500;margin-top:10px">MCP endpoint</div>
-          <p class="muted" style="font-size:12.5px;margin-top:4px">Scoped bearer tokens, limitable to single forms. Off unless you enable it.</p>
-          <div class="mono dim" style="font-size:10.5px;margin-top:6px">MCP_ENABLED</div>
+          <p class="muted" style="font-size:12.5px;margin-top:4px">Scoped bearer tokens or OAuth sign-in, limitable to single forms. Off unless you enable it.</p>
+          <div class="mono dim" style="font-size:10.5px;margin-top:6px">MCP_ENABLED · MCP_OAUTH</div>
         </div>
       </div>
     </div>

@@ -27,6 +27,7 @@
       </div>
 
       <form class="card elev-md" method="POST" action="/admin/login" style="padding:22px">
+        {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         {{if .LoginError}}
         <!-- Tinted, not red: Nocturne is a mono palette and this is the same
              notice treatment every other warning in the admin uses. -->

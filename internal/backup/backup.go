@@ -37,7 +37,20 @@ import (
 // either, so they are re-minted after a recovery, and everyone signs in again.
 // Clients and people visibly stopping is the better failure than a revoked
 // credential quietly working again.
-var credentialTables = []string{"api_tokens", "sessions"}
+//
+// The OAuth tables follow the same rule. Codes and refresh tokens are bearer
+// secrets; a grant is what lets a refresh token mint access, so restoring one
+// would revive a connection the operator disconnected; and a client without its
+// grants is only an unapproved registration. A restore disconnects every OAuth
+// client, which signs in again.
+//
+// TestEverySchemaTableIsClassified fails on a table that is in neither this
+// list nor the test's list of data tables, so a new credential table cannot be
+// forgotten here silently.
+var credentialTables = []string{
+	"api_tokens", "sessions",
+	"oauth_clients", "oauth_auth_codes", "oauth_grants", "oauth_refresh_tokens",
+}
 
 // Export creates a snapshot of the DB using VACUUM INTO, with the credential
 // tables emptied.
