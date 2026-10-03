@@ -170,7 +170,7 @@ again before it touches the database.
 |---|---|
 | `read` | `list_forms`, `list_submissions`, `get_submission`, `search_submissions`, `list_quarantine`, `list_filter_rules`, `get_stats` |
 | `write` | `mark_read`, `mark_all_read`, `mark_spam`, `add_block_rule` |
-| `delete` | `delete_submission`, `delete_quarantined` |
+| `delete` | `delete_submission`, `delete_quarantined`, `empty_quarantine` |
 
 `delete` is separate from `write` on purpose: it is the one class of action
 nothing can undo, and a token that files spam should not also be able to erase
@@ -269,6 +269,17 @@ you can see what you are doing.
 **`delete_quarantined` cannot reach an inbox.** Ids that are not in quarantine
 match nothing, and it reports how many actually went rather than how many you
 asked for. It refuses an empty list rather than reading it as "all of them".
+
+**`empty_quarantine` deletes only what the client counted.** It clears
+quarantine in one call instead of a hundred ids at a time, so it takes a
+required `expected_count`: the number the client expects to delete, from
+`list_quarantine` or `get_stats`. The count and the delete happen together, and
+if quarantine holds a different number by then, nothing is deleted and the
+answer says how many there are. Quarantine can hold messages that were held by
+mistake; this is what stops spam that arrived after the client looked from
+being deleted unseen. It can be narrowed with `form_id` or `older_than_days`,
+it reaches only the forms the token does, and like `delete_quarantined` it
+never touches an inbox.
 
 ## What can go wrong
 
