@@ -479,7 +479,11 @@ func (s *Store) DeleteHeld(ids []string, forms FormScope) (int, error) {
 // so a filter built without a scope can never mean "all of them".
 type HeldFilter struct {
 	Forms FormScope
-	// Before, when set, keeps only spam created strictly before it.
+	// Before, when set, keeps only spam submitted strictly before it. Age is
+	// measured from created_at — when the message was submitted — and not from
+	// when it entered quarantine. That is the product's one definition of a
+	// held message's age: the retention sweep and the MCP clear both use it,
+	// through this field, so they cannot come to disagree.
 	Before time.Time
 }
 

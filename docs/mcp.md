@@ -277,9 +277,10 @@ required `expected_count`: the number the client expects to delete, from
 if quarantine holds a different number by then, nothing is deleted and the
 answer says how many there are. Quarantine can hold messages that were held by
 mistake; this is what stops spam that arrived after the client looked from
-being deleted unseen. It can be narrowed with `form_id` or `older_than_days`,
-it reaches only the forms the token does, and like `delete_quarantined` it
-never touches an inbox.
+being deleted unseen. It can be narrowed with `form_id` or with
+`older_than_days`, which counts from when a message was submitted, the same
+way the 30-day retention does. It reaches only the forms the token does, and
+like `delete_quarantined` it never touches an inbox.
 
 ## What can go wrong
 

@@ -1374,3 +1374,37 @@ func TestClearHeldTakesTheSignalsWithIt(t *testing.T) {
 		t.Errorf("%d signals outlived their submissions", n)
 	}
 }
+
+// A held message's age is counted from when it was submitted, not from when it
+// entered quarantine. This is deliberate, and it is one definition: the
+// retention sweep and ClearHeld both read it through HeldFilter.Before. A
+// message submitted 40 days ago and marked as spam today is therefore "older
+// than 30 days" to both. Changing one of them to count from held_at would make
+// the sweep and the MCP tool disagree about the same message.
+func TestHeldAgeIsCountedFromSubmissionForSweepAndClearAlike(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	cutoff := now.Add(-30 * 24 * time.Hour)
+
+	seed := func(t *testing.T) *Store {
+		t.Helper()
+		s := mustNew(t)
+		seedForm(t, s, "f1")
+		if err := s.CreateSubmission(Submission{ID: "old", FormID: "f1", RawData: `{"m":"hi"}`, CreatedAt: now.Add(-40 * 24 * time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.MarkSpam("old", "admin"); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+
+	sweep := seed(t)
+	if n, err := sweep.PurgeHeldOlderThan(cutoff); err != nil || n != 1 {
+		t.Errorf("the sweep deleted %d (%v), want 1", n, err)
+	}
+	clear := seed(t)
+	if n, err := clear.ClearHeld(HeldFilter{Forms: AllForms(), Before: cutoff}, 1); err != nil || n != 1 {
+		t.Errorf("ClearHeld deleted %d (%v), want 1", n, err)
+	}
+}
