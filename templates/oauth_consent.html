@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{if .Lang}}{{.Lang}}{{else}}en{{end}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>Connect a client — dsforms</title>
+  <title>{{.T "Connect a client — dsforms"}}</title>
   <link rel="icon" href="/static/favicon.svg?v={{.AssetVer}}" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css?v={{.AssetVer}}">
 </head>
@@ -27,18 +27,17 @@
       <div class="card elev-md" style="padding:22px">
         <div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Fatal}}</span></div>
         <p class="dim" style="font-size:12px;margin-top:12px">
-          Start the connection again from the client.
+          {{.T "Start the connection again from the client."}}
         </p>
       </div>
       {{else}}
       <form class="card elev-md" method="POST" action="/oauth/authorize" style="padding:22px">
-        <h4 style="margin:0 0 6px">Connect <strong>{{.ClientName}}</strong>?</h4>
+        <h4 style="margin:0 0 6px">{{.T "Connect"}} <strong>{{.ClientName}}</strong>?</h4>
         <!-- The name is whatever the client registered itself as, so it proves
              nothing. The host is where the code actually goes, and is the line
              an operator should read. -->
         <p style="font-size:13px;margin:0 0 4px">
-          It will act on your dsforms as <strong>{{.Username}}</strong>, and
-          sign-in results go to <strong>{{.RedirectHost}}</strong>.
+          {{.T "It will act on your dsforms as"}} <strong>{{.Username}}</strong>{{.T ", and sign-in results go to"}} <strong>{{.RedirectHost}}</strong>.
         </p>
         <p class="dim" style="font-size:11.5px;margin:0 0 14px;word-break:break-all">{{.RedirectURI}}</p>
 
@@ -46,8 +45,7 @@
         <!-- Shown, not pre-ticked: a client asks for whatever the server
              advertises, so the request is not a recommendation. -->
         <p class="form-hint" style="margin:0 0 12px">
-          {{.ClientName}} asked for {{.AskedFor}}. Only <strong>read</strong> is
-          ticked to start; tick the rest only if it needs them.
+          {{.T "%s asked for %s. Only read is ticked to start; tick the rest only if it needs them." .ClientName .AskedFor}}
         </p>
         {{end}}
 
@@ -58,7 +56,7 @@
         {{template "access-fields" .}}
 
         <span class="form-hint" style="display:block;margin-bottom:6px">
-          You can disconnect it any time under System &rarr; API tokens.
+          {{.T "You can disconnect it any time under System → API tokens."}}
         </span>
 
         <input type="hidden" name="client_id" value="{{.ClientID}}">
@@ -69,14 +67,19 @@
         <input type="hidden" name="consent" value="{{.Signature}}">
 
         <div style="display:flex;gap:8px;margin-top:16px">
-          <button class="btn btn-primary" type="submit" name="action" value="approve">Allow</button>
-          <button class="btn btn-secondary" type="submit" name="action" value="deny">Deny</button>
+          <button class="btn btn-primary" type="submit" name="action" value="approve">{{.T "Allow"}}</button>
+          <button class="btn btn-secondary" type="submit" name="action" value="deny">{{.T "Deny"}}</button>
         </div>
       </form>
       {{end}}
 
       <p class="dim" style="font-size:11px;text-align:center;margin-top:14px">
-        dsforms {{.Version}} · self-hosted
+        dsforms {{.Version}} · {{.T "self-hosted"}}
+      </p>
+      <p style="font-size:11px;text-align:center;margin-top:6px;display:flex;justify-content:center;gap:8px">
+        {{range .Languages}}
+        <a class="dim" href="{{$.LanguageURL .}}" {{if eq . $.Lang}}style="color:var(--fg);font-weight:600"{{end}}>{{.Name}}</a>
+        {{end}}
       </p>
     </div>
   </main>

@@ -2,14 +2,14 @@
 
 {{define "header-actions"}}
 <a class="btn btn-primary btn-34" href="/admin/users/new">
-  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Add user
+  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>{{.T "Add user"}}
 </a>
 {{end}}
 
 {{define "content"}}
 <div class="page-head">
-  <h4>Users</h4>
-  <span class="muted" style="font-size:13px">Everyone who can sign in to this instance.</span>
+  <h4>{{.T "Users"}}</h4>
+  <span class="muted" style="font-size:13px">{{.T "Everyone who can sign in to this instance."}}</span>
 </div>
 
 {{if .Error}}
@@ -21,7 +21,7 @@
     <div class="card elev-sm">
       <div class="table-wrap">
         <table class="table" style="min-width:420px">
-          <thead><tr><th>User</th><th>Added</th><th style="width:120px"></th></tr></thead>
+          <thead><tr><th>{{.T "User"}}</th><th>{{.T "Added"}}</th><th style="width:120px"></th></tr></thead>
           <tbody>
             {{range .Users}}
             <tr>
@@ -31,19 +31,19 @@
                   <div style="min-width:0">
                     <div style="font-size:13.5px">
                       {{.Username}}
-                      {{if .IsYou}}<span class="tag tag-accent tag-sm" style="margin-left:6px">you</span>{{end}}
+                      {{if .IsYou}}<span class="tag tag-accent tag-sm" style="margin-left:6px">{{$.T "you"}}</span>{{end}}
                     </div>
                   </div>
                 </div>
               </td>
-              <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
+              <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "02.01.2006"}}</td>
               <td style="text-align:right">
                 {{if .IsYou}}
-                <span class="dim" style="font-size:11px">Cannot remove yourself</span>
+                <span class="dim" style="font-size:11px">{{$.T "Cannot remove yourself"}}</span>
                 {{else}}
                 <form method="POST" action="/admin/users/{{.ID}}/delete"
-                      data-confirm="Remove {{.Username}}? Their sessions end immediately.">
-                  <button class="btn btn-quiet" type="submit">Remove</button>
+                      data-confirm="{{$.T "Remove %s? Their sessions end immediately." .Username}}">
+                  <button class="btn btn-quiet" type="submit">{{$.T "Remove"}}</button>
                 </form>
                 {{end}}
               </td>
@@ -57,13 +57,12 @@
 
   <div class="col-side" style="flex:1 1 300px">
     <div class="card elev-sm">
-      <span class="card-title">Your account</span>
+      <span class="card-title">{{.T "Your account"}}</span>
       <p class="card-body" style="flex:none">
-        Changing your password signs out every session on every device — this is
-        real, not a warning: the stored sessions are deleted.
+        {{.T "Changing your password signs out every session on every device — this is real, not a warning: the stored sessions are deleted."}}
       </p>
       <a class="btn btn-secondary btn-block" href="/admin/account">
-        <svg class="i" style="font-size:15px"><use href="#ph-lock-key"/></svg>Change password
+        <svg class="i" style="font-size:15px"><use href="#ph-lock-key"/></svg>{{.T "Change password"}}
       </a>
     </div>
   </div>

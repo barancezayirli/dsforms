@@ -2,8 +2,8 @@
 
 {{define "content"}}
 <div class="page-head">
-  <h4>New form</h4>
-  <span class="muted" style="font-size:13px">A name and a notify address is all it needs.</span>
+  <h4>{{.T "New form"}}</h4>
+  <span class="muted" style="font-size:13px">{{.T "A name and a notify address is all it needs."}}</span>
 </div>
 
 {{if .Error}}
@@ -15,39 +15,39 @@
 <form method="POST" action="/admin/forms/new" style="max-width:560px">
   <div class="card elev-sm">
     <label class="field">
-      <span>Name</span>
-      <input class="input" name="name" value="{{.Form.Name}}" required autofocus placeholder="Contact form">
+      <span>{{.T "Name"}}</span>
+      <input class="input" name="name" value="{{.Form.Name}}" required autofocus placeholder="{{.T "Contact form"}}">
     </label>
     <label class="field">
-      <span>Notify address</span>
+      <span>{{.T "Notify address"}}</span>
       <input class="input" type="email" name="email_to" value="{{.Form.EmailTo}}" placeholder="you@example.com">
-      <span class="form-hint">Leave empty to store submissions without emailing anyone.</span>
+      <span class="form-hint">{{.T "Leave empty to store submissions without emailing anyone."}}</span>
     </label>
     <label class="field">
-      <span>Redirect after submit</span>
+      <span>{{.T "Redirect after submit"}}</span>
       <input class="input" name="redirect" value="{{.Form.Redirect}}" placeholder="https://yoursite.com/thanks">
-      <span class="form-hint">If this is a full URL, it is also the allowlist for <code>_redirect</code>: any page on that origin is accepted.</span>
+      <span class="form-hint">{{.T "If this is a full URL, it is also the allowlist for _redirect: any page on that origin is accepted."}}</span>
     </label>
     <label class="field">
-      <span>Webhook URL</span>
+      <span>{{.T "Webhook URL"}}</span>
       <input class="input" name="webhook_url" value="{{.Form.WebhookURL}}" placeholder="https://hooks.slack.com/services/…">
     </label>
     <label class="field" style="margin-bottom:0">
-      <span>Webhook format</span>
+      <span>{{.T "Webhook format"}}</span>
       <select class="input" name="webhook_format">
-        <option value=""        {{if eq .Form.WebhookFormat ""}}selected{{end}}>None</option>
-        <option value="generic" {{if eq .Form.WebhookFormat "generic"}}selected{{end}}>Generic JSON</option>
-        <option value="slack"   {{if eq .Form.WebhookFormat "slack"}}selected{{end}}>Slack</option>
-        <option value="discord" {{if eq .Form.WebhookFormat "discord"}}selected{{end}}>Discord</option>
+        <option value=""        {{if eq .Form.WebhookFormat ""}}selected{{end}}>{{.T "None"}}</option>
+        <option value="generic" {{if eq .Form.WebhookFormat "generic"}}selected{{end}}>{{.T "Generic JSON"}}</option>
+        <option value="slack"   {{if eq .Form.WebhookFormat "slack"}}selected{{end}}>{{.T "Slack"}}</option>
+        <option value="discord" {{if eq .Form.WebhookFormat "discord"}}selected{{end}}>{{.T "Discord"}}</option>
       </select>
     </label>
   </div>
 
   <div style="display:flex;gap:8px;margin-top:12px">
     <button class="btn btn-primary" type="submit">
-      <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Create form
+      <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>{{.T "Create form"}}
     </button>
-    <a class="btn btn-secondary" href="/admin/forms">Cancel</a>
+    <a class="btn btn-secondary" href="/admin/forms">{{.T "Cancel"}}</a>
   </div>
 </form>
 {{end}}

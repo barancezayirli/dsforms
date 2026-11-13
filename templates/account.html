@@ -2,8 +2,8 @@
 
 {{define "content"}}
 <div class="page-head">
-  <h4>Your account</h4>
-  <span class="muted" style="font-size:13px">Signed in as <strong>{{.CurrentUser.Username}}</strong></span>
+  <h4>{{.T "Your account"}}</h4>
+  <span class="muted" style="font-size:13px">{{.T "Signed in as"}} <strong>{{.CurrentUser.Username}}</strong></span>
 </div>
 
 {{if .Error}}
@@ -12,30 +12,30 @@
 
 <form method="POST" action="/admin/account/password" style="max-width:420px">
   <div class="card elev-sm">
-    <span class="card-title">Change password</span>
+    <span class="card-title">{{.T "Change password"}}</span>
     <p class="card-body" style="flex:none">
-      This signs out every session on every device, including this one.
+      {{.T "This signs out every session on every device, including this one."}}
     </p>
 
     <label class="field">
-      <span>Current password</span>
+      <span>{{.T "Current password"}}</span>
       <input class="input" type="password" name="current_password" required autocomplete="current-password">
     </label>
     <label class="field">
-      <span>New password</span>
+      <span>{{.T "New password"}}</span>
       <input class="input" type="password" name="new_password" required autocomplete="new-password"
              data-strength="#pw-strength" data-strength-min="{{minPassword}}">
       <span class="strength" id="pw-strength" aria-hidden="true">
         <span></span><span></span><span></span><span></span>
       </span>
-      <span class="form-hint">bcrypt cost 12 · minimum {{minPassword}} characters</span>
+      <span class="form-hint">{{.T "bcrypt cost 12 · minimum %d characters" minPassword}}</span>
     </label>
     <label class="field" style="margin-bottom:0">
-      <span>Confirm new password</span>
+      <span>{{.T "Confirm new password"}}</span>
       <input class="input" type="password" name="confirm_password" required autocomplete="new-password">
     </label>
 
-    <button class="btn btn-primary btn-block" type="submit" style="margin-top:12px">Update password</button>
+    <button class="btn btn-primary btn-block" type="submit" style="margin-top:12px">{{.T "Update password"}}</button>
   </div>
 </form>
 {{end}}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/barancezayirli/dsforms/internal/i18n"
 	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
@@ -267,6 +268,26 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // triaging a queue actually reads: "6d", "3h", "just now".
 func Age(t time.Time) string {
 	return ageSince(t, time.Now())
+}
+
+// AgeIn is Age in a page's language. The English Age above stays for tests and
+// for callers that have no request, but every screen passes its language here.
+func AgeIn(lang i18n.Lang, t time.Time) string {
+	return ageSinceIn(lang, t, time.Now())
+}
+
+func ageSinceIn(lang i18n.Lang, t, now time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return i18n.T(lang, "just now")
+	case d < time.Hour:
+		return i18n.T(lang, "%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return i18n.T(lang, "%dh", int(d.Hours()))
+	default:
+		return i18n.T(lang, "%dd", int(d.Hours()/24))
+	}
 }
 
 // ageSince is Age with the clock injected, so every branch is reachable in a

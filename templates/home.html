@@ -2,7 +2,7 @@
 
 {{define "header-actions"}}
 <a class="btn btn-primary btn-34" href="/admin/forms/new">
-  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>New form
+  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>{{.T "New form"}}
 </a>
 {{end}}
 
@@ -13,7 +13,7 @@
     <div class="muted" style="font-size:13px;margin-top:4px">{{.Summary}}</div>
   </div>
   <div class="actions">
-    <form method="GET" class="seg" role="group" aria-label="Date range">
+    <form method="GET" class="seg" role="group" aria-label="{{.T "Date range"}}">
       {{$r := .Range}}
       <label class="seg-opt"><input type="radio" name="range" value="7"  data-autosubmit {{if eq $r 7}}checked{{end}}><span>7d</span></label>
       <label class="seg-opt"><input type="radio" name="range" value="30" data-autosubmit {{if eq $r 30}}checked{{end}}><span>30d</span></label>
@@ -48,10 +48,10 @@
   <div class="col-main" style="flex:2 1 440px">
     <div class="card elev-sm" style="height:100%">
       <div class="card-head">
-        <span class="card-title">Submissions over time</span>
+        <span class="card-title">{{.T "Submissions over time"}}</span>
         <div class="legend">
-          <span><span class="swatch" style="background:var(--a-500)"></span>Accepted</span>
-          <span><span class="swatch" style="background:var(--a-800)"></span>Quarantined</span>
+          <span><span class="swatch" style="background:var(--a-500)"></span>{{.T "Accepted"}}</span>
+          <span><span class="swatch" style="background:var(--a-800)"></span>{{.T "Quarantined"}}</span>
         </div>
       </div>
 
@@ -67,7 +67,7 @@
         </div>
         {{end}}
         <svg viewBox="{{ChartViewBox}}" preserveAspectRatio="none" role="img"
-             aria-label="Submissions per day, accepted and quarantined">
+             aria-label="{{.T "Submissions per day, accepted and quarantined"}}">
           {{$w := .BarWidth}}
           {{range .Bars}}
           <g>
@@ -85,8 +85,8 @@
 
   <div class="col-side" style="flex:1 1 280px;display:flex;flex-direction:column;gap:12px">
     <div class="card elev-sm">
-      <span class="card-title">Top spam signals</span>
-      <p class="card-meta">Weighted hits from the stored breakdowns, last {{.Range}} days</p>
+      <span class="card-title">{{.T "Top spam signals"}}</span>
+      <p class="card-meta">{{.T "Weighted hits from the stored breakdowns, last %d days" .Range}}</p>
       {{if .Signals}}
       <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
         {{range .Signals}}
@@ -103,31 +103,31 @@
         {{end}}
       </div>
       {{else}}
-      <p class="dim" style="font-size:12px">Nothing has been held in this period.</p>
+      <p class="dim" style="font-size:12px">{{.T "Nothing has been held in this period."}}</p>
       {{end}}
     </div>
 
     <div class="card elev-sm">
       <div class="card-head">
-        <span class="card-title">Rate limit</span>
+        <span class="card-title">{{.T "Rate limit"}}</span>
         <span class="tag tag-outline tag-sm">{{.RateLabel}}</span>
       </div>
       <!-- The limiter is in-process and resets on restart. Saying so is the
            difference between a useful panel and one that implies a history it
            does not keep. -->
-      <p class="card-meta">Per-IP activity since the last restart</p>
+      <p class="card-meta">{{.T "Per-IP activity since the last restart"}}</p>
       {{if .Activity}}
       <div style="display:flex;flex-direction:column;gap:0;margin-top:4px">
         {{range .Activity}}
         <div class="rule-b" style="display:flex;align-items:center;gap:8px;padding:7px 0;font-size:12px">
           <span class="mono truncate" style="flex:1;min-width:0">{{.IP}}</span>
           <span class="dim nowrap">{{.Requests}}</span>
-          <span class="tag tag-sm {{if eq .State "throttled"}}tag-outline{{else}}tag-neutral{{end}}">{{.State}}</span>
+          <span class="tag tag-sm {{if eq .State "throttled"}}tag-outline{{else}}tag-neutral{{end}}">{{$.T .State}}</span>
         </div>
         {{end}}
       </div>
       {{else}}
-      <p class="dim" style="font-size:12px">No form submissions since the last restart.</p>
+      <p class="dim" style="font-size:12px">{{.T "No form submissions since the last restart."}}</p>
       {{end}}
     </div>
   </div>
@@ -136,12 +136,12 @@
 <div class="row">
   <div class="col-main" style="flex:1.4 1 420px">
     <div class="card elev-sm">
-      <span class="card-title">By form</span>
+      <span class="card-title">{{.T "By form"}}</span>
       {{if .Forms}}
       <div class="table-wrap" style="margin-top:4px">
         <table class="table" style="min-width:460px">
           <thead>
-            <tr><th>Form</th><th>Received</th><th>Held</th><th>Unread</th><th>Read rate</th></tr>
+            <tr><th>{{.T "Form"}}</th><th>{{.T "Received"}}</th><th>{{.T "Held"}}</th><th>{{.T "Unread"}}</th><th>{{.T "Read rate"}}</th></tr>
           </thead>
           <tbody>
             {{range .Forms}}
@@ -165,14 +165,14 @@
         </table>
       </div>
       {{else}}
-      <p class="dim" style="font-size:12px">No forms yet.</p>
+      <p class="dim" style="font-size:12px">{{.T "No forms yet."}}</p>
       {{end}}
     </div>
   </div>
 
   <div class="col-side" style="flex:1 1 300px">
     <div class="card elev-sm">
-      <span class="card-title">Recent</span>
+      <span class="card-title">{{.T "Recent"}}</span>
       {{if .Recent}}
       <div style="display:flex;flex-direction:column;margin-top:4px">
         {{range .Recent}}
@@ -189,7 +189,7 @@
         {{end}}
       </div>
       {{else}}
-      <p class="dim" style="font-size:12px">Nothing has arrived yet.</p>
+      <p class="dim" style="font-size:12px">{{.T "Nothing has arrived yet."}}</p>
       {{end}}
     </div>
   </div>

@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{if .Lang}}{{.Lang}}{{else}}en{{end}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>Not found — dsforms</title>
+  <title>{{.T "Not found — dsforms"}}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -14,11 +14,11 @@
       <span class="empty-icon" style="margin:0 auto 14px">
         <svg class="i"><use href="#ph-question"/></svg>
       </span>
-      <h3 style="font-size:22px">Nothing here</h3>
+      <h3 style="font-size:22px">{{.T "Nothing here"}}</h3>
       <p class="muted" style="font-size:13px;margin-top:8px">
-        That page does not exist, or the form endpoint has been deleted.
+        {{.T "That page does not exist, or the form endpoint has been deleted."}}
       </p>
-      <a class="btn btn-primary" href="/admin" style="margin-top:16px">Back to the admin</a>
+      <a class="btn btn-primary" href="/admin" style="margin-top:16px">{{.T "Back to the admin"}}</a>
     </div>
   </main>
   {{template "icons"}}

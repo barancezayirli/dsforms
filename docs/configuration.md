@@ -15,6 +15,7 @@ SMTP — it just has nowhere to send the notification.
 | `SMTP_PASS` | No | — | SMTP password |
 | `SMTP_FROM` | For email | — | From address, e.g. `DSForms <noreply@example.com>` |
 | `LISTEN_ADDR` | No | `:8080` | HTTP listen address |
+| `DEFAULT_LANGUAGE` | No | `auto` | Language for a browser that has not chosen one: `auto` follows `Accept-Language`, or force `en` / `ru`. The switcher in the UI overrides it per browser. |
 | `BASE_URL` | No | — | Public URL. Sets the `Secure` cookie flag, builds links in emails, and acts as one of the origins `_redirect` may point at. |
 | `DB_PATH` | No | `/data/dsforms.db` | SQLite database path |
 | `SPAM_THRESHOLD` | No | `6` | Score at or above which a submission is held for review. Clamped to 1–20; `0` or unset means the default. Each form can override it in its settings. |

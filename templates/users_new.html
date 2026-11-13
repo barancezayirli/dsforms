@@ -2,7 +2,7 @@
 
 {{define "content"}}
 <div class="page-head">
-  <h4>Add user</h4>
+  <h4>{{.T "Add user"}}</h4>
 </div>
 
 {{if .Error}}
@@ -12,26 +12,26 @@
 <form method="POST" action="/admin/users/new" style="max-width:420px">
   <div class="card elev-sm">
     <label class="field">
-      <span>Username</span>
+      <span>{{.T "Username"}}</span>
       <input class="input" name="username" value="{{.FormUsername}}" required autofocus autocomplete="username">
     </label>
     <label class="field">
-      <span>Password</span>
+      <span>{{.T "Password"}}</span>
       <input class="input" type="password" name="password" required autocomplete="new-password"
              data-strength="#new-user-strength" data-strength-min="{{minPassword}}">
       <span class="strength" id="new-user-strength" aria-hidden="true">
         <span></span><span></span><span></span><span></span>
       </span>
-      <span class="form-hint">bcrypt cost 12 · minimum {{minPassword}} characters</span>
+      <span class="form-hint">{{.T "bcrypt cost 12 · minimum %d characters" minPassword}}</span>
     </label>
     <label class="field" style="margin-bottom:0">
-      <span>Confirm password</span>
+      <span>{{.T "Confirm password"}}</span>
       <input class="input" type="password" name="confirm_password" required autocomplete="new-password">
     </label>
   </div>
   <div style="display:flex;gap:8px;margin-top:12px">
-    <button class="btn btn-primary" type="submit">Add user</button>
-    <a class="btn btn-secondary" href="/admin/users">Cancel</a>
+    <button class="btn btn-primary" type="submit">{{.T "Add user"}}</button>
+    <a class="btn btn-secondary" href="/admin/users">{{.T "Cancel"}}</a>
   </div>
 </form>
 {{end}}

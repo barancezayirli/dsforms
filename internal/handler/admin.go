@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/i18n"
 	"github.com/barancezayirli/dsforms/internal/redact"
 	"github.com/barancezayirli/dsforms/internal/screen"
 	"github.com/barancezayirli/dsforms/internal/store"
@@ -199,7 +200,7 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 				WebhookURL:    webhookURL,
 				WebhookFormat: webhookFormat,
 			},
-			Error: "Form name is required.",
+			Error: h.T(r, "Form name is required."),
 		}
 		if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
 			log.Printf("form_new template error: %v", err)
@@ -230,7 +231,7 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 				Name: name, EmailTo: emailTo, Redirect: redirect,
 				WebhookURL: webhookURL, WebhookFormat: webhookFormat,
 			},
-			Error: "Redirect must be a full http(s) URL or a path starting with /.",
+			Error: h.T(r, "Redirect must be a full http(s) URL or a path starting with /."),
 		}
 		if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
 			log.Printf("form_new template error: %v", err)
@@ -246,7 +247,7 @@ func (h *AdminHandler) CreateForm(w http.ResponseWriter, r *http.Request) {
 				Name: name, EmailTo: emailTo, Redirect: redirect,
 				WebhookURL: webhookURL, WebhookFormat: webhookFormat,
 			},
-			Error: "Webhook URL must use http or https.",
+			Error: h.T(r, "Webhook URL must use http or https."),
 		}
 		if err := h.Templates["form_new.html"].ExecuteTemplate(w, "base", data); err != nil {
 			log.Printf("form_new template error: %v", err)
@@ -327,7 +328,7 @@ func (h *AdminHandler) renderFormEditError(w http.ResponseWriter, r *http.Reques
 		PageData: h.Shell(w, r, "Edit Form", "forms"),
 		Form:     f,
 		BaseURL:  h.BaseURL,
-		Error:    msg,
+		Error:    h.T(r, msg),
 	}
 	if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
 		log.Printf("form_edit template error: %v", err)
@@ -373,7 +374,7 @@ func (h *AdminHandler) EditForm(w http.ResponseWriter, r *http.Request) {
 			PageData: h.Shell(w, r, "Edit Form", "forms"),
 			Form:     f,
 			BaseURL:  h.BaseURL,
-			Error:    "Form name is required.",
+			Error:    h.T(r, "Form name is required."),
 		}
 		if err := h.Templates["form_edit.html"].ExecuteTemplate(w, "base", data); err != nil {
 			log.Printf("form_edit template error: %v", err)
@@ -442,7 +443,12 @@ func (h *AdminHandler) DeleteForm(w http.ResponseWriter, r *http.Request) {
 
 // Success renders the public success page (no auth required).
 func (h *AdminHandler) Success(w http.ResponseWriter, r *http.Request) {
-	if err := h.Templates["success.html"].Execute(w, nil); err != nil {
+	data := PageData{
+		Lang:      h.LanguageFor(r),
+		Path:      r.URL.RequestURI(),
+		Languages: i18n.Supported,
+	}
+	if err := h.Templates["success.html"].Execute(w, data); err != nil {
 		log.Printf("success template error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}

@@ -133,6 +133,7 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 	}
 
 	names, namesFailed := h.formNames()
+	lang := h.LanguageFor(r)
 	anySignalsFailed := false
 	rows := make([]heldRow, 0, len(held))
 	for _, sub := range held {
@@ -150,15 +151,19 @@ func (h *QuarantineHandler) Page(w http.ResponseWriter, r *http.Request) {
 			// An opaque id beats a blank cell.
 			name = sub.FormID
 		}
+		from := senderLabel(sub.Data)
+		if from == "Submission" {
+			from = h.T(r, "Submission")
+		}
 		rows = append(rows, heldRow{
 			Submission: sub,
 			FormName:   name,
 			Signals:    signals,
-			From:       senderLabel(sub.Data),
+			From:       from,
 			// Time in quarantine, not time since it was submitted: this is
 			// read against "Auto-deleted after N days", and it is the age
 			// the retention sweep counts.
-			Age:           Age(sub.QuarantinedSince()),
+			Age:           AgeIn(lang, sub.QuarantinedSince()),
 			SignalsFailed: signalsFailed,
 		})
 	}
@@ -242,14 +247,14 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	// "could not be restored" sends the operator back to the queue to hunt for a
 	// submission now sitting unread in the inbox.
 	alreadyRestored := func() {
-		done("success", "Already restored — it is in the inbox.", "already restored")
+		done("success", h.T(r, "Already restored — it is in the inbox."), "already restored")
 	}
 	// And the opposite case, which the first version of this fix reported as a
 	// success: the row is not merely un-held, it is gone. Retention purges after
 	// 30 days, so an operator working a stale queue hits this. Telling them it
 	// reached the inbox sends them looking for something that no longer exists.
 	gone := func() {
-		done("error", "That submission no longer exists — it was deleted or aged out of quarantine.", "gone")
+		done("error", h.T(r, "That submission no longer exists — it was deleted or aged out of quarantine."), "gone")
 	}
 
 	// The held submission is read first so the form can be resolved *before*
@@ -266,7 +271,7 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 			alreadyRestored()
 			return
 		}
-		done("error", "That submission could not be restored.", fmt.Sprintf("load: %v", err))
+		done("error", h.T(r, "That submission could not be restored."), fmt.Sprintf("load: %v", err))
 		return
 	}
 	form, err := h.Store.GetForm(sub.FormID)
@@ -274,7 +279,7 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// Names the actual cause. A generic message here would point the
 		// operator at the submission, which is fine, rather than at the form,
 		// which is not.
-		done("error", "That submission could not be restored — its form could not be read.",
+		done("error", h.T(r, "That submission could not be restored — its form could not be read."),
 			fmt.Sprintf("get form %s: %v", sub.FormID, err))
 		return
 	}
@@ -291,7 +296,7 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 			alreadyRestored()
 			return
 		}
-		done("error", "That submission could not be restored.", err.Error())
+		done("error", h.T(r, "That submission could not be restored."), err.Error())
 		return
 	}
 
@@ -317,7 +322,7 @@ func (h *QuarantineHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	flash.Set(w, h.SecretKey, "success", "Restored to "+form.Name+" as unread.")
+	flash.Set(w, h.SecretKey, "success", h.T(r, "Restored to %s as unread.", form.Name))
 	http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
 }
 
@@ -344,12 +349,12 @@ func (h *QuarantineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		// retries would otherwise reconcile against a count that never happened.
 		log.Printf("quarantine: delete: %v", err)
 		flash.Set(w, h.SecretKey, "error",
-			plural(n, "submission")+" deleted before the delete failed; the rest are still held.")
+			h.Plural(r, n, "submission")+" "+h.T(r, "deleted before the delete failed; the rest are still held."))
 	case err != nil:
 		log.Printf("quarantine: delete: %v", err)
-		flash.Set(w, h.SecretKey, "error", "Those submissions could not be deleted.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "Those submissions could not be deleted."))
 	default:
-		flash.Set(w, h.SecretKey, "success", plural(n, "submission")+" deleted.")
+		flash.Set(w, h.SecretKey, "success", h.Plural(r, n, "submission")+" "+h.T(r, "deleted."))
 	}
 	http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
 }
@@ -364,9 +369,9 @@ func (h *QuarantineHandler) Empty(w http.ResponseWriter, r *http.Request) {
 	n, err := h.Store.DeleteAllHeld()
 	if err != nil {
 		log.Printf("quarantine: empty: %v", err)
-		flash.Set(w, h.SecretKey, "error", "The quarantine could not be emptied.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "The quarantine could not be emptied."))
 	} else {
-		flash.Set(w, h.SecretKey, "success", plural(n, "submission")+" deleted.")
+		flash.Set(w, h.SecretKey, "success", h.Plural(r, n, "submission")+" "+h.T(r, "deleted."))
 	}
 	http.Redirect(w, r, "/admin/quarantine", http.StatusSeeOther)
 }
@@ -409,7 +414,7 @@ func (h *QuarantineHandler) Report(w http.ResponseWriter, r *http.Request) {
 		sub.ID, sub.FormID, sub.SpamScore, sub.HeldThreshold, strings.Join(rules, " "))
 
 	flash.Set(w, h.SecretKey, "success",
-		"Logged as a false positive. Restore it too if you have not already.")
+		h.T(r, "Logged as a false positive. Restore it too if you have not already."))
 	http.Redirect(w, r, "/admin/quarantine?sel="+sub.ID, http.StatusSeeOther)
 }
 
@@ -545,7 +550,7 @@ func (h *QuarantineHandler) AddRule(w http.ResponseWriter, r *http.Request) {
 		h.renderRules(w, r, strings.TrimPrefix(err.Error(), "add filter rule: "))
 		return
 	}
-	flash.Set(w, h.SecretKey, "success", "Rule added.")
+	flash.Set(w, h.SecretKey, "success", h.T(r, "Rule added."))
 	http.Redirect(w, r, "/admin/rules", http.StatusSeeOther)
 }
 
@@ -556,14 +561,14 @@ func (h *QuarantineHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err != nil:
 		log.Printf("rules: delete %s: %v", id, err)
-		flash.Set(w, h.SecretKey, "error", "That rule could not be removed.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "That rule could not be removed."))
 	case !removed:
 		// Confirming a removal that did not happen leaves the operator believing
 		// the filter is configured differently than it is.
 		log.Printf("rules: delete %s: no such rule", id)
-		flash.Set(w, h.SecretKey, "error", "That rule no longer exists.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "That rule no longer exists."))
 	default:
-		flash.Set(w, h.SecretKey, "success", "Rule removed.")
+		flash.Set(w, h.SecretKey, "success", h.T(r, "Rule removed."))
 	}
 	http.Redirect(w, r, "/admin/rules", http.StatusSeeOther)
 }

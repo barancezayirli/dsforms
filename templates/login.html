@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{if .Lang}}{{.Lang}}{{else}}en{{end}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>Login — dsforms</title>
+  <title>{{.T "Login — dsforms"}}</title>
   <link rel="icon" href="/static/favicon.svg?v={{.AssetVer}}" type="image/svg+xml">
   <!-- The same stylesheet the admin uses. This page used to carry its own copy
        of the design tokens, which is how the two drifted apart. -->
@@ -33,7 +33,7 @@
              notice treatment every other warning in the admin uses. -->
         <div class="notice" style="margin-bottom:14px">
           <svg class="i"><use href="#ph-warning"/></svg>
-          <span>Invalid username or password.</span>
+          <span>{{.T "Invalid username or password."}}</span>
         </div>
         {{end}}
 
@@ -43,30 +43,33 @@
              is the only action that revokes the token that is still live. -->
         <div class="notice" style="margin-bottom:14px">
           <svg class="i"><use href="#ph-warning"/></svg>
-          <span>You were signed out of this browser, but the session could not be
-            ended on the server and stays valid until it expires. Sign in and
-            change your password to revoke it.</span>
+          <span>{{.T "You were signed out of this browser, but the session could not be ended on the server and stays valid until it expires. Sign in and change your password to revoke it."}}</span>
         </div>
         {{end}}
 
         <label class="field">
-          <span>Username</span>
+          <span>{{.T "Username"}}</span>
           <input class="input" name="username" required autofocus autocomplete="username">
         </label>
         <label class="field">
-          <span>Password</span>
+          <span>{{.T "Password"}}</span>
           <input class="input" type="password" name="password" required autocomplete="current-password">
         </label>
 
-        <button class="btn btn-primary btn-block" type="submit" style="height:38px">Log in</button>
+        <button class="btn btn-primary btn-block" type="submit" style="height:38px">{{.T "Log in"}}</button>
 
         <p class="dim" style="font-size:11px;text-align:center;margin-top:12px">
-          5 attempts, then a 15-minute lockout on this IP.
+          {{.T "5 attempts, then a 15-minute lockout on this IP."}}
         </p>
       </form>
 
       <p class="dim" style="font-size:11px;text-align:center;margin-top:14px">
-        {{.Host}} · dsforms {{.Version}} · self-hosted
+        {{.Host}} · dsforms {{.Version}} · {{.T "self-hosted"}}
+      </p>
+      <p style="font-size:11px;text-align:center;margin-top:6px;display:flex;justify-content:center;gap:8px">
+        {{range .Languages}}
+        <a class="dim" href="{{$.LanguageURL .}}" {{if eq . $.Lang}}style="color:var(--fg);font-weight:600"{{end}}>{{.Name}}</a>
+        {{end}}
       </p>
     </div>
   </main>

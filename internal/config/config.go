@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/barancezayirli/dsforms/internal/i18n"
 	"github.com/barancezayirli/dsforms/internal/screen"
 )
 
@@ -16,6 +17,11 @@ type Config struct {
 	BaseURL    string
 	DBPath     string
 	SecretKey  string
+
+	// DefaultLanguage is the language an unconfigured browser gets. "auto"
+	// follows Accept-Language and falls back to English; "en" and "ru" force a
+	// language. A browser can always override it with the switcher in the UI.
+	DefaultLanguage string
 
 	SMTPHost string
 	SMTPPort int
@@ -93,6 +99,7 @@ func Load() Config {
 		BaseURL:              baseURL,
 		DBPath:               envOr("DB_PATH", "/data/dsforms.db"),
 		SecretKey:            requireEnv("SECRET_KEY"),
+		DefaultLanguage:      defaultLanguage(),
 		SMTPHost:             os.Getenv("SMTP_HOST"),
 		SMTPPort:             envOrInt("SMTP_PORT", 587),
 		SMTPUser:             os.Getenv("SMTP_USER"),
@@ -159,6 +166,25 @@ func requireMCPTransportSecurity(enabled, allowInsecure bool, baseURL string) {
 			"Set BASE_URL to the https:// address clients actually use, or set "+
 			"MCP_ALLOW_INSECURE=true if this instance is only reachable over "+
 			"localhost or a trusted private network.", baseURL))
+}
+
+// defaultLanguage resolves DEFAULT_LANGUAGE.
+//
+// An unset value means "auto": a Russian browser gets Russian and everyone else
+// gets English. A named language forces that language for browsers that have not
+// chosen one, which is useful for an internal deployment where the operator does
+// not want the browser to decide. A typo is refused at startup rather than
+// silently read as English — the same reason envOrBool refuses one.
+func defaultLanguage() string {
+	raw := strings.TrimSpace(os.Getenv("DEFAULT_LANGUAGE"))
+	if raw == "" || strings.EqualFold(raw, string(i18n.Auto)) {
+		return string(i18n.Auto)
+	}
+	lang := i18n.Normalize(raw)
+	if !lang.Valid() {
+		panic(fmt.Sprintf("DEFAULT_LANGUAGE must be auto, en or ru, got %q", raw))
+	}
+	return string(lang)
 }
 
 // envOrBool reads a boolean environment variable.

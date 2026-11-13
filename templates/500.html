@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{if .Lang}}{{.Lang}}{{else}}en{{end}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>Server error — dsforms</title>
+  <title>{{.T "Server error — dsforms"}}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -14,12 +14,11 @@
       <span class="empty-icon" style="margin:0 auto 14px">
         <svg class="i"><use href="#ph-warning"/></svg>
       </span>
-      <h3 style="font-size:22px">Something went wrong</h3>
+      <h3 style="font-size:22px">{{.T "Something went wrong"}}</h3>
       <p class="muted" style="font-size:13px;margin-top:8px">
-        The details are in the server log — dsforms deliberately does not put
-        them on this page.
+        {{.T "The details are in the server log — dsforms deliberately does not put them on this page."}}
       </p>
-      <a class="btn btn-primary" href="/admin" style="margin-top:16px">Back to the admin</a>
+      <a class="btn btn-primary" href="/admin" style="margin-top:16px">{{.T "Back to the admin"}}</a>
     </div>
   </main>
   {{template "icons"}}

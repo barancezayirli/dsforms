@@ -5,12 +5,14 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 
 	"github.com/barancezayirli/dsforms/internal/auth"
 	"github.com/barancezayirli/dsforms/internal/flash"
+	"github.com/barancezayirli/dsforms/internal/i18n"
 	"github.com/barancezayirli/dsforms/internal/store"
 )
 
@@ -38,6 +40,10 @@ type Base struct {
 	DBPath    string
 	Version   string
 	AssetVer  string // content hash appended to /static URLs for cache busting
+
+	// DefaultLanguage is config.DefaultLanguage: "auto" follows the browser,
+	// otherwise it is the language a browser without a choice sees.
+	DefaultLanguage string
 
 	// Journal is the database's actual journal mode, read once at startup.
 	//
@@ -69,6 +75,9 @@ type PageData struct {
 	Active      string // which sidebar item is current
 	Crumb       string // the small line above the title in the header
 	Query       string // current search term, so the header input keeps it
+	Lang        i18n.Lang
+	Path        string // current request URI, so the language switcher returns here
+	Languages   []i18n.Lang
 	Version     string
 	AssetVer    string
 	CurrentUser store.User
@@ -92,6 +101,43 @@ type PageData struct {
 	// Fragment responses do not go through base.html, so they render the
 	// "degraded-notice" define directly.
 	Degraded bool
+}
+
+// T translates a phrase for this page's language. Templates call it as
+// {{.T "Forms"}}; an empty Lang (a zero PageData in a test) renders English.
+func (p PageData) T(key string, args ...any) string {
+	return i18n.T(p.Lang, key, args...)
+}
+
+// Plural renders a count and noun in this page's language.
+func (p PageData) Plural(n int, noun string) string {
+	return i18n.Plural(p.Lang, n, noun)
+}
+
+// LanguageURL is the switcher link that keeps the operator on this page.
+func (p PageData) LanguageURL(lang i18n.Lang) string {
+	q := url.Values{"lang": {string(lang)}}
+	if p.Path != "" {
+		q.Set("next", p.Path)
+	}
+	return "/admin/language?" + q.Encode()
+}
+
+// LanguageFor is the language selected for this request, and the helper every
+// standalone page needs. Shell carries the same value on PageData.
+func (b *Base) LanguageFor(r *http.Request) i18n.Lang {
+	return i18n.FromRequest(r, b.DefaultLanguage)
+}
+
+// T translates a phrase for this request. Handlers use it for flashes and inline
+// errors, which are not template text and so cannot call PageData.T.
+func (b *Base) T(r *http.Request, key string, args ...any) string {
+	return i18n.T(b.LanguageFor(r), key, args...)
+}
+
+// Plural renders a count for this request, for handler-built summaries.
+func (b *Base) Plural(r *http.Request, n int, noun string) string {
+	return i18n.Plural(b.LanguageFor(r), n, noun)
 }
 
 // navGroups maps a sidebar item to the group heading above it. The header
@@ -132,12 +178,16 @@ var navGroups = map[string]string{
 func (b *Base) Shell(w http.ResponseWriter, r *http.Request, title, active string) PageData {
 	user, _ := auth.UserFromContext(r.Context())
 	flashType, flashMsg := flash.Get(r, w, b.SecretKey)
+	lang := b.LanguageFor(r)
 
 	data := PageData{
-		Title:       title,
+		Title:       i18n.T(lang, title),
 		Active:      active,
-		Crumb:       navGroups[active],
+		Crumb:       i18n.T(lang, navGroups[active]),
 		Query:       r.URL.Query().Get("q"),
+		Lang:        lang,
+		Path:        r.URL.RequestURI(),
+		Languages:   i18n.Supported,
 		Version:     b.Version,
 		AssetVer:    b.AssetVer,
 		CurrentUser: user,

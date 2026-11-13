@@ -93,7 +93,7 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	if err := r.ParseMultipartForm(100 << 20); err != nil {
 		log.Printf("backup import: parse multipart: %v", err)
-		flash.Set(w, h.SecretKey, "error", "Failed to read uploaded file.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "Failed to read uploaded file."))
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return
 	}
@@ -101,7 +101,7 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		log.Printf("backup import: get form file: %v", err)
-		flash.Set(w, h.SecretKey, "error", "No file uploaded.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "No file uploaded."))
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return
 	}
@@ -121,7 +121,7 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("backup import: create temp file beside %s: %v", h.DBPath, err)
 		flash.Set(w, h.SecretKey, "error",
-			"Could not stage the upload next to the database. Your database is unchanged.")
+			h.T(r, "Could not stage the upload next to the database. Your database is unchanged."))
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return
 	}
@@ -131,7 +131,7 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(tmp, file); err != nil {
 		tmp.Close()
 		log.Printf("backup import: write temp file: %v", err)
-		flash.Set(w, h.SecretKey, "error", "Failed to save uploaded file.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "Failed to save uploaded file."))
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return
 	}
@@ -147,11 +147,10 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, backup.ErrUnavailable):
 			flash.Set(w, h.SecretKey, "error",
-				"Restore failed and the database could not be reopened. "+
-					"The service needs to be restarted.")
+				h.T(r, "Restore failed and the database could not be reopened. The service needs to be restarted."))
 		case errors.Is(err, backup.ErrRolledBack):
 			flash.Set(w, h.SecretKey, "error",
-				"Restore failed. Your existing database is unchanged and still in use.")
+				h.T(r, "Restore failed. Your existing database is unchanged and still in use."))
 		case errors.Is(err, backup.ErrNotAttempted):
 			// Before ErrRejected, which this also is: nothing was touched. But
 			// the obstacle is on this side — the live database's own state, a
@@ -161,12 +160,10 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 			// "that file was rejected" would send the operator to re-export and
 			// re-upload the one thing that was not the problem.
 			flash.Set(w, h.SecretKey, "error",
-				"The restore could not be started, and not because of the file you "+
-					"uploaded. Your database is unchanged. Check the server log for "+
-					"what is in the way, then try again.")
+				h.T(r, "The restore could not be started, and not because of the file you uploaded. Your database is unchanged. Check the server log for what is in the way, then try again."))
 		case errors.Is(err, backup.ErrRejected):
 			flash.Set(w, h.SecretKey, "error",
-				"That file was rejected. Your database is unchanged.")
+				h.T(r, "That file was rejected. Your database is unchanged."))
 		default:
 			// Never the reassuring message. AGENT.md §4: in a switch over a closed
 			// set the safe outcome is not default. Every return from Import carries
@@ -174,13 +171,12 @@ func (h *BackupHandler) Import(w http.ResponseWriter, r *http.Request) {
 			// next unsentinelled return starts telling an operator their database
 			// is fine while nobody has established that.
 			flash.Set(w, h.SecretKey, "error",
-				"Restore failed in an unexpected way. Check the server log and verify "+
-					"the database before retrying.")
+				h.T(r, "Restore failed in an unexpected way. Check the server log and verify the database before retrying."))
 		}
 		http.Redirect(w, r, "/admin/backups", http.StatusFound)
 		return
 	}
 
-	flash.Set(w, h.SecretKey, "success", "Database restored successfully.")
+	flash.Set(w, h.SecretKey, "success", h.T(r, "Database restored successfully."))
 	http.Redirect(w, r, "/admin/backups", http.StatusFound)
 }

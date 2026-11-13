@@ -2,9 +2,9 @@
 
 {{define "content"}}
 <div class="page-head">
-  <h4>Filter rules</h4>
+  <h4>{{.T "Filter rules"}}</h4>
   <span class="muted" style="font-size:12px">
-    Explicit overrides of the scoring filter. Allow always beats block.
+    {{.T "Explicit overrides of the scoring filter. Allow always beats block."}}
   </span>
 </div>
 
@@ -23,9 +23,8 @@
 <div class="notice" style="align-items:flex-start">
   <svg class="i"><use href="#ph-warning"/></svg>
   <div>
-    <div><strong>{{len .Problems}} rule{{if ne (len .Problems) 1}}s{{end}} can never match.</strong>
-      They were saved in a form this version no longer produces, so they are not
-      filtering anything. Remove and re-add each one.</div>
+    <div><strong>{{len .Problems}} · {{.T "rules can never match"}}</strong>
+      {{.T "They were saved in a form this version no longer produces, so they are not filtering anything. Remove and re-add each one."}}</div>
     <ul style="margin:6px 0 0;padding-left:18px">
       {{range .Problems}}
       <li class="dim" style="font-size:12px"><code class="mono">{{.Value}}</code> — {{.Reason}}</li>
@@ -40,46 +39,44 @@
     <div class="card elev-sm">
       <div class="card-head">
         <svg class="i i-accent" style="font-size:16px"><use href="#ph-prohibit"/></svg>
-        <span class="card-title">Blocklist</span>
-        <span class="tag tag-accent tag-sm">{{len .Block}} rule{{if ne (len .Block) 1}}s{{end}}</span>
+        <span class="card-title">{{.T "Blocklist"}}</span>
+        <span class="tag tag-accent tag-sm">{{.Plural (len .Block) "rule"}}</span>
       </div>
       <p class="card-body" style="flex:none">
-        Anything matching a rule here is held on arrival, whatever it scores.
-        Email and domain rules are checked against every field; IP and CIDR
-        rules use the client address.
+        {{.T "Anything matching a rule here is held on arrival, whatever it scores. Email and domain rules are checked against every field; IP and CIDR rules use the client address."}}
       </p>
 
       <form method="POST" action="/admin/rules" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
         <input type="hidden" name="kind" value="block">
         <div class="seg">
-          <label class="seg-opt"><input type="radio" name="type" value="email" checked><span>Email</span></label>
-          <label class="seg-opt"><input type="radio" name="type" value="domain"><span>Domain</span></label>
-          <label class="seg-opt"><input type="radio" name="type" value="ip"><span>IP</span></label>
-          <label class="seg-opt"><input type="radio" name="type" value="cidr"><span>CIDR</span></label>
+          <label class="seg-opt"><input type="radio" name="type" value="email" checked><span>{{.T "Email"}}</span></label>
+          <label class="seg-opt"><input type="radio" name="type" value="domain"><span>{{.T "Domain"}}</span></label>
+          <label class="seg-opt"><input type="radio" name="type" value="ip"><span>{{.T "IP"}}</span></label>
+          <label class="seg-opt"><input type="radio" name="type" value="cidr"><span>{{.T "CIDR"}}</span></label>
         </div>
         <input class="input" name="value" style="flex:1 1 220px;min-width:0"
                placeholder="spammer@example.com, example.ru, or 45.155.204.0/24"
-               aria-label="Rule to block" required>
-        <button class="btn btn-primary" type="submit">Block</button>
+               aria-label="{{.T "Rule to block"}}" required>
+        <button class="btn btn-primary" type="submit">{{.T "Block"}}</button>
       </form>
 
       {{if .Block}}
       <div class="table-wrap" style="margin-top:6px">
         <table class="table" style="min-width:460px">
           <thead>
-            <tr><th>Rule</th><th>Type</th><th>Blocked</th><th>Added</th><th style="width:36px"></th></tr>
+            <tr><th>{{.T "Rule"}}</th><th>{{.T "Type"}}</th><th>{{.T "Blocked"}}</th><th>{{.T "Added"}}</th><th style="width:36px"></th></tr>
           </thead>
           <tbody>
             {{range .Block}}
             <tr>
               <td class="mono" style="font-size:12.5px">{{.Value}}</td>
-              <td><span class="tag tag-neutral tag-sm">{{.Type}}</span></td>
+              <td><span class="tag tag-neutral tag-sm">{{$.T .Type}}</span></td>
               <td class="muted">{{.Hits}}</td>
-              <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "Jan 2"}}</td>
+              <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "02.01"}}</td>
               <td>
                 <form method="POST" action="/admin/rules/{{.ID}}/delete">
                   <button class="btn btn-quiet btn-icon sm" type="submit"
-                          title="Remove rule" aria-label="Remove rule {{.Value}}">
+                          title="{{$.T "Remove rule"}}" aria-label="{{$.T "Remove rule"}} {{.Value}}">
                     <svg class="i" style="font-size:14px"><use href="#ph-x"/></svg>
                   </button>
                 </form>
@@ -90,19 +87,18 @@
         </table>
       </div>
       {{else}}
-      <p class="dim" style="font-size:12px">No block rules yet.</p>
+      <p class="dim" style="font-size:12px">{{.T "No block rules yet."}}</p>
       {{end}}
     </div>
 
     <div class="card elev-sm" style="margin-top:12px">
       <div class="card-head">
         <svg class="i i-accent" style="font-size:16px"><use href="#ph-text-aa"/></svg>
-        <span class="card-title">Custom keywords</span>
-        <span class="tag tag-neutral tag-sm">{{len .Keywords}}</span>
+        <span class="card-title">{{.T "Custom keywords"}}</span>
+        <span class="tag tag-neutral tag-sm">{{.Plural (len .Keywords) "keyword"}}</span>
       </div>
       <p class="card-body" style="flex:none">
-        Added to the built-in list. Each hit scores +5 — below the threshold on
-        purpose, so a single keyword never holds a submission on its own.
+        {{.T "Added to the built-in list. Each hit scores +5 — below the threshold on purpose, so a single keyword never holds a submission on its own."}}
       </p>
 
       {{if .Keywords}}
@@ -112,7 +108,7 @@
           {{.Value}}
           <form method="POST" action="/admin/rules/{{.ID}}/delete" style="display:inline-flex">
             <button class="btn btn-quiet" type="submit" style="padding:0 0 0 4px;min-height:0"
-                    title="Remove keyword" aria-label="Remove keyword {{.Value}}">
+                    title="{{$.T "Remove keyword"}}" aria-label="{{$.T "Remove keyword"}} {{.Value}}">
               <svg class="i" style="font-size:12px"><use href="#ph-x"/></svg>
             </button>
           </form>
@@ -124,8 +120,8 @@
       <form method="POST" action="/admin/rules" style="display:flex;gap:8px;margin-top:8px">
         <input type="hidden" name="kind" value="block">
         <input type="hidden" name="type" value="keyword">
-        <input class="input" name="value" placeholder="crypto pump" aria-label="Keyword to add" required>
-        <button class="btn btn-secondary" type="submit">Add</button>
+        <input class="input" name="value" placeholder="crypto pump" aria-label="{{.T "Add keyword"}}" required>
+        <button class="btn btn-secondary" type="submit">{{.T "Add"}}</button>
       </form>
     </div>
   </div>
@@ -134,32 +130,29 @@
     <div class="card elev-sm">
       <div class="card-head">
         <svg class="i i-accent" style="font-size:16px"><use href="#ph-gauge"/></svg>
-        <span class="card-title">Score threshold</span>
+        <span class="card-title">{{.T "Score threshold"}}</span>
       </div>
       <p class="card-body" style="flex:none">
-        Submissions scoring at or above this are held. The instance default is
-        <strong>{{.Threshold}}</strong>, set with <code>SPAM_THRESHOLD</code>;
-        each form can override it in its own settings.
+        {{.T "Submissions scoring at or above this are held. The instance default is %d, set with SPAM_THRESHOLD; each form can override it in its own settings." .Threshold}}
       </p>
       <!-- The weights are absolute, so moving the threshold changes which
            single signals are enough on their own. Saying so here is the
            tradeoff the operator is actually making. -->
       <div class="panel-box" style="font-size:11.5px;line-height:1.6">
-        <div><strong>Lenient · 9</strong> <span class="dim">— a lone link-markup hit (+6) no longer holds.</span></div>
-        <div style="margin-top:5px"><strong>Balanced · 6</strong> <span class="dim">— the default. One markup link holds; one keyword never does.</span></div>
-        <div style="margin-top:5px"><strong>Strict · 4</strong> <span class="dim">— a lone keyword hit (+5) now holds on its own.</span></div>
+        <div><strong>{{.T "Lenient · 9"}}</strong> <span class="dim">— {{.T "a lone link-markup hit (+6) no longer holds."}}</span></div>
+        <div style="margin-top:5px"><strong>{{.T "Balanced · 6"}}</strong> <span class="dim">— {{.T "the default. One markup link holds; one keyword never does."}}</span></div>
+        <div style="margin-top:5px"><strong>{{.T "Strict · 4"}}</strong> <span class="dim">— {{.T "a lone keyword hit (+5) now holds on its own."}}</span></div>
       </div>
     </div>
 
     <div class="card elev-sm" style="margin-top:12px">
       <div class="card-head">
         <svg class="i i-accent" style="font-size:16px"><use href="#ph-user-check"/></svg>
-        <span class="card-title">Allowlist</span>
-        <span class="tag tag-neutral tag-sm">{{len .Allow}}</span>
+        <span class="card-title">{{.T "Allowlist"}}</span>
+        <span class="tag tag-neutral tag-sm">{{.Plural (len .Allow) "rule"}}</span>
       </div>
       <p class="card-body" style="flex:none">
-        Never held, whatever the score, and scoring is skipped entirely. Use it
-        after a false positive.
+        {{.T "Never held, whatever the score, and scoring is skipped entirely. Use it after a false positive."}}
       </p>
       <!-- Allow rules deliberately match only the sender's own email field.
            Matching any field would let anyone bypass the filter by mentioning an
@@ -168,22 +161,20 @@
            single sender — filter.SenderAddress calls that ambiguous and no allow
            rule matches, rather than picking a winner the submitter chose. -->
       <p class="dim" style="font-size:11px;margin-top:-2px">
-        Matched against the submission's <code>email</code> field only — not any
-        field that happens to contain the address. A form sending two different
-        <code>email</code> fields is rejected outright.
+        {{.T "Matched against the submission's email field only — not any field that happens to contain the address. A form sending two different email fields is rejected outright."}}
       </p>
 
       <form method="POST" action="/admin/rules" style="display:flex;gap:8px">
         <input type="hidden" name="kind" value="allow">
         <input type="hidden" name="type" value="email">
         <input class="input" name="value" placeholder="real.customer@example.com"
-               aria-label="Address to allow" required>
+               aria-label="{{.T "Address to allow"}}" required>
         <!-- Optional, and the only rule list that renders a note. Allowlisting
              is the entry that most needs a reason attached: it silently skips
              every check, and six months on nobody remembers why. -->
-        <input class="input" name="note" placeholder="why (optional)"
-               aria-label="Why this address is allowed" style="flex:0 1 180px;min-width:0">
-        <button class="btn btn-secondary" type="submit">Allow</button>
+        <input class="input" name="note" placeholder="{{.T "why (optional)"}}"
+               aria-label="{{.T "Why this address is allowed"}}" style="flex:0 1 180px;min-width:0">
+        <button class="btn btn-secondary" type="submit">{{.T "Allow"}}</button>
       </form>
 
       {{if .Allow}}
@@ -196,7 +187,7 @@
           </div>
           <form method="POST" action="/admin/rules/{{.ID}}/delete">
             <button class="btn btn-quiet btn-icon sm" type="submit"
-                    title="Remove rule" aria-label="Remove allow rule {{.Value}}">
+                    title="{{$.T "Remove rule"}}" aria-label="{{$.T "Remove rule"}} {{.Value}}">
               <svg class="i" style="font-size:14px"><use href="#ph-x"/></svg>
             </button>
           </form>
@@ -204,7 +195,7 @@
         {{end}}
       </div>
       {{else}}
-      <p class="dim" style="font-size:12px;margin-top:6px">No allow rules yet.</p>
+      <p class="dim" style="font-size:12px;margin-top:6px">{{.T "No allow rules yet."}}</p>
       {{end}}
     </div>
   </div>

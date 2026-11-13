@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/astcheck"
+	"github.com/barancezayirli/dsforms/internal/handler"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/go-chi/chi/v5"
 )
@@ -46,7 +47,7 @@ func TestHealthzReportsAnUnusableDatabase(t *testing.T) {
 
 	r := newRouter(func(context.Context) error {
 		return errors.New("sql: database is closed")
-	}, nil)
+	}, nil, "")
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -66,7 +67,7 @@ func TestHealthzReportsAnUnusableDatabase(t *testing.T) {
 func TestHealthz(t *testing.T) {
 	t.Parallel()
 
-	r := newRouter(alwaysHealthy, nil)
+	r := newRouter(alwaysHealthy, nil, "")
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -82,7 +83,7 @@ func TestHealthz(t *testing.T) {
 
 func TestSecurityHeaders(t *testing.T) {
 	t.Parallel()
-	r := newRouter(alwaysHealthy, nil)
+	r := newRouter(alwaysHealthy, nil, "")
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -110,7 +111,7 @@ func TestSecurityHeaders(t *testing.T) {
 
 func TestMaxBytesReader(t *testing.T) {
 	t.Parallel()
-	r := newRouter(alwaysHealthy, nil)
+	r := newRouter(alwaysHealthy, nil, "")
 	// Add a test route that reads the body
 	r.Post("/test-body", func(w http.ResponseWriter, r *http.Request) {
 		_, err := io.ReadAll(r.Body)
@@ -162,7 +163,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 
 func TestNotFoundHandler(t *testing.T) {
 	t.Parallel()
-	r := newRouter(alwaysHealthy, nil)
+	r := newRouter(alwaysHealthy, nil, "")
 	req := httptest.NewRequest("GET", "/nonexistent-route", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -176,7 +177,7 @@ func TestNotFoundHandler(t *testing.T) {
 
 func TestRecoveryMiddleware(t *testing.T) {
 	t.Parallel()
-	r := newRouter(alwaysHealthy, nil)
+	r := newRouter(alwaysHealthy, nil, "")
 	r.Get("/panic-test", func(w http.ResponseWriter, r *http.Request) {
 		panic("test panic")
 	})
@@ -386,16 +387,28 @@ func TestStandalonePagesExecute(t *testing.T) {
 		t.Fatalf("parseTemplates() failed: %v", err)
 	}
 
+	// Every standalone page now carries a language and a T method. Each page
+	// still has its own few fields, so the fixture names the smallest value that
+	// reaches its real branches.
+	type consentFixture struct {
+		handler.PageData
+		Fatal string
+	}
+	fixtures := map[string]any{
+		"login.html":         handler.LoginData{},
+		"success.html":       handler.PageData{},
+		"404.html":           handler.PageData{},
+		"500.html":           handler.PageData{},
+		"oauth_consent.html": consentFixture{Fatal: "blocked"},
+	}
 	for _, name := range standalonePages {
 		tmpl := templates[name]
 		if tmpl == nil {
 			t.Errorf("template %q was not registered", name)
 			continue
 		}
-		// login.html needs data; the error pages take none. Executing with a
-		// permissive map keeps this a structural check rather than a fixture.
 		var buf bytes.Buffer
-		if err := tmpl.ExecuteTemplate(&buf, name, map[string]any{}); err != nil {
+		if err := tmpl.ExecuteTemplate(&buf, name, fixtures[name]); err != nil {
 			t.Errorf("executing %s: %v", name, err)
 			continue
 		}
@@ -416,7 +429,7 @@ func TestErrorPagesRenderStyled404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTemplates: %v", err)
 	}
-	r := newRouter(alwaysHealthy, templates)
+	r := newRouter(alwaysHealthy, templates, "")
 
 	req := httptest.NewRequest("GET", "/nonexistent-route", nil)
 	w := httptest.NewRecorder()
@@ -499,7 +512,7 @@ func TestRecoveryRendersStyled500(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTemplates: %v", err)
 	}
-	r := newRouter(alwaysHealthy, templates)
+	r := newRouter(alwaysHealthy, templates, "")
 
 	r.Get("/boom", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
 
@@ -535,8 +548,8 @@ func TestRoutersDoNotShareErrorPages(t *testing.T) {
 	// Build order doesn't matter: with a shared page, whichever router did not
 	// set it last fails its row. The 404 was always per router; its rows are
 	// there to keep it that way.
-	plain := newRouter(alwaysHealthy, nil)
-	styled := newRouter(alwaysHealthy, templates)
+	plain := newRouter(alwaysHealthy, nil, "")
+	styled := newRouter(alwaysHealthy, templates, "")
 
 	for _, r := range []*chi.Mux{plain, styled} {
 		r.Get("/boom", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
@@ -628,7 +641,7 @@ func TestErrorPagesFallBackPerTemplate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := newRouter(alwaysHealthy, tt.templates)
+			r := newRouter(alwaysHealthy, tt.templates, "")
 			r.Get("/boom", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest("GET", tt.path, nil))

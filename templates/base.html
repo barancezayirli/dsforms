@@ -1,6 +1,6 @@
 {{define "base"}}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{if .Lang}}{{.Lang}}{{else}}en{{end}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -37,45 +37,45 @@
 
       <nav>
         <div class="nav-group">
-          <div class="nav-group-title kicker">Overview</div>
-          <a class="nav-item {{if eq .Active "home"}}on{{end}}" href="/admin" title="Home">
-            <svg class="i"><use href="#ph-chart-line-up"/></svg><span class="label">Home</span>
+          <div class="nav-group-title kicker">{{.T "Overview"}}</div>
+          <a class="nav-item {{if eq .Active "home"}}on{{end}}" href="/admin" title="{{.T "Home"}}">
+            <svg class="i"><use href="#ph-chart-line-up"/></svg><span class="label">{{.T "Home"}}</span>
           </a>
         </div>
 
         <div class="nav-group">
-          <div class="nav-group-title kicker">Collect</div>
-          <a class="nav-item {{if eq .Active "forms"}}on{{end}}" href="/admin/forms" title="Forms">
-            <svg class="i"><use href="#ph-tray"/></svg><span class="label">Forms</span>
+          <div class="nav-group-title kicker">{{.T "Collect"}}</div>
+          <a class="nav-item {{if eq .Active "forms"}}on{{end}}" href="/admin/forms" title="{{.T "Forms"}}">
+            <svg class="i"><use href="#ph-tray"/></svg><span class="label">{{.T "Forms"}}</span>
             {{if .Nav.Unread}}<span class="nav-badge">{{.Nav.Unread}}</span>{{end}}
           </a>
-          <a class="nav-item {{if eq .Active "waitlists"}}on{{end}}" href="/admin/waitlists" title="Waitlists">
-            <svg class="i"><use href="#ph-users-three"/></svg><span class="label">Waitlists</span>
+          <a class="nav-item {{if eq .Active "waitlists"}}on{{end}}" href="/admin/waitlists" title="{{.T "Waitlists"}}">
+            <svg class="i"><use href="#ph-users-three"/></svg><span class="label">{{.T "Waitlists"}}</span>
             {{if .Nav.Waitlist}}<span class="nav-badge">{{.Nav.Waitlist}}</span>{{end}}
           </a>
         </div>
 
         <div class="nav-group">
-          <div class="nav-group-title kicker">Moderate</div>
-          <a class="nav-item {{if eq .Active "quarantine"}}on{{end}}" href="/admin/quarantine" title="Quarantine">
-            <svg class="i"><use href="#ph-shield-warning"/></svg><span class="label">Quarantine</span>
+          <div class="nav-group-title kicker">{{.T "Moderate"}}</div>
+          <a class="nav-item {{if eq .Active "quarantine"}}on{{end}}" href="/admin/quarantine" title="{{.T "Quarantine"}}">
+            <svg class="i"><use href="#ph-shield-warning"/></svg><span class="label">{{.T "Quarantine"}}</span>
             {{if .Nav.Held}}<span class="nav-badge">{{.Nav.Held}}</span>{{end}}
           </a>
-          <a class="nav-item {{if eq .Active "rules"}}on{{end}}" href="/admin/rules" title="Filter rules">
-            <svg class="i"><use href="#ph-funnel"/></svg><span class="label">Filter rules</span>
+          <a class="nav-item {{if eq .Active "rules"}}on{{end}}" href="/admin/rules" title="{{.T "Filter rules"}}">
+            <svg class="i"><use href="#ph-funnel"/></svg><span class="label">{{.T "Filter rules"}}</span>
           </a>
         </div>
 
         <div class="nav-group">
-          <div class="nav-group-title kicker">System</div>
-          <a class="nav-item {{if eq .Active "users"}}on{{end}}" href="/admin/users" title="Users">
-            <svg class="i"><use href="#ph-user-circle"/></svg><span class="label">Users</span>
+          <div class="nav-group-title kicker">{{.T "System"}}</div>
+          <a class="nav-item {{if eq .Active "users"}}on{{end}}" href="/admin/users" title="{{.T "Users"}}">
+            <svg class="i"><use href="#ph-user-circle"/></svg><span class="label">{{.T "Users"}}</span>
           </a>
-          <a class="nav-item {{if eq .Active "tokens"}}on{{end}}" href="/admin/tokens" title="API tokens">
-            <svg class="i"><use href="#ph-lock-key"/></svg><span class="label">API tokens</span>
+          <a class="nav-item {{if eq .Active "tokens"}}on{{end}}" href="/admin/tokens" title="{{.T "API tokens"}}">
+            <svg class="i"><use href="#ph-lock-key"/></svg><span class="label">{{.T "API tokens"}}</span>
           </a>
-          <a class="nav-item {{if eq .Active "backups"}}on{{end}}" href="/admin/backups" title="Backups">
-            <svg class="i"><use href="#ph-database"/></svg><span class="label">Backups</span>
+          <a class="nav-item {{if eq .Active "backups"}}on{{end}}" href="/admin/backups" title="{{.T "Backups"}}">
+            <svg class="i"><use href="#ph-database"/></svg><span class="label">{{.T "Backups"}}</span>
           </a>
         </div>
       </nav>
@@ -87,14 +87,20 @@
           </div>
           <div class="db-card-sub">{{.DB.Size}}{{if and .DB.Size .DB.Journal}} · {{end}}{{.DB.Journal}}</div>
         </div>
+        <div style="display:flex;align-items:center;gap:5px;padding:2px 0 7px;font-size:11px">
+          {{range .Languages}}
+          <a class="dim" href="{{$.LanguageURL .}}" style="padding:2px 5px;border-radius:4px;{{if eq . $.Lang}}color:var(--fg);font-weight:600{{end}}"
+             title="{{.Name}}">{{.Short}}</a>
+          {{end}}
+        </div>
         <div class="user-row">
           <span class="avatar" aria-hidden="true">{{.CurrentUser.Initials}}</span>
           <a class="user-text truncate" href="/admin/account" style="flex:1;min-width:0">
             <span style="font-size:13px;line-height:1.2;display:block">{{.CurrentUser.Username}}</span>
-            <span class="dim" style="font-size:11px">owner</span>
+            <span class="dim" style="font-size:11px">{{.T "owner"}}</span>
           </a>
           <form method="POST" action="/admin/logout" style="display:flex">
-            <button class="btn btn-quiet btn-icon sm" title="Log out" aria-label="Log out">
+            <button class="btn btn-quiet btn-icon sm" title="{{.T "Log out"}}" aria-label="{{.T "Log out"}}">
               <svg class="i" style="font-size:15px"><use href="#ph-sign-out"/></svg>
             </button>
           </form>
@@ -104,7 +110,7 @@
 
     <div class="main">
       <header class="header rule-b">
-        <button class="btn btn-secondary btn-icon" data-sidebar-toggle title="Toggle sidebar" aria-label="Toggle sidebar">
+        <button class="btn btn-secondary btn-icon" data-sidebar-toggle title="{{.T "Toggle sidebar"}}" aria-label="{{.T "Toggle sidebar"}}">
           <svg class="i"><use href="#ph-sidebar-simple"/></svg>
         </button>
         <div class="brand-mobile brand-word" style="font-size:15px">ds<em>forms</em></div>
@@ -116,8 +122,8 @@
         <div class="header-actions">
           <form class="search" method="GET" action="/admin/search" role="search">
             <svg class="i"><use href="#ph-magnifying-glass"/></svg>
-            <input type="search" name="q" value="{{.Query}}" placeholder="Search submissions"
-                   aria-label="Search submissions" data-search>
+            <input type="search" name="q" value="{{.Query}}" placeholder="{{.T "Search submissions"}}"
+                   aria-label="{{.T "Search submissions"}}" data-search>
             <span class="kbd" aria-hidden="true">⌘K</span>
           </form>
           {{block "header-actions" .}}{{end}}
@@ -127,8 +133,8 @@
       {{if .CurrentUser.IsDefaultPassword}}
       <div class="notice banner">
         <svg class="i"><use href="#ph-shield-warning"/></svg>
-        <span>Default password <strong>admin / admin</strong> is still active.</span>
-        <a href="/admin/account">Change it now &rarr;</a>
+        <span>{{.T "Default password"}} <strong>admin / admin</strong> {{.T "is still active."}}</span>
+        <a href="/admin/account">{{.T "Change it now"}} &rarr;</a>
       </div>
       {{end}}
 
@@ -164,8 +170,7 @@
      while the query behind it failed. -->
 <div class="notice banner">
   <svg class="i"><use href="#ph-warning"/></svg>
-  <span>Some data could not be loaded, so counts here may be wrong or missing.
-        Check the server log.</span>
+  <span>{{.T "Some data could not be loaded, so counts here may be wrong or missing. Check the server log."}}</span>
 </div>
 {{end}}
 {{end}}

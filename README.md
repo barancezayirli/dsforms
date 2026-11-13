@@ -40,6 +40,9 @@ delete. No per-submission fee, no vendor, no Redis, no Postgres.
 - **Waitlists** — unique signups by email, positions, confirmation emails, and
   a restart-safe broadcast when you launch.
 - **Admin UI** with search, bulk actions, CSV export and a reading drawer.
+- **English and Russian UI**, switchable per browser and defaulting from
+  `DEFAULT_LANGUAGE` (`auto`, `en` or `ru`). The translation catalogue lives in
+  `internal/i18n`.
 - **Backups that fail safely** — download or restore a snapshot from the UI; a
   failed restore puts the original back rather than leaving you with nothing.
 - **Honeypot, rate limiting and login lockout** built in. No CAPTCHA.

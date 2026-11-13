@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{if .Lang}}{{.Lang}}{{else}}en{{end}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>Thanks — dsforms</title>
+  <title>{{.T "Thanks — dsforms"}}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -14,9 +14,9 @@
       <span class="empty-icon" style="margin:0 auto 14px">
         <svg class="i"><use href="#ph-check-circle"/></svg>
       </span>
-      <h3 style="font-size:22px">Thanks — that came through.</h3>
+      <h3 style="font-size:22px">{{.T "Thanks — that came through."}}</h3>
       <p class="muted" style="font-size:13px;margin-top:8px">
-        Your message has been delivered. You can close this tab.
+        {{.T "Your message has been delivered. You can close this tab."}}
       </p>
     </div>
   </main>
