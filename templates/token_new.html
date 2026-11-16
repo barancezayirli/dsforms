@@ -15,42 +15,41 @@
 
   {{if not .Enabled}}
   <div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>
-    The MCP endpoint is switched off, so this token will be refused until
-    <code>MCP_ENABLED=true</code> is set.
+    {{.T "The MCP endpoint is switched off, so this token will be refused until MCP_ENABLED=true is set."}}
   </span></div>
   {{end}}
 
   <label class="field">
-    <span>Name</span>
+    <span>{{.T "Name"}}</span>
     <input class="input" type="text" name="name" required maxlength="64" autofocus
-           value="{{.Name}}" placeholder="laptop, ci, desktop client">
-    <span class="form-hint">So you can tell it apart from your other tokens later.</span>
+           value="{{.Name}}" placeholder="{{.T "laptop, ci, desktop client"}}">
+    <span class="form-hint">{{.T "So you can tell it apart from your other tokens later."}}</span>
   </label>
 
   {{template "access-fields" .}}
   <span class="form-hint" style="display:block;margin-top:-6px;margin-bottom:6px">
-    {{if .TTLDays}}Expires after {{.TTLDays}} days.{{else}}Does not expire — revoke it from the list when it is no longer needed.{{end}}
+    {{if .TTLDays}}{{.T "Expires after %d days." .TTLDays}}{{else}}{{.T "Does not expire — revoke it from the list when it is no longer needed."}}{{end}}
   </span>
 
   <div style="display:flex;gap:8px;margin-top:16px">
     <button class="btn btn-primary" type="submit">
-      <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Create token
+      <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>{{.T "Create token"}}
     </button>
-    <a class="btn btn-secondary" data-drawer-close href="/admin/tokens">Cancel</a>
+    <a class="btn btn-secondary" data-drawer-close href="/admin/tokens">{{.T "Cancel"}}</a>
   </div>
 </form>
 {{end}}
 
 {{define "drawer"}}
 <div class="backdrop" data-drawer-close></div>
-<div class="drawer" role="dialog" aria-modal="true" aria-label="New API token" tabindex="-1">
+<div class="drawer" role="dialog" aria-modal="true" aria-label="{{.T "New API token"}}" tabindex="-1">
   <div class="drawer-scroll">
     <div class="drawer-toolbar rule-b">
       <a class="btn btn-secondary btn-icon" data-drawer-close href="/admin/tokens"
-         title="Close" aria-label="Close">
+         title="{{.T "Close"}}" aria-label="{{.T "Close"}}">
         <svg class="i" style="font-size:15px"><use href="#ph-x"/></svg>
       </a>
-      <span style="font-size:13.5px;font-weight:500">New API token</span>
+      <span style="font-size:13.5px;font-weight:500">{{.T "New API token"}}</span>
     </div>
     <!-- Capped rather than filling the 640px drawer: a name field and three
          checkboxes stretched to full width read as a form with something
@@ -64,8 +63,8 @@
 
 {{define "content"}}
 <div class="page-head">
-  <h4>New API token</h4>
-  <span class="muted" style="font-size:13px">A credential for one MCP client.</span>
+  <h4>{{.T "New API token"}}</h4>
+  <span class="muted" style="font-size:13px">{{.T "A credential for one MCP client."}}</span>
 </div>
 
 <div class="card elev-sm" style="max-width:480px">

@@ -2,8 +2,8 @@
 
 {{define "content"}}
 <div class="page-head">
-  <h4>Backups</h4>
-  <span class="muted" style="font-size:13px">Everything lives in one SQLite file.</span>
+  <h4>{{.T "Backups"}}</h4>
+  <span class="muted" style="font-size:13px">{{.T "Everything lives in one SQLite file."}}</span>
 </div>
 
 <div class="row" style="max-width:1000px">
@@ -12,31 +12,29 @@
       <div class="card-head">
         <svg class="i i-accent" style="font-size:16px"><use href="#ph-database"/></svg>
         <span class="card-title">{{.DB.Name}}</span>
-        <span class="tag tag-outline tag-sm">healthy</span>
+        <span class="tag tag-outline tag-sm">{{.T "healthy"}}</span>
       </div>
 
       <div style="display:flex;gap:22px;margin:6px 0 4px">
         <div>
           <div class="stat-value sm">{{if .DB.Size}}{{.DB.Size}}{{else}}—{{end}}</div>
-          <div class="stat-label">size</div>
+          <div class="stat-label">{{.T "size"}}</div>
         </div>
         <div>
           <div class="stat-value sm">{{.Nav.Unread}}</div>
-          <div class="stat-label">unread</div>
+          <div class="stat-label">{{.T "unread"}}</div>
         </div>
         <div>
           <div class="stat-value sm">{{.DB.Journal}}</div>
-          <div class="stat-label">journal</div>
+          <div class="stat-label">{{.T "journal"}}</div>
         </div>
       </div>
 
       <a class="btn btn-primary btn-block" href="/admin/backups/export">
-        <svg class="i" style="font-size:15px"><use href="#ph-download-simple"/></svg>Download snapshot
+        <svg class="i" style="font-size:15px"><use href="#ph-download-simple"/></svg>{{.T "Download snapshot"}}
       </a>
       <p class="dim" style="font-size:11px;margin-top:8px">
-        <code>VACUUM INTO</code> a temp file, then streamed — safe while the server is running.
-        API tokens and login sessions are left out. The rest is all there — treat the
-        file like the database it is a copy of.
+        {{.T "VACUUM INTO a temp file, then streamed — safe while the server is running. API tokens and login sessions are left out. The rest is all there — treat the file like the database it is a copy of."}}
       </p>
     </div>
   </div>
@@ -45,29 +43,26 @@
     <div class="card elev-sm">
       <div class="card-head">
         <svg class="i i-accent" style="font-size:16px"><use href="#ph-upload-simple"/></svg>
-        <span class="card-title">Restore</span>
+        <span class="card-title">{{.T "Restore"}}</span>
       </div>
 
       <div class="notice">
         <svg class="i"><use href="#ph-warning"/></svg>
-        <span>This replaces every form, submission and user with the uploaded
-              file's contents. It cannot be undone.
-              <strong>Every API token is revoked and everyone is signed out</strong>,
-              including you — MCP clients stop working until you mint new tokens.</span>
+        <span>{{.T "This replaces every form, submission and user with the uploaded file's contents. It cannot be undone. Every API token is revoked and everyone is signed out, including you — MCP clients stop working until you mint new tokens."}}</span>
       </div>
 
       <form method="POST" action="/admin/backups/import" enctype="multipart/form-data"
-            data-confirm="Replace the entire database with the uploaded file? Every API token is revoked and everyone is signed out, including you. This cannot be undone.">
+            data-confirm="{{.T "Replace the entire database with the uploaded file? Every API token is revoked and everyone is signed out, including you. This cannot be undone."}}">
         <div class="dropzone" data-dropzone data-dropzone-submit="#restore-btn">
           <svg class="i"><use href="#ph-cloud-arrow-up"/></svg>
-          <span style="font-size:13px" data-dropzone-name>Drop a <code>.db</code> file, or browse</span>
-          <span class="dim" style="font-size:11px">up to 100 MB</span>
+          <span style="font-size:13px" data-dropzone-name>{{.T "Drop a .db file, or browse"}}</span>
+          <span class="dim" style="font-size:11px">{{.T "up to 100 MB"}}</span>
           <input type="file" name="file" accept=".db" required style="display:none">
         </div>
         <!-- Disabled until a file is actually chosen: a restore is the single
              most destructive action in the admin. -->
         <button class="btn btn-danger btn-block" type="submit" id="restore-btn" style="margin-top:10px" disabled>
-          <svg class="i" style="font-size:15px"><use href="#ph-arrow-u-up-left"/></svg>Restore database
+          <svg class="i" style="font-size:15px"><use href="#ph-arrow-u-up-left"/></svg>{{.T "Restore database"}}
         </button>
       </form>
     </div>

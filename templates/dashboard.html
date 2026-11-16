@@ -2,18 +2,18 @@
 
 {{define "header-actions"}}
 <a class="btn btn-primary btn-34" href="/admin/forms/new">
-  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>New form
+  <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>{{$.T "New form"}}
 </a>
 {{end}}
 
 {{define "content"}}
 {{if .Cards}}
 <div class="page-head">
-  <h4>Forms</h4>
+  <h4>{{$.T "Forms"}}</h4>
   <span class="muted" style="font-size:13px">
-    {{.TotalForms}} form{{if ne .TotalForms 1}}s{{end}} ·
-    {{.TotalAll}} submission{{if ne .TotalAll 1}}s{{end}}
-    {{if .TotalUnread}}· <strong class="stat-accent">{{.TotalUnread}} unread</strong>{{end}}
+    {{.Plural .TotalForms "form"}} ·
+    {{.Plural .TotalAll "submission"}}
+    {{if .TotalUnread}}· <strong class="stat-accent">{{.TotalUnread}} {{$.T "unread"}}</strong>{{end}}
   </span>
 </div>
 
@@ -21,29 +21,29 @@
   {{range .Cards}}
   <div class="card elev-sm" style="padding:15px 16px;gap:0">
     <div class="card-head">
-      <span class="card-kicker" style="margin-right:auto">form</span>
-      <a class="btn btn-quiet btn-icon sm" href="/admin/forms/{{.ID}}/edit" title="Settings" aria-label="Form settings">
+      <span class="card-kicker" style="margin-right:auto">{{$.T "form"}}</span>
+      <a class="btn btn-quiet btn-icon sm" href="/admin/forms/{{.ID}}/edit" title="{{$.T "Settings"}}" aria-label="{{$.T "Settings"}}">
         <svg class="i" style="font-size:15px"><use href="#ph-dots-three"/></svg>
       </a>
     </div>
 
     <a href="/admin/forms/{{.ID}}" style="font-size:17px;font-weight:500;display:block;margin-top:2px">{{.Name}}</a>
     <div class="dim truncate" style="font-size:12px;margin-top:2px">
-      {{if .EmailTo}}&rarr; {{.EmailTo}}{{else}}no notification address{{end}}
+      {{if .EmailTo}}&rarr; {{.EmailTo}}{{else}}{{$.T "no notification address"}}{{end}}
     </div>
 
     <div style="display:flex;gap:18px;margin-top:14px">
       <div>
         <div class="stat-value sm">{{.Total}}</div>
-        <div class="stat-label">total</div>
+        <div class="stat-label">{{$.T "total"}}</div>
       </div>
       <div>
         <div class="stat-value sm {{if .Unread}}stat-accent{{end}}">{{.Unread}}</div>
-        <div class="stat-label">unread</div>
+        <div class="stat-label">{{$.T "unread"}}</div>
       </div>
       <div>
         <div class="stat-value sm">{{.Held}}</div>
-        <div class="stat-label">held</div>
+        <div class="stat-label">{{$.T "held"}}</div>
       </div>
     </div>
 
@@ -60,9 +60,9 @@
 
     <div style="display:flex;gap:8px;margin-top:12px">
       <a class="btn btn-secondary" href="/admin/forms/{{.ID}}" style="flex:1">
-        <svg class="i" style="font-size:15px"><use href="#ph-tray"/></svg>Submissions
+        <svg class="i" style="font-size:15px"><use href="#ph-tray"/></svg>{{$.T "Submissions"}}
       </a>
-      <a class="btn btn-secondary btn-icon" href="/admin/forms/{{.ID}}/edit" title="Settings" aria-label="Form settings">
+      <a class="btn btn-secondary btn-icon" href="/admin/forms/{{.ID}}/edit" title="{{$.T "Settings"}}" aria-label="{{$.T "Settings"}}">
         <svg class="i" style="font-size:15px"><use href="#ph-gear-six"/></svg>
       </a>
     </div>
@@ -71,18 +71,18 @@
 
   <a class="tile-new" href="/admin/forms/new">
     <svg class="i"><use href="#ph-plus"/></svg>
-    <span style="font-size:13px;font-weight:500">New form</span>
-    <span class="dim" style="font-size:11px;max-width:24ch">Name it, pick a notify address, paste the snippet</span>
+    <span style="font-size:13px;font-weight:500">{{$.T "New form"}}</span>
+    <span class="dim" style="font-size:11px;max-width:24ch">{{$.T "Name it, pick a notify address, paste the snippet"}}</span>
   </a>
 </div>
 
 {{else}}
 <div class="card elev-sm empty">
   <span class="empty-icon"><svg class="i"><use href="#ph-tray"/></svg></span>
-  <h3>No forms yet</h3>
-  <p>A form is a name, a notify address and an endpoint. Takes about twenty seconds.</p>
+  <h3>{{$.T "No forms yet"}}</h3>
+  <p>{{$.T "A form is a name, a notify address and an endpoint. Takes about twenty seconds."}}</p>
   <a class="btn btn-primary" href="/admin/forms/new">
-    <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>Create your first form
+    <svg class="i" style="font-size:15px"><use href="#ph-plus"/></svg>{{$.T "Create your first form"}}
   </a>
 </div>
 {{end}}

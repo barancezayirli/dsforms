@@ -2,10 +2,10 @@
 
 {{define "content"}}
 <div class="page-head">
-  <h4>Search</h4>
+  <h4>{{.T "Search"}}</h4>
   {{if .Query}}
   <span class="muted" style="font-size:13px">
-    {{len .Rows}} result{{if ne (len .Rows) 1}}s{{end}} for <strong>{{.Query}}</strong>
+    {{.Plural (len .Rows) "result"}} {{.T "for"}} <strong>{{.Query}}</strong>
   </span>
   {{end}}
 </div>
@@ -13,9 +13,8 @@
 {{if not .Query}}
 <div class="card elev-sm empty">
   <span class="empty-icon"><svg class="i"><use href="#ph-magnifying-glass"/></svg></span>
-  <h3>Search submissions</h3>
-  <p>Type in the header field, or press <span class="kbd">⌘K</span> from anywhere.
-     Matches are across every field of every accepted submission.</p>
+  <h3>{{.T "Search submissions"}}</h3>
+  <p>{{.T "Type in the header field, or press ⌘K from anywhere. Matches are across every field of every accepted submission."}}</p>
 </div>
 
 {{else if .Rows}}
@@ -41,11 +40,10 @@
 {{else}}
 <div class="card elev-sm empty">
   <span class="empty-icon"><svg class="i"><use href="#ph-selection-slash"/></svg></span>
-  <h3>Nothing matched</h3>
-  <p>No accepted submission contains all of those words. Held submissions are
-     not searched — they have their own screen.</p>
+  <h3>{{.T "Nothing matched"}}</h3>
+  <p>{{.T "No accepted submission contains all of those words. Held submissions are not searched — they have their own screen."}}</p>
   <a class="btn btn-secondary" href="/admin/quarantine">
-    <svg class="i" style="font-size:15px"><use href="#ph-shield-warning"/></svg>Check quarantine
+    <svg class="i" style="font-size:15px"><use href="#ph-shield-warning"/></svg>{{.T "Check quarantine"}}
   </a>
 </div>
 {{end}}

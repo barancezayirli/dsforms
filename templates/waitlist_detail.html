@@ -2,10 +2,10 @@
 
 {{define "header-actions"}}
 <a class="btn btn-secondary btn-34" href="/admin/waitlists/{{.Waitlist.ID}}/export">
-  <svg class="i" style="font-size:15px"><use href="#ph-file-csv"/></svg>Export CSV
+  <svg class="i" style="font-size:15px"><use href="#ph-file-csv"/></svg>{{.T "Export CSV"}}
 </a>
 <a class="btn btn-primary btn-34" href="/admin/waitlists/{{.Waitlist.ID}}/broadcast">
-  <svg class="i" style="font-size:15px"><use href="#ph-megaphone"/></svg>Broadcast
+  <svg class="i" style="font-size:15px"><use href="#ph-megaphone"/></svg>{{.T "Broadcast"}}
 </a>
 {{end}}
 
@@ -15,7 +15,7 @@
   <span class="tag tag-neutral mono">/w/{{.Waitlist.ID}}</span>
   <div class="actions">
     <a class="btn btn-secondary" href="/admin/waitlists/{{.Waitlist.ID}}/edit">
-      <svg class="i" style="font-size:15px"><use href="#ph-gear-six"/></svg>Settings
+      <svg class="i" style="font-size:15px"><use href="#ph-gear-six"/></svg>{{.T "Settings"}}
     </a>
   </div>
 </div>
@@ -23,8 +23,8 @@
 <div class="row">
   <div class="card elev-sm stat">
     <div class="stat-value">{{.TotalCount}}</div>
-    <div class="stat-label">Signups</div>
-    <div class="stat-sub">deduplicated by email</div>
+    <div class="stat-label">{{.T "Signups"}}</div>
+    <div class="stat-sub">{{.T "deduplicated by email"}}</div>
   </div>
 </div>
 
@@ -32,17 +32,17 @@
 <div class="card elev-sm">
   <div class="table-wrap">
     <table class="table" style="min-width:460px">
-      <thead><tr><th style="width:70px">#</th><th>Email</th><th>Joined</th><th style="width:40px"></th></tr></thead>
+      <thead><tr><th style="width:70px">#</th><th>{{.T "Email"}}</th><th>{{.T "Joined"}}</th><th style="width:40px"></th></tr></thead>
       <tbody>
         {{range .Entries}}
         <tr>
           <td class="mono dim">#{{.Position}}</td>
           <td class="truncate">{{.Email}}</td>
-          <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "Jan 2, 15:04"}}</td>
+          <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "02.01. 15:04"}}</td>
           <td>
             <form method="POST" action="/admin/waitlists/{{$.Waitlist.ID}}/entries/{{.ID}}/delete"
-                  data-confirm="Remove this signup? Positions below it shift up.">
-              <button class="btn btn-quiet btn-icon sm" type="submit" title="Remove" aria-label="Remove signup">
+                  data-confirm="{{$.T "Remove this signup? Positions below it shift up."}}">
+              <button class="btn btn-quiet btn-icon sm" type="submit" title="{{$.T "Remove"}}" aria-label="{{$.T "Remove signup"}}">
                 <svg class="i" style="font-size:14px"><use href="#ph-x"/></svg>
               </button>
             </form>
@@ -55,8 +55,8 @@
 
   {{if or .HasPrev .HasNext}}
   <div class="pager rule-b" style="background-position:top">
-    <span class="muted" style="font-size:12px">Page {{.Page}}</span>
-    <nav class="pages" aria-label="Pagination">
+    <span class="muted" style="font-size:12px">{{.T "Page %d" .Page}}</span>
+    <nav class="pages" aria-label="{{.T "Pagination"}}">
       {{if .HasPrev}}
       <a class="btn btn-secondary" href="/admin/waitlists/{{.Waitlist.ID}}?page={{.PrevPage}}">
         <svg class="i" style="font-size:13px"><use href="#ph-caret-left"/></svg>
@@ -75,11 +75,10 @@
 {{else}}
 <div class="card elev-sm empty">
   <span class="empty-icon"><svg class="i"><use href="#ph-list-numbers"/></svg></span>
-  <h3>No signups yet</h3>
-  <p>Paste the waitlist snippet on your landing page and positions start filling
-     in from #1.</p>
+  <h3>{{.T "No signups yet"}}</h3>
+  <p>{{.T "Paste the waitlist snippet on your landing page and positions start filling in from #1."}}</p>
   <a class="btn btn-primary" href="/admin/waitlists/{{.Waitlist.ID}}/edit">
-    <svg class="i" style="font-size:15px"><use href="#ph-clipboard-text"/></svg>Get the snippet
+    <svg class="i" style="font-size:15px"><use href="#ph-clipboard-text"/></svg>{{.T "Get the snippet"}}
   </a>
 </div>
 {{end}}

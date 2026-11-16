@@ -89,10 +89,12 @@ func TestEveryAdminRouteRequiresAuth(t *testing.T) {
 	t.Parallel()
 	r, _ := testRouter(t)
 
-	// Reachable without a session by design: the login form itself, the static
-	// assets the login page needs, health, and the public submit endpoints.
+	// Reachable without a session by design: the login form itself, the language
+	// switcher the login page offers, the static assets the login page needs,
+	// health, and the public submit endpoints.
 	public := map[string]bool{
-		"/admin/login": true,
+		"/admin/login":    true,
+		"/admin/language": true,
 	}
 
 	var checked int
@@ -135,6 +137,33 @@ func TestEveryAdminRouteRequiresAuth(t *testing.T) {
 		t.Fatalf("only %d admin routes walked; the table is not being read", checked)
 	}
 	t.Logf("checked %d admin routes", checked)
+}
+
+// TestLanguageSwitcherServesRussianOnAPublicPage proves the public half of the
+// language selection: the login page has no session and no admin shell, and it
+// is the first screen a Russian operator sees.
+func TestLanguageSwitcherServesRussianOnAPublicPage(t *testing.T) {
+	t.Parallel()
+
+	r, _ := testRouter(t)
+
+	req := httptest.NewRequest("GET", "/admin/login", nil)
+	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.2")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /admin/login = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"Войти", "Имя пользователя", "5 попыток"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("login page lacks %q; Accept-Language did not reach the template", want)
+		}
+	}
+	if strings.Contains(body, "Invalid username or password") {
+		t.Error("login page rendered the English error under a Russian request")
+	}
 }
 
 // TestPublicRoutesAreReachableWithoutASession is the other half. A guard that

@@ -104,7 +104,7 @@ func (h *WaitlistHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if wl.Name == "" {
 		data := waitlistFormData{
 			PageData: h.Shell(w, r, "New Waitlist", "waitlists"),
-			Waitlist: wl, BaseURL: h.BaseURL, Error: "Waitlist name is required.",
+			Waitlist: wl, BaseURL: h.BaseURL, Error: h.T(r, "Waitlist name is required."),
 		}
 		h.render(w, "waitlist_new.html", data)
 		return
@@ -115,7 +115,7 @@ func (h *WaitlistHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !urlsafe.ConfiguredRedirect(wl.Redirect) {
 		data := waitlistFormData{
 			PageData: h.Shell(w, r, "New Waitlist", "waitlists"),
-			Waitlist: wl, BaseURL: h.BaseURL, Error: "Redirect must be a full http(s) URL or a path starting with /.",
+			Waitlist: wl, BaseURL: h.BaseURL, Error: h.T(r, "Redirect must be a full http(s) URL or a path starting with /."),
 		}
 		h.render(w, "waitlist_new.html", data)
 		return
@@ -191,7 +191,7 @@ func (h *WaitlistHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	if wl.Name == "" {
 		data := waitlistFormData{
 			PageData: h.Shell(w, r, "Edit Waitlist", "waitlists"),
-			Waitlist: wl, BaseURL: h.BaseURL, Error: "Waitlist name is required.",
+			Waitlist: wl, BaseURL: h.BaseURL, Error: h.T(r, "Waitlist name is required."),
 		}
 		h.render(w, "waitlist_edit.html", data)
 		return
@@ -202,7 +202,7 @@ func (h *WaitlistHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	if !urlsafe.ConfiguredRedirect(wl.Redirect) {
 		data := waitlistFormData{
 			PageData: h.Shell(w, r, "Edit Waitlist", "waitlists"),
-			Waitlist: wl, BaseURL: h.BaseURL, Error: "Redirect must be a full http(s) URL or a path starting with /.",
+			Waitlist: wl, BaseURL: h.BaseURL, Error: h.T(r, "Redirect must be a full http(s) URL or a path starting with /."),
 		}
 		h.render(w, "waitlist_edit.html", data)
 		return
@@ -483,7 +483,7 @@ func (h *WaitlistHandler) CreateBroadcast(w http.ResponseWriter, r *http.Request
 	}
 
 	if subject == "" || body == "" {
-		rerender("Subject and body are required.")
+		rerender(h.T(r, "Subject and body are required."))
 		return
 	}
 
@@ -494,7 +494,7 @@ func (h *WaitlistHandler) CreateBroadcast(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if len(entries) == 0 {
-		rerender("This waitlist has no signups to send to.")
+		rerender(h.T(r, "This waitlist has no signups to send to."))
 		return
 	}
 	emails := make([]string, 0, len(entries))

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/i18n"
 	"github.com/barancezayirli/dsforms/internal/ratelimit"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/barancezayirli/dsforms/internal/urlsafe"
@@ -36,12 +37,11 @@ type AuthHandler struct {
 // links the same content-hashed stylesheet, and an unversioned URL would be
 // cached for a year and go stale on the next upgrade.
 type LoginData struct {
+	PageData
 	LoginError bool
 	// LogoutIncomplete means the last logout could not delete the session
 	// server-side, so the token it issued is still accepted until it expires.
 	LogoutIncomplete bool
-	AssetVer         string
-	Version          string
 	Host             string
 	// Next is where to go after signing in, already checked to be a path on
 	// this server. Empty means the default landing page.
@@ -69,10 +69,15 @@ func loginNext(raw string) string {
 // cookie is read by the shell that this page deliberately does not render.
 func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	data := LoginData{
+		PageData: PageData{
+			Lang:      i18n.FromRequest(r, h.DefaultLanguage),
+			Path:      r.URL.RequestURI(),
+			Languages: i18n.Supported,
+			AssetVer:  h.AssetVer,
+			Version:   h.Version,
+		},
 		LoginError:       r.URL.Query().Get("error") == "1",
 		LogoutIncomplete: r.URL.Query().Get("logout") == "incomplete",
-		AssetVer:         h.AssetVer,
-		Version:          h.Version,
 		Host:             r.Host,
 		Next:             loginNext(r.URL.Query().Get("next")),
 	}
@@ -102,7 +107,7 @@ func (h *AuthHandler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.LoginGuard.IsLocked(ip) {
-		http.Error(w, "Too many failed attempts. Try again in 15 minutes.", http.StatusTooManyRequests)
+		http.Error(w, i18n.T(i18n.FromRequest(r, h.DefaultLanguage), "Too many failed attempts. Try again in 15 minutes."), http.StatusTooManyRequests)
 		return
 	}
 

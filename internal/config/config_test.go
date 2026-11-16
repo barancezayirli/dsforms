@@ -176,6 +176,41 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// TestDefaultLanguage pins the three accepted forms and the refusal of a typo.
+// No t.Parallel: t.Setenv is incompatible with parallel test execution.
+func TestDefaultLanguage(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		want      string
+		wantPanic bool
+	}{
+		{name: "unset follows the browser", value: "", want: "auto"},
+		{name: "auto follows the browser", value: "auto", want: "auto"},
+		{name: "a language tag is normalised", value: "ru-RU", want: "ru"},
+		{name: "English can be forced", value: "EN", want: "en"},
+		{name: "a typo is refused rather than read as English", value: "russian", wantPanic: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setAllRequired(t)
+			t.Setenv("DEFAULT_LANGUAGE", tt.value)
+			if tt.wantPanic {
+				defer func() {
+					if recover() == nil {
+						t.Fatal("expected a panic for an unsupported DEFAULT_LANGUAGE")
+					}
+				}()
+				Load()
+				return
+			}
+			if got := Load().DefaultLanguage; got != tt.want {
+				t.Errorf("DEFAULT_LANGUAGE=%q gave %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestBroadcastConfigDefaults and TestBroadcastConfigOverride do not use
 // t.Parallel because t.Setenv is incompatible with parallel test execution.
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/barancezayirli/dsforms/internal/auth"
+	"github.com/barancezayirli/dsforms/internal/i18n"
 	"github.com/barancezayirli/dsforms/internal/mcpserver"
 	"github.com/barancezayirli/dsforms/internal/oauth"
 	"github.com/barancezayirli/dsforms/internal/store"
@@ -158,8 +159,7 @@ func (h *OAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 // consentData is the consent page.
 type consentData struct {
 	accessFields
-	AssetVer string
-	Version  string
+	PageData
 
 	// Fatal replaces the form: the request cannot be trusted enough to send the
 	// browser back to the client, so the page says so and goes nowhere.
@@ -191,7 +191,7 @@ type consentData struct {
 // then are protocol errors sent back to the client, as RFC 6749 §4.1.2.1 asks.
 func (h *OAuthHandler) AuthorizePage(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	client, ok := h.trustedClient(w, q.Get("client_id"), q.Get("redirect_uri"))
+	client, ok := h.trustedClient(w, r, q.Get("client_id"), q.Get("redirect_uri"))
 	if !ok {
 		return
 	}
@@ -221,14 +221,14 @@ func (h *OAuthHandler) AuthorizePage(w http.ResponseWriter, r *http.Request) {
 // AuthorizeSubmit records the operator's decision.
 func (h *OAuthHandler) AuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		h.renderFatal(w, "That request could not be read.")
+		h.renderFatal(w, r, "That request could not be read.")
 		return
 	}
 	user, _ := auth.UserFromContext(r.Context())
 
 	// The client is checked again, not trusted from the page: it may have been
 	// pruned or evicted since the page was rendered.
-	client, ok := h.trustedClient(w, r.PostForm.Get("client_id"), r.PostForm.Get("redirect_uri"))
+	client, ok := h.trustedClient(w, r, r.PostForm.Get("client_id"), r.PostForm.Get("redirect_uri"))
 	if !ok {
 		return
 	}
@@ -237,7 +237,7 @@ func (h *OAuthHandler) AuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	// its lifetime approves nothing, and goes nowhere.
 	req, ok := h.Consent.VerifyForm(r.PostForm, user.ID)
 	if !ok {
-		h.renderFatal(w, "This approval has expired or was not issued to you.")
+		h.renderFatal(w, r, "This approval has expired or was not issued to you.")
 		return
 	}
 
@@ -280,19 +280,19 @@ func (h *OAuthHandler) AuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 
 // trustedClient looks up a client and checks the redirect URI is one it
 // registered, rendering a page — never a redirect — when either fails.
-func (h *OAuthHandler) trustedClient(w http.ResponseWriter, clientID, redirectURI string) (store.OAuthClient, bool) {
+func (h *OAuthHandler) trustedClient(w http.ResponseWriter, r *http.Request, clientID, redirectURI string) (store.OAuthClient, bool) {
 	client, err := h.Store.GetOAuthClient(clientID)
 	if errors.Is(err, store.ErrNotFound) {
-		h.renderFatal(w, "This client is not registered with this dsforms.")
+		h.renderFatal(w, r, "This client is not registered with this dsforms.")
 		return store.OAuthClient{}, false
 	}
 	if err != nil {
 		log.Printf("oauth: looking up client %q: %v", clientID, err)
-		h.renderFatal(w, "This request could not be checked right now. Try again in a moment.")
+		h.renderFatal(w, r, "This request could not be checked right now. Try again in a moment.")
 		return store.OAuthClient{}, false
 	}
 	if !oauth.MatchRedirectURI(client.RedirectURIs, redirectURI) {
-		h.renderFatal(w, "This request names a return address the client did not register.")
+		h.renderFatal(w, r, "This request names a return address the client did not register.")
 		return store.OAuthClient{}, false
 	}
 	return client, true
@@ -318,7 +318,7 @@ func (h *OAuthHandler) redirect(w http.ResponseWriter, r *http.Request, redirect
 	to, err := oauth.RedirectURL(redirectURI, params)
 	if err != nil {
 		log.Printf("oauth: a registered redirect URI does not parse: %q: %v", redirectURI, err)
-		h.renderFatal(w, "This client's return address is invalid.")
+		h.renderFatal(w, r, "This client's return address is invalid.")
 		return
 	}
 	http.Redirect(w, r, to, http.StatusFound)
@@ -339,11 +339,17 @@ func (h *OAuthHandler) renderConsent(w http.ResponseWriter, r *http.Request, cli
 	// Without the list, the page must not say there are no forms: on a consent
 	// screen that reads as "this reaches everything you will ever create".
 	fields.FormsUnavailable = formsUnavailable
+	lang := h.LanguageFor(r)
 	h.renderPage(w, status, consentData{
-		accessFields:  fields,
-		AssetVer:      h.AssetVer,
-		Version:       h.Version,
-		Error:         errMsg,
+		accessFields: fields,
+		PageData: PageData{
+			Lang:      lang,
+			Path:      r.URL.RequestURI(),
+			Languages: i18n.Supported,
+			AssetVer:  h.AssetVer,
+			Version:   h.Version,
+		},
+		Error:         i18n.T(lang, errMsg),
 		AskedFor:      askedFor,
 		Username:      user.Username,
 		ClientName:    client.Name,
@@ -357,8 +363,18 @@ func (h *OAuthHandler) renderConsent(w http.ResponseWriter, r *http.Request, cli
 	})
 }
 
-func (h *OAuthHandler) renderFatal(w http.ResponseWriter, msg string) {
-	h.renderPage(w, http.StatusBadRequest, consentData{AssetVer: h.AssetVer, Version: h.Version, Fatal: msg})
+func (h *OAuthHandler) renderFatal(w http.ResponseWriter, r *http.Request, msg string) {
+	lang := h.LanguageFor(r)
+	h.renderPage(w, http.StatusBadRequest, consentData{
+		PageData: PageData{
+			Lang:      lang,
+			Path:      r.URL.RequestURI(),
+			Languages: i18n.Supported,
+			AssetVer:  h.AssetVer,
+			Version:   h.Version,
+		},
+		Fatal: i18n.T(lang, msg),
+	})
 }
 
 // renderPage renders into a buffer first, so a template failure is a 500 and

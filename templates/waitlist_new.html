@@ -1,7 +1,7 @@
 {{template "base" .}}
 
 {{define "content"}}
-<div class="page-head"><h4>New waitlist</h4></div>
+<div class="page-head"><h4>{{.T "New waitlist"}}</h4></div>
 
 {{if .Error}}
 <div class="notice"><svg class="i"><use href="#ph-warning"/></svg><span>{{.Error}}</span></div>
@@ -10,28 +10,28 @@
 <form method="POST" action="/admin/waitlists/new" style="max-width:560px">
   <div class="card elev-sm">
     <label class="field">
-      <span>Name</span>
-      <input class="input" name="name" value="{{.Waitlist.Name}}" required autofocus placeholder="Launch list">
+      <span>{{.T "Name"}}</span>
+      <input class="input" name="name" value="{{.Waitlist.Name}}" required autofocus placeholder="{{.T "Launch list"}}">
     </label>
     <label class="field">
-      <span>Redirect after signup</span>
+      <span>{{.T "Redirect after signup"}}</span>
       <input class="input" name="redirect" value="{{.Waitlist.Redirect}}" placeholder="https://yoursite.com/joined">
-      <span class="form-hint">If this is a full URL, it is also the allowlist for <code>_redirect</code>: any page on that origin is accepted.</span>
+      <span class="form-hint">{{.T "If this is a full URL, it is also the allowlist for _redirect: any page on that origin is accepted."}}</span>
     </label>
     <label class="field">
-      <span>Confirmation subject</span>
+      <span>{{.T "Confirmation subject"}}</span>
       <input class="input" name="confirm_subject" value="{{.Waitlist.ConfirmSubject}}"
-             placeholder="Leave blank to send no confirmation">
+             placeholder="{{.T "Leave blank to send no confirmation"}}">
     </label>
     <label class="field" style="margin-bottom:0">
-      <span>Confirmation body</span>
+      <span>{{.T "Confirmation body"}}</span>
       <textarea class="input" name="confirm_body" placeholder="Hi {{`{{name}}`}}, you're #{{`{{position}}`}}!">{{.Waitlist.ConfirmBody}}</textarea>
-      <span class="form-hint">Variables: <code>{{`{{email}}`}}</code> <code>{{`{{name}}`}}</code> <code>{{`{{position}}`}}</code></span>
+      <span class="form-hint">{{.T "Variables:"}} <code>{{`{{email}}`}}</code> <code>{{`{{name}}`}}</code> <code>{{`{{position}}`}}</code></span>
     </label>
   </div>
   <div style="display:flex;gap:8px;margin-top:12px">
-    <button class="btn btn-primary" type="submit">Create waitlist</button>
-    <a class="btn btn-secondary" href="/admin/waitlists">Cancel</a>
+    <button class="btn btn-primary" type="submit">{{.T "Create waitlist"}}</button>
+    <a class="btn btn-secondary" href="/admin/waitlists">{{.T "Cancel"}}</a>
   </div>
 </form>
 {{end}}

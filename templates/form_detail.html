@@ -2,10 +2,10 @@
 
 {{define "header-actions"}}
 <a class="btn btn-secondary btn-34" href="/admin/forms/{{.Form.ID}}/export">
-  <svg class="i" style="font-size:15px"><use href="#ph-file-csv"/></svg>Export CSV
+  <svg class="i" style="font-size:15px"><use href="#ph-file-csv"/></svg>{{.T "Export CSV"}}
 </a>
 <a class="btn btn-primary btn-34" href="/admin/forms/{{.Form.ID}}/edit">
-  <svg class="i" style="font-size:15px"><use href="#ph-gear-six"/></svg>Settings
+  <svg class="i" style="font-size:15px"><use href="#ph-gear-six"/></svg>{{.T "Settings"}}
 </a>
 {{end}}
 
@@ -16,7 +16,7 @@
   <div class="actions">
     <form method="POST" action="/admin/forms/{{.Form.ID}}/read-all">
       <button class="btn btn-secondary" type="submit">
-        <svg class="i" style="font-size:15px"><use href="#ph-envelope-open"/></svg>Mark all read
+        <svg class="i" style="font-size:15px"><use href="#ph-envelope-open"/></svg>{{.T "Mark all read"}}
       </button>
     </form>
   </div>
@@ -25,28 +25,28 @@
 <div class="row">
   <div class="card elev-sm stat">
     <div class="stat-value">{{.TotalCount}}</div>
-    <div class="stat-label">Total</div>
-    <div class="stat-sub">all time</div>
+    <div class="stat-label">{{.T "Total"}}</div>
+    <div class="stat-sub">{{.T "all time"}}</div>
   </div>
   <div class="card elev-sm stat">
     <!-- "inbox zero" is a claim, not an absent value: rendering it because the
          count query failed tells the operator nothing is waiting when something
          may be. UnreadUnknown renders "—" the way the Held stat does. -->
     <div class="stat-value {{if and .UnreadCount (not .UnreadUnknown)}}stat-accent{{end}}">{{if .UnreadUnknown}}—{{else}}{{.UnreadCount}}{{end}}</div>
-    <div class="stat-label">Unread</div>
+    <div class="stat-label">{{.T "Unread"}}</div>
     <div class="stat-sub">
-      {{if .UnreadUnknown}}count unavailable
-      {{else if .UnreadCount}}waiting for you
-      {{else}}inbox zero{{end}}
+      {{if .UnreadUnknown}}{{.T "count unavailable"}}
+      {{else if .UnreadCount}}{{.T "waiting for you"}}
+      {{else}}{{.T "inbox zero"}}{{end}}
     </div>
   </div>
   <div class="card elev-sm stat">
     <div class="stat-value">{{if .HeldUnknown}}—{{else}}{{.HeldCount}}{{end}}</div>
-    <div class="stat-label">Held</div>
+    <div class="stat-label">{{.T "Held"}}</div>
     <div class="stat-sub">
-      {{if .HeldUnknown}}count unavailable
-      {{else if .HeldCount}}<a class="link" href="/admin/quarantine">review them</a>
-      {{else}}nothing quarantined{{end}}
+      {{if .HeldUnknown}}{{.T "count unavailable"}}
+      {{else if .HeldCount}}<a class="link" href="/admin/quarantine">{{.T "review them"}}</a>
+      {{else}}{{.T "nothing quarantined"}}{{end}}
     </div>
   </div>
 </div>
@@ -57,18 +57,18 @@
      every row already contains its own single-submission delete form, and
      forms cannot nest. -->
 <form id="bulk-form" method="POST" action="/admin/forms/{{.Form.ID}}/submissions/bulk-delete"
-      data-confirm="Delete the selected submissions? This cannot be undone."></form>
+      data-confirm="{{.T "Delete the selected submissions? This cannot be undone."}}"></form>
 
 <div class="card elev-sm" data-bulk>
   <div class="bulkbar" data-bulk-bar hidden>
     <label class="radio">
-      <input type="checkbox" data-bulk-all aria-label="Select all submissions on this page">
+      <input type="checkbox" data-bulk-all aria-label="{{.T "Select all submissions on this page"}}">
       <span class="dot"></span>
     </label>
-    <span class="count" data-bulk-count>0 selected</span>
+    <span class="count" data-bulk-count>{{.T "0 selected"}}</span>
     <div class="actions">
       <button class="btn btn-danger" type="submit" form="bulk-form" data-bulk-action>
-        <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>Delete
+        <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>{{.T "Delete"}}
       </button>
     </div>
   </div>
@@ -78,10 +78,10 @@
       <thead>
         <tr>
           <th style="width:28px"></th>
-          <th>From</th>
-          <th>Preview</th>
-          <th>Signals</th>
-          <th>Received</th>
+          <th>{{.T "From"}}</th>
+          <th>{{.T "Preview"}}</th>
+          <th>{{.T "Signals"}}</th>
+          <th>{{.T "Received"}}</th>
           <th style="width:40px"></th>
         </tr>
       </thead>
@@ -91,7 +91,7 @@
           <td>
             <label class="radio">
               <input type="checkbox" name="ids" value="{{.ID}}" form="bulk-form" data-bulk-item
-                     aria-label="Select this submission">
+                     aria-label="{{$.T "Select this submission"}}">
               <span class="dot"></span>
             </label>
           </td>
@@ -102,7 +102,7 @@
               <span class="unread-dot" aria-hidden="true"></span>
               <div style="min-width:0">
                 <a class="from-name" data-drawer href="/admin/forms/{{$.Form.ID}}/submissions/{{.ID}}">
-                  {{if index .Data "name"}}{{index .Data "name"}}{{else if index .Data "email"}}{{index .Data "email"}}{{else}}Submission{{end}}
+                  {{if index .Data "name"}}{{index .Data "name"}}{{else if index .Data "email"}}{{index .Data "email"}}{{else}}{{$.T "Submission"}}{{end}}
                 </a>
                 {{if index .Data "email"}}<div class="from-email truncate">{{index .Data "email"}}</div>{{end}}
               </div>
@@ -112,18 +112,18 @@
             {{if index .Data "message"}}{{index .Data "message"}}{{else if index .Data "body"}}{{index .Data "body"}}{{else if index .Data "content"}}{{index .Data "content"}}{{else}}—{{end}}
           </td>
           <td>
-            {{if not .Read}}<span class="tag tag-accent tag-sm">new</span>
-            {{else}}<span class="tag tag-neutral tag-sm">read</span>{{end}}
+            {{if not .Read}}<span class="tag tag-accent tag-sm">{{$.T "new"}}</span>
+            {{else}}<span class="tag tag-neutral tag-sm">{{$.T "read"}}</span>{{end}}
             <!-- An operator will not open every message, so a mark that exists
                  only on the reader is a mark nobody finds. -->
             {{if hasHidden .Data}}<span class="tag tag-outline tag-sm nowrap"
-                  title="Carries hidden instructions, removed before any MCP client sees it">hidden text</span>{{end}}
+                  title="{{$.T "Carries hidden instructions, removed before any MCP client sees it"}}">{{$.T "hidden text"}}</span>{{end}}
           </td>
-          <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "Jan 2, 15:04"}}</td>
+          <td class="dim nowrap" style="font-size:12px">{{.CreatedAt.Format "02.01. 15:04"}}</td>
           <td>
             <form method="POST" action="/admin/submissions/{{.ID}}/delete"
-                  data-confirm="Delete this submission? This cannot be undone.">
-              <button class="btn btn-quiet btn-icon sm" type="submit" title="Delete" aria-label="Delete submission">
+                  data-confirm="{{$.T "Delete this submission? This cannot be undone."}}">
+              <button class="btn btn-quiet btn-icon sm" type="submit" title="{{$.T "Delete"}}" aria-label="{{$.T "Delete submission"}}">
                 <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>
               </button>
             </form>
@@ -136,7 +136,7 @@
 
   <div class="pager rule-b" style="background-position:top">
     <form method="GET" style="display:flex;align-items:center;gap:8px">
-      <label class="dim" style="font-size:12px" for="rows">Rows</label>
+      <label class="dim" style="font-size:12px" for="rows">{{.T "Rows"}}</label>
       <select class="input" id="rows" name="size" data-autosubmit style="width:auto;min-height:30px;font-size:12px">
         {{$size := .Pager.PageSize}}
         {{range .Pager.Sizes}}<option value="{{.}}" {{if eq . $size}}selected{{end}}>{{.}}</option>{{end}}
@@ -145,15 +145,15 @@
     <span class="muted" style="font-size:12px">{{.Pager.From}}–{{.Pager.To}} of {{.Pager.Total}}</span>
 
     {{if gt .Pager.TotalPages 1}}
-    <nav class="pages" aria-label="Pagination">
+    <nav class="pages" aria-label="{{.T "Pagination"}}">
       {{$form := .Form.ID}}{{$size := .Pager.PageSize}}{{$cur := .Pager.Page}}
       <a class="btn btn-secondary {{if not .Pager.HasPrev}}disabled{{end}}"
-         href="/admin/forms/{{$form}}?page=1&size={{$size}}" title="First page" aria-label="First page"
+         href="/admin/forms/{{$form}}?page=1&size={{$size}}" title="{{.T "First page"}}" aria-label="{{.T "First page"}}"
          {{if not .Pager.HasPrev}}aria-disabled="true" tabindex="-1"{{end}}>
         <svg class="i" style="font-size:13px"><use href="#ph-caret-double-left"/></svg>
       </a>
       <a class="btn btn-secondary {{if not .Pager.HasPrev}}disabled{{end}}"
-         href="/admin/forms/{{$form}}?page={{.Pager.PrevPage}}&size={{$size}}" title="Previous page" aria-label="Previous page"
+         href="/admin/forms/{{$form}}?page={{.Pager.PrevPage}}&size={{$size}}" title="{{.T "Previous page"}}" aria-label="{{.T "Previous page"}}"
          {{if not .Pager.HasPrev}}aria-disabled="true" tabindex="-1"{{end}}>
         <svg class="i" style="font-size:13px"><use href="#ph-caret-left"/></svg>
       </a>
@@ -163,12 +163,12 @@
         {{else}}<a class="btn btn-secondary" href="/admin/forms/{{$form}}?page={{.}}&size={{$size}}">{{.}}</a>{{end}}
       {{end}}
       <a class="btn btn-secondary {{if not .Pager.HasNext}}disabled{{end}}"
-         href="/admin/forms/{{$form}}?page={{.Pager.NextPage}}&size={{$size}}" title="Next page" aria-label="Next page"
+         href="/admin/forms/{{$form}}?page={{.Pager.NextPage}}&size={{$size}}" title="{{.T "Next page"}}" aria-label="{{.T "Next page"}}"
          {{if not .Pager.HasNext}}aria-disabled="true" tabindex="-1"{{end}}>
         <svg class="i" style="font-size:13px"><use href="#ph-caret-right"/></svg>
       </a>
       <a class="btn btn-secondary {{if not .Pager.HasNext}}disabled{{end}}"
-         href="/admin/forms/{{$form}}?page={{.Pager.TotalPages}}&size={{$size}}" title="Last page" aria-label="Last page"
+         href="/admin/forms/{{$form}}?page={{.Pager.TotalPages}}&size={{$size}}" title="{{.T "Last page"}}" aria-label="{{.T "Last page"}}"
          {{if not .Pager.HasNext}}aria-disabled="true" tabindex="-1"{{end}}>
         <svg class="i" style="font-size:13px"><use href="#ph-caret-double-right"/></svg>
       </a>
@@ -180,11 +180,10 @@
 {{else}}
 <div class="card elev-sm empty">
   <span class="empty-icon"><svg class="i"><use href="#ph-tray"/></svg></span>
-  <h3>No submissions yet</h3>
-  <p>Paste the endpoint snippet into your form and submissions land here, with an
-     email notification for each one.</p>
+  <h3>{{.T "No submissions yet"}}</h3>
+  <p>{{.T "Paste the endpoint snippet into your form and submissions land here, with an email notification for each one."}}</p>
   <a class="btn btn-primary" href="/admin/forms/{{.Form.ID}}/edit">
-    <svg class="i" style="font-size:15px"><use href="#ph-clipboard-text"/></svg>Get the snippet
+    <svg class="i" style="font-size:15px"><use href="#ph-clipboard-text"/></svg>{{.T "Get the snippet"}}
   </a>
 </div>
 {{end}}

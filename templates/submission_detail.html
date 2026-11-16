@@ -10,28 +10,28 @@
 {{define "reader-toolbar"}}
 <div class="drawer-toolbar rule-b">
   <a class="btn btn-secondary btn-icon" data-drawer-close href="/admin/forms/{{.Form.ID}}"
-     title="Close" aria-label="Close reader">
+     title="{{.T "Close"}}" aria-label="{{.T "Close"}}">
     <svg class="i" style="font-size:15px"><use href="#ph-x"/></svg>
   </a>
 
   <div style="display:flex;align-items:center;gap:4px">
     {{if .NewerID}}
     <a class="btn btn-secondary btn-icon sm" data-drawer href="/admin/forms/{{.Form.ID}}/submissions/{{.NewerID}}"
-       title="Newer" aria-label="Newer submission">
+       title="{{.T "Newer"}}" aria-label="{{.T "Newer submission"}}">
       <svg class="i" style="font-size:14px"><use href="#ph-caret-up"/></svg>
     </a>
     {{else}}
-    <span class="btn btn-secondary btn-icon sm" aria-disabled="true" title="No newer submission">
+    <span class="btn btn-secondary btn-icon sm" aria-disabled="true" title="{{.T "No newer submission"}}">
       <svg class="i" style="font-size:14px"><use href="#ph-caret-up"/></svg>
     </span>
     {{end}}
     {{if .OlderID}}
     <a class="btn btn-secondary btn-icon sm" data-drawer href="/admin/forms/{{.Form.ID}}/submissions/{{.OlderID}}"
-       title="Older" aria-label="Older submission">
+       title="{{.T "Older"}}" aria-label="{{.T "Older submission"}}">
       <svg class="i" style="font-size:14px"><use href="#ph-caret-down"/></svg>
     </a>
     {{else}}
-    <span class="btn btn-secondary btn-icon sm" aria-disabled="true" title="No older submission">
+    <span class="btn btn-secondary btn-icon sm" aria-disabled="true" title="{{.T "No older submission"}}">
       <svg class="i" style="font-size:14px"><use href="#ph-caret-down"/></svg>
     </span>
     {{end}}
@@ -39,20 +39,20 @@
          position is a hard numeric claim, and one manufactured from a query
          that did not run is worse than no counter at all. -->
     {{if .PositionKnown}}
-    <span class="dim nowrap" style="font-size:11px;margin-left:5px">{{.Position}} of {{.Total}}</span>
+    <span class="dim nowrap" style="font-size:11px;margin-left:5px">{{.T "%d of %d" .Position .Total}}</span>
     {{end}}
   </div>
 
   <div class="actions">
     <form method="POST" action="/admin/submissions/{{.Submission.ID}}/delete"
-          data-confirm="Delete this submission? This cannot be undone.">
-      <button class="btn btn-secondary btn-icon" type="submit" title="Delete" aria-label="Delete submission">
+          data-confirm="{{.T "Delete this submission? This cannot be undone."}}">
+      <button class="btn btn-secondary btn-icon" type="submit" title="{{.T "Delete"}}" aria-label="{{.T "Delete submission"}}">
         <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>
       </button>
     </form>
     {{if index .Submission.Data "email"}}
     <a class="btn btn-primary" style="font-size:12px" href="mailto:{{index .Submission.Data "email"}}">
-      <svg class="i" style="font-size:14px"><use href="#ph-arrow-bend-up-left"/></svg>Reply
+      <svg class="i" style="font-size:14px"><use href="#ph-arrow-bend-up-left"/></svg>{{.T "Reply"}}
     </a>
     {{end}}
   </div>
@@ -67,14 +67,14 @@
     </span>
     <div style="min-width:0;flex:1">
       <div style="font-size:17px;font-weight:500">
-        {{if index .Submission.Data "name"}}{{index .Submission.Data "name"}}{{else}}Submission{{end}}
+        {{if index .Submission.Data "name"}}{{index .Submission.Data "name"}}{{else}}{{.T "Submission"}}{{end}}
       </div>
       {{if index .Submission.Data "email"}}
       <div class="muted truncate" style="font-size:12px">{{index .Submission.Data "email"}}</div>
       {{end}}
     </div>
     <div style="text-align:right">
-      <div style="font-size:12px">{{.Submission.CreatedAt.Format "Jan 2, 2006 15:04"}}</div>
+      <div style="font-size:12px">{{.Submission.CreatedAt.Format "02.01.2006 15:04"}}</div>
       {{if .Submission.IP}}<div class="dim mono" style="font-size:11px">{{.Submission.IP}}</div>{{end}}
     </div>
   </div>
@@ -91,7 +91,7 @@
   {{end}}
 
   {{if .Message}}
-  <div class="field-key" style="margin:18px 0 7px">message</div>
+  <div class="field-key" style="margin:18px 0 7px">{{.T "message"}}</div>
   <div class="message">{{.Message}}</div>
   {{end}}
 </div>
@@ -105,12 +105,11 @@
 <div class="panel-box" style="margin:12px 22px 0">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <svg class="i i-accent" style="font-size:15px"><use href="#ph-selection-slash"/></svg>
-    <span style="font-size:13px">Hidden instructions in this message</span>
-    <span class="tag tag-outline tag-sm" style="margin-left:auto">withheld from MCP</span>
+    <span style="font-size:13px">{{.T "Hidden instructions in this message"}}</span>
+    <span class="tag tag-outline tag-sm" style="margin-left:auto">{{.T "withheld from MCP"}}</span>
   </div>
   <div class="dim" style="font-size:12px;margin-top:5px">
-    Removed before any MCP client was shown this submission. The message above
-    is unchanged — it is exactly what was sent.
+    {{.T "Removed before any MCP client was shown this submission. The message above is unchanged — it is exactly what was sent."}}
   </div>
   <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
     {{range .Hidden}}
@@ -118,13 +117,13 @@
       <div class="rule-head">
         <svg class="i"><use href="#ph-prohibit"/></svg>
         <span class="rule-name">{{.Reason}}</span>
-        <span class="tag tag-outline tag-sm nowrap">{{if eq .Line .Through}}line {{.Line}}{{else}}lines {{.Line}}&ndash;{{.Through}}{{end}}</span>
+        <span class="tag tag-outline tag-sm nowrap">{{if eq .Line .Through}}{{$.T "line %v" .Line}}{{else}}{{$.T "lines %v–%v" .Line .Through}}{{end}}</span>
       </div>
       <div class="rule-field">
-        {{if .InName}}in a field <em>name</em>, so the whole field was withheld
-        {{else if .Field}}field <code>{{.Field}}</code>
-        {{else}}in a field submitted with no name{{end}}
-        &middot; matched <code>{{.Matched}}</code>
+        {{if .InName}}{{$.T "in a field name, so the whole field was withheld"}}
+        {{else if .Field}}{{$.T "field %s" .Field}}
+        {{else}}{{$.T "in a field submitted with no name"}}{{end}}
+        &middot; {{$.T "matched"}} <code>{{.Matched}}</code>
       </div>
       {{if .Lines}}
       <div class="code" style="margin-top:5px;white-space:pre-wrap">{{range .Lines}}{{.}}
@@ -145,16 +144,16 @@
       <use href="#ph-{{if .Signals}}shield-warning{{else}}shield-check{{end}}"/>
     </svg>
     <span style="font-size:13px">
-      {{if .SignalsFailed}}Spam check unavailable{{else if .Signals}}Was held, then restored{{else}}Spam check passed{{end}}
+      {{if .SignalsFailed}}{{.T "Spam check unavailable"}}{{else if .Signals}}{{.T "Was held, then restored"}}{{else}}{{.T "Spam check passed"}}{{end}}
     </span>
     <span class="tag tag-outline tag-sm" style="margin-left:auto">
-      {{if or .Submission.SpamScore .Submission.HeldThreshold}}score {{.Submission.SpamScore}}{{if .Submission.HeldThreshold}} / {{.Submission.HeldThreshold}}{{end}}{{else}}score not recorded{{end}}
+      {{if or .Submission.SpamScore .Submission.HeldThreshold}}{{if .Submission.HeldThreshold}}{{.T "score %d / %d" .Submission.SpamScore .Submission.HeldThreshold}}{{else}}{{.T "score %d" .Submission.SpamScore}}{{end}}{{else}}{{.T "score not recorded"}}{{end}}
     </span>
   </div>
   {{if .SignalsFailed}}
   <div class="notice" style="margin-top:8px">
     <svg class="i"><use href="#ph-warning"/></svg>
-    <span>The reason this was held could not be read.</span>
+    <span>{{.T "The reason this was held could not be read."}}</span>
   </div>
   {{end}}
 
@@ -169,11 +168,11 @@
     <div class="rule-box">
       <div class="rule-head">
         <svg class="i"><use href="#ph-{{ruleIcon .Check}}"/></svg>
-        <span class="rule-name">{{ruleLabel .Check}}</span>
+        <span class="rule-name">{{$.T (ruleLabel .Check)}}</span>
         <span class="tag tag-outline tag-sm">+{{.Weight}}</span>
       </div>
       {{if .Match}}
-      <div class="rule-field">{{if .Field}}field <code>{{.Field}}</code> · {{end}}matched</div>
+      <div class="rule-field">{{if .Field}}{{$.T "field %s" .Field}} · {{end}}{{$.T "matched"}}</div>
       <div class="code" style="margin-top:5px">{{.Match}}</div>
       {{end}}
     </div>
@@ -181,17 +180,15 @@
   </div>
   {{else if not .Submission.HeldThreshold}}
   <div class="dim" style="font-size:12px;margin-top:5px">
-    Received before scores were recorded, so there is nothing to show. New
-    submissions carry theirs.
+    {{.T "Received before scores were recorded, so there is nothing to show. New submissions carry theirs."}}
   </div>
   {{else if .Submission.SpamScore}}
   <div class="dim" style="font-size:12px;margin-top:5px">
-    Scored below the threshold, so it was delivered. The breakdown is kept only
-    for submissions that were held.
+    {{.T "Scored below the threshold, so it was delivered. The breakdown is kept only for submissions that were held."}}
   </div>
   {{else}}
   <div class="dim" style="font-size:12px;margin-top:5px">
-    Nothing scored against this submission.
+    {{.T "Nothing scored against this submission."}}
   </div>
   {{end}}
 </div>
@@ -199,7 +196,7 @@
 
 {{define "drawer"}}
 <div class="backdrop" data-drawer-close></div>
-<div class="drawer" role="dialog" aria-modal="true" aria-label="Submission" tabindex="-1">
+<div class="drawer" role="dialog" aria-modal="true" aria-label="{{.T "Submission"}}" tabindex="-1">
   <div class="drawer-scroll">
 {{template "degraded-notice" .}}
     {{template "reader-toolbar" .}}

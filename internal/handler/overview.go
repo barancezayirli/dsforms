@@ -117,7 +117,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 		BarWidth:      BarWidth(),
 		RetentionDays: h.RetentionDays,
 	}
-	data.Greeting = greeting(time.Now()) + ", " + data.CurrentUser.Username
+	data.Greeting = data.T(greeting(time.Now())) + ", " + data.CurrentUser.Username
 
 	series, err := h.Store.SubmissionsPerDay(days, store.AllForms())
 	if err != nil {
@@ -166,29 +166,29 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 
 	data.KPIs = []kpi{
 		{
-			Icon: "tray-arrow-down", Label: "Submissions",
+			Icon: "tray-arrow-down", Label: data.T("Submissions"),
 			Value: itoa(totalAccepted),
 			Delta: deltaLabel(totalAccepted, prevAccepted),
-			Sub:   "vs. " + itoa(prevAccepted) + " previous " + itoa(days) + "d",
+			Sub:   data.T("vs. %d previous %dd", prevAccepted, days),
 			Spark: Sparkline(accepted, sparkWidth, sparkHeight, 4),
 		},
 		{
-			Icon: "envelope", Label: "Unread",
+			Icon: "envelope", Label: data.T("Unread"),
 			Value: itoa(nav.Unread),
-			Sub:   "across every form",
+			Sub:   data.T("across every form"),
 			Spark: Sparkline(accepted, sparkWidth, sparkHeight, 4),
 		},
 		{
-			Icon: "shield-warning", Label: "Spam held",
+			Icon: "shield-warning", Label: data.T("Spam held"),
 			Value: itoa(heldRecent),
 			Delta: itoa(Percent(heldRecent, trafficRecent)) + "%",
-			Sub:   itoa(nav.Held) + " awaiting review",
+			Sub:   data.T("%d awaiting review", nav.Held),
 			Spark: Sparkline(held, sparkWidth, sparkHeight, 4),
 		},
 		{
-			Icon: "users-three", Label: "Waitlist",
+			Icon: "users-three", Label: data.T("Waitlist"),
 			Value: itoa(nav.Waitlist),
-			Sub:   "signups across every list",
+			Sub:   data.T("signups across every list"),
 			Spark: Sparkline(accepted, sparkWidth, sparkHeight, 4),
 		},
 	}
@@ -206,7 +206,7 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 		for _, t := range tallies {
 			p := Percent(t.Hits, maxHits)
 			data.Signals = append(data.Signals, signalBar{
-				Label: RuleLabel(t.Check), Icon: RuleIcon(t.Check),
+				Label: data.T(RuleLabel(t.Check)), Icon: RuleIcon(t.Check),
 				Hits: t.Hits, Weight: t.Weight, Percent: p, Hot: p > 60,
 			})
 		}
@@ -231,12 +231,15 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 	} else {
 		for _, rs := range recent {
 			name := senderLabel(rs.Data)
+			if name == "Submission" {
+				name = data.T("Submission")
+			}
 			data.Recent = append(data.Recent, recentRow{
 				RecentSubmission: rs,
 				Name:             name,
 				Initial:          Initial(name),
 				Preview:          previewOf(rs.Data),
-				Age:              Age(rs.CreatedAt),
+				Age:              AgeIn(data.Lang, rs.CreatedAt),
 			})
 		}
 	}
@@ -244,12 +247,12 @@ func (h *OverviewHandler) Page(w http.ResponseWriter, r *http.Request) {
 	if h.Limiter != nil {
 		data.Activity = h.Limiter.Snapshot(5)
 	}
-	data.RateLabel = itoa(h.RateBurst) + " burst · " + itoa(h.RatePerMinute) + " / min"
+	data.RateLabel = data.T("%d burst · %d / min", h.RateBurst, h.RatePerMinute)
 
 	forms := len(data.Forms)
-	data.Summary = plural(forms, "form") + " on this instance"
+	data.Summary = data.Plural(forms, "form") + " " + data.T("on this instance")
 	if nav.Held > 0 {
-		data.Summary += " · " + plural(nav.Held, "submission") + " held in quarantine"
+		data.Summary += " · " + data.Plural(nav.Held, "submission") + " " + data.T("held in quarantine")
 	}
 
 	h.Render(w, "home.html", data)
@@ -290,7 +293,7 @@ func tickLabels(series []store.DayCounts) []string {
 	out := make([]string, 0, ticks)
 	for i := 0; i < ticks; i++ {
 		idx := i * (len(series) - 1) / (ticks - 1)
-		out = append(out, series[idx].Day.Format("Jan 2"))
+		out = append(out, series[idx].Day.Format("02.01"))
 	}
 	return out
 }

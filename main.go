@@ -25,6 +25,7 @@ import (
 	"github.com/barancezayirli/dsforms/internal/broadcaster"
 	"github.com/barancezayirli/dsforms/internal/config"
 	"github.com/barancezayirli/dsforms/internal/handler"
+	"github.com/barancezayirli/dsforms/internal/i18n"
 	"github.com/barancezayirli/dsforms/internal/mail"
 	"github.com/barancezayirli/dsforms/internal/mcpserver"
 	"github.com/barancezayirli/dsforms/internal/oauth"
@@ -252,10 +253,10 @@ type healthCheck func(context.Context) error
 // package-level variable assigned later instead, which every router in the
 // process shared. Production builds one router, so only tests saw another
 // router's page, and they raced on the variable.
-func newRouter(healthy healthCheck, templates map[string]*template.Template) *chi.Mux {
+func newRouter(healthy healthCheck, templates map[string]*template.Template, defaultLanguage string) *chi.Mux {
 	r := chi.NewRouter()
 
-	render := func(w http.ResponseWriter, name string, status int, fallback string) {
+	render := func(w http.ResponseWriter, r *http.Request, name string, status int, fallback string) {
 		tmpl, ok := templates[name]
 		if !ok {
 			http.Error(w, fallback, status)
@@ -263,7 +264,12 @@ func newRouter(healthy healthCheck, templates map[string]*template.Template) *ch
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(status)
-		if err := tmpl.ExecuteTemplate(w, name, nil); err != nil {
+		data := handler.PageData{
+			Lang:      i18n.FromRequest(r, defaultLanguage),
+			Path:      r.URL.RequestURI(),
+			Languages: i18n.Supported,
+		}
+		if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
 			log.Printf("%s template error: %v", name, err)
 		}
 	}
@@ -288,7 +294,7 @@ func newRouter(healthy healthCheck, templates map[string]*template.Template) *ch
 						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 					}
 				}()
-				render(w, "500.html", http.StatusInternalServerError, "Internal Server Error")
+				render(w, r, "500.html", http.StatusInternalServerError, "Internal Server Error")
 			}()
 			next.ServeHTTP(w, r)
 		})
@@ -356,7 +362,7 @@ func newRouter(healthy healthCheck, templates map[string]*template.Template) *ch
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		render(w, "404.html", http.StatusNotFound, "Page not found")
+		render(w, r, "404.html", http.StatusNotFound, "Page not found")
 	})
 
 	return r
@@ -1142,14 +1148,15 @@ func routes(d serverDeps) *chi.Mux {
 	// handler a second, unrestricted route to the database beside the narrow one
 	// it declares.
 	base := handler.Base{
-		Nav:       d.store,
-		SecretKey: d.cfg.SecretKey,
-		BaseURL:   d.cfg.BaseURL,
-		DBPath:    d.cfg.DBPath,
-		Journal:   journalMode(d.store.DB()),
-		Version:   version,
-		AssetVer:  assetVersion(),
-		Templates: d.templates,
+		Nav:             d.store,
+		SecretKey:       d.cfg.SecretKey,
+		BaseURL:         d.cfg.BaseURL,
+		DBPath:          d.cfg.DBPath,
+		Journal:         journalMode(d.store.DB()),
+		Version:         version,
+		AssetVer:        assetVersion(),
+		DefaultLanguage: d.cfg.DefaultLanguage,
+		Templates:       d.templates,
 	}
 
 	authHandler := &handler.AuthHandler{Base: base, Store: d.store, LoginGuard: loginGuard}
@@ -1227,9 +1234,14 @@ func routes(d serverDeps) *chi.Mux {
 		// failed restore.
 		var ok int
 		return d.store.DB().QueryRowContext(ctx, "SELECT 1").Scan(&ok)
-	}, d.templates)
+	}, d.templates, d.cfg.DefaultLanguage)
 	r.With(rateLimitMiddleware(limiter)).Post("/f/{formID}", submitHandler.Handle)
 	r.With(rateLimitMiddleware(limiter)).Post("/w/{waitlistID}", waitlistSubmitHandler.Handle)
+
+	// The switcher lives under /admin like the rest of the app, but is public:
+	// the login page needs it before a session exists. Its destination is
+	// checked with urlsafe.RelativePath inside the handler.
+	r.Get("/admin/language", base.Language)
 
 	mountMCP(r, d, base)
 

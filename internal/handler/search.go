@@ -42,7 +42,6 @@ func (h *SearchHandler) Page(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 
 	data := searchData{PageData: h.Shell(w, r, "Search", "forms")}
-	data.Title = "Search"
 
 	if query != "" {
 		results, err := h.Store.SearchSubmissions(query, store.AllForms(), 50)
@@ -53,12 +52,15 @@ func (h *SearchHandler) Page(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, res := range results {
 			name := senderLabel(res.Data)
+			if name == "Submission" {
+				name = data.T("Submission")
+			}
 			data.Rows = append(data.Rows, searchRow{
 				SearchResult: res,
 				Name:         name,
 				Initial:      Initial(name),
 				Preview:      previewOf(res.Data),
-				Age:          Age(res.CreatedAt),
+				Age:          AgeIn(data.Lang, res.CreatedAt),
 			})
 		}
 	}

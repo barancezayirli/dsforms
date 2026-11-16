@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -121,26 +120,26 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if username == "" {
-		renderError("Username is required.")
+		renderError(h.T(r, "Username is required."))
 		return
 	}
 
 	if password != confirmPassword {
-		renderError("Passwords do not match.")
+		renderError(h.T(r, "Passwords do not match."))
 		return
 	}
 
 	// The store enforces this too, and that is the guarantee — this exists so the
 	// operator gets a specific sentence rather than a generic failure.
 	if len(password) < store.MinPasswordLength {
-		renderError(fmt.Sprintf("Password must be at least %d characters.", store.MinPasswordLength))
+		renderError(h.T(r, "Password must be at least %d characters.", store.MinPasswordLength))
 		return
 	}
 
 	if err := h.Store.CreateUser(username, password); err != nil {
 		// Detect UNIQUE constraint violation as a duplicate username
 		if strings.Contains(err.Error(), "UNIQUE constraint") || strings.Contains(err.Error(), "duplicate") {
-			renderError("Username already exists.")
+			renderError(h.T(r, "Username already exists."))
 			return
 		}
 		log.Printf("create user error: %v", err)
@@ -164,7 +163,7 @@ func (h *UsersHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	// Prevent self-deletion
 	if id == currentUser.ID {
-		flash.Set(w, h.SecretKey, "error", "You cannot delete your own account.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "You cannot delete your own account."))
 		http.Redirect(w, r, "/admin/users", http.StatusFound)
 		return
 	}
@@ -172,7 +171,7 @@ func (h *UsersHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	if err := h.Store.DeleteUser(id); err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "cannot delete the last user") {
-			flash.Set(w, h.SecretKey, "error", "Cannot delete the last user.")
+			flash.Set(w, h.SecretKey, "error", h.T(r, "Cannot delete the last user."))
 			http.Redirect(w, r, "/admin/users", http.StatusFound)
 			return
 		}
@@ -181,7 +180,7 @@ func (h *UsersHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flash.Set(w, h.SecretKey, "success", "User deleted.")
+	flash.Set(w, h.SecretKey, "success", h.T(r, "User deleted."))
 	http.Redirect(w, r, "/admin/users", http.StatusFound)
 }
 
@@ -218,17 +217,17 @@ func (h *UsersHandler) UpdatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if newPassword != confirmPassword {
-		renderError("Passwords do not match.")
+		renderError(h.T(r, "Passwords do not match."))
 		return
 	}
 
 	if len(newPassword) < store.MinPasswordLength {
-		renderError(fmt.Sprintf("New password must be at least %d characters.", store.MinPasswordLength))
+		renderError(h.T(r, "New password must be at least %d characters.", store.MinPasswordLength))
 		return
 	}
 
 	if _, err := h.Store.CheckPassword(currentUser.Username, currentPassword); err != nil {
-		renderError("Current password is incorrect.")
+		renderError(h.T(r, "Current password is incorrect."))
 		return
 	}
 
@@ -256,6 +255,6 @@ func (h *UsersHandler) UpdatePassword(w http.ResponseWriter, r *http.Request) {
 	cookie := auth.CreateSessionCookie(newToken, h.BaseURL)
 	http.SetCookie(w, cookie)
 
-	flash.Set(w, h.SecretKey, "success", "Password updated.")
+	flash.Set(w, h.SecretKey, "success", h.T(r, "Password updated."))
 	http.Redirect(w, r, "/admin/account", http.StatusFound)
 }

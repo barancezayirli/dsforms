@@ -3,10 +3,10 @@
 {{define "content"}}
 <div class="page-head">
   <h4>{{.Broadcast.Subject}}</h4>
-  <span class="tag tag-sm {{if .Broadcast.IsSending}}tag-accent{{else}}tag-neutral{{end}}">{{.Broadcast.Status}}</span>
+  <span class="tag tag-sm {{if .Broadcast.IsSending}}tag-accent{{else}}tag-neutral{{end}}">{{.T .Broadcast.Status}}</span>
   <div class="actions">
     <a class="btn btn-secondary" href="/admin/waitlists/{{.Waitlist.ID}}/broadcast">
-      <svg class="i" style="font-size:15px"><use href="#ph-caret-left"/></svg>Back
+      <svg class="i" style="font-size:15px"><use href="#ph-caret-left"/></svg>{{.T "Back"}}
     </a>
   </div>
 </div>
@@ -14,32 +14,31 @@
 <div class="grid-stat">
   <div class="card elev-sm stat">
     <div class="stat-value">{{.Broadcast.Sent}}</div>
-    <div class="stat-label">Sent</div>
+    <div class="stat-label">{{.T "Sent"}}</div>
   </div>
   <div class="card elev-sm stat">
     <div class="stat-value {{if .Broadcast.Pending}}stat-accent{{end}}">{{.Broadcast.Pending}}</div>
-    <div class="stat-label">Pending</div>
+    <div class="stat-label">{{.T "Pending"}}</div>
   </div>
   <div class="card elev-sm stat">
     <div class="stat-value">{{.Broadcast.Failed}}</div>
-    <div class="stat-label">Failed</div>
+    <div class="stat-label">{{.T "Failed"}}</div>
   </div>
   <div class="card elev-sm stat">
     <div class="stat-value">{{.Broadcast.Total}}</div>
-    <div class="stat-label">Recipients</div>
+    <div class="stat-label">{{.T "Recipients"}}</div>
   </div>
 </div>
 
 <div class="card elev-sm">
-  <span class="card-title">Message</span>
-  <div class="field-key" style="margin-top:6px">subject</div>
+  <span class="card-title">{{.T "Message"}}</span>
+  <div class="field-key" style="margin-top:6px">{{.T "subject"}}</div>
   <div class="field-val">{{.Broadcast.Subject}}</div>
-  <div class="field-key" style="margin-top:12px">body</div>
+  <div class="field-key" style="margin-top:12px">{{.T "body"}}</div>
   <div class="message">{{.Broadcast.Body}}</div>
   {{if .Broadcast.IsSending}}
   <p class="dim" style="font-size:11px;margin-top:10px">
-    Sending is in progress. Refresh to update the counts — the worker keeps
-    going whether this page is open or not.
+    {{.T "Sending is in progress. Refresh to update the counts — the worker keeps going whether this page is open or not."}}
   </p>
   {{end}}
 </div>

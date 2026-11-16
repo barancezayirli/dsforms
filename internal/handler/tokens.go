@@ -11,6 +11,7 @@ import (
 
 	"github.com/barancezayirli/dsforms/internal/auth"
 	"github.com/barancezayirli/dsforms/internal/flash"
+	"github.com/barancezayirli/dsforms/internal/i18n"
 	"github.com/barancezayirli/dsforms/internal/mcpserver"
 	"github.com/barancezayirli/dsforms/internal/store"
 	"github.com/go-chi/chi/v5"
@@ -277,10 +278,12 @@ func (h *TokensHandler) NewPage(w http.ResponseWriter, r *http.Request) {
 func (h *TokensHandler) renderForm(w http.ResponseWriter, r *http.Request, errMsg, name string, choice accessChoice) {
 	data := tokenFormData{
 		PageData: h.Shell(w, r, "New API token", "tokens"),
-		Error:    errMsg,
 		Enabled:  h.MCPEnabled,
 		TTLDays:  h.TTLDays,
 		Name:     name,
+	}
+	if errMsg != "" {
+		data.Error = data.T(errMsg)
 	}
 
 	// A failure here loses the picker, not the page: the operator can still
@@ -344,9 +347,9 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 		data.Tokens = append(data.Tokens, tokenRow{
 			APIToken:  t,
 			ScopeList: strings.Join(t.Scopes, ", "),
-			Reach:     describeReach(t.Scope(), t.FormIDs, names),
-			LastUsed:  humanTime(t.LastUsedAt, "Never"),
-			Expires:   humanTime(t.ExpiresAt, "Never"),
+			Reach:     describeReach(data.Lang, t.Scope(), t.FormIDs, names),
+			LastUsed:  humanTime(t.LastUsedAt, data.T("Never")),
+			Expires:   humanTime(t.ExpiresAt, data.T("Never")),
 		})
 	}
 
@@ -370,9 +373,9 @@ func (h *TokensHandler) render(w http.ResponseWriter, r *http.Request, newToken 
 			ClientName:   g.ClientName,
 			RedirectHost: host,
 			ScopeList:    strings.Join(g.Scopes, ", "),
-			Reach:        describeReach(g.Scope(), g.FormIDs, names),
-			Connected:    humanTime(g.CreatedAt, "Unknown"),
-			LastUsed:     humanTime(g.LastUsedAt, "Never"),
+			Reach:        describeReach(data.Lang, g.Scope(), g.FormIDs, names),
+			Connected:    humanTime(g.CreatedAt, data.T("Unknown")),
+			LastUsed:     humanTime(g.LastUsedAt, data.T("Never")),
 		})
 	}
 
@@ -391,7 +394,7 @@ func humanTime(t time.Time, zero string) string {
 	if t.IsZero() {
 		return zero
 	}
-	return t.Format("Jan 2, 2006 15:04")
+	return t.Format("02.01.2006 15:04")
 }
 
 // Create mints a token and renders it exactly once.
@@ -460,9 +463,9 @@ func (h *TokensHandler) Create(w http.ResponseWriter, r *http.Request) {
 // A form that has since been deleted keeps its id here rather than vanishing:
 // the credential still names it, and a reach that silently shortened would tell
 // an operator it is narrower than it is.
-func describeReach(scope store.FormScope, formIDs []string, names map[string]string) string {
+func describeReach(lang i18n.Lang, scope store.FormScope, formIDs []string, names map[string]string) string {
 	if scope.All() {
-		return "All forms"
+		return i18n.T(lang, "All forms")
 	}
 	out := make([]string, 0, len(formIDs))
 	for _, id := range formIDs {
@@ -527,15 +530,15 @@ func (h *TokensHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err != nil:
 		log.Printf("tokens: delete %s for %s: %v", id, user.ID, err)
-		flash.Set(w, h.SecretKey, "error", "That token could not be revoked.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "That token could not be revoked."))
 	case !removed:
 		// Not an error. A double-submitted form, or a token another session
 		// already revoked, both land here — and saying "could not be revoked"
 		// about a token that is already gone sends an operator looking for it.
-		flash.Set(w, h.SecretKey, "success", "That token is already gone.")
+		flash.Set(w, h.SecretKey, "success", h.T(r, "That token is already gone."))
 	default:
 		log.Printf("tokens: revoked %s for user %s", id, user.Username)
-		flash.Set(w, h.SecretKey, "success", "Token revoked. Any client using it is refused from now on.")
+		flash.Set(w, h.SecretKey, "success", h.T(r, "Token revoked. Any client using it is refused from now on."))
 	}
 	http.Redirect(w, r, "/admin/tokens", http.StatusSeeOther)
 }
@@ -551,12 +554,12 @@ func (h *TokensHandler) RevokeGrant(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err != nil:
 		log.Printf("tokens: disconnecting grant %s for %s: %v", id, user.ID, err)
-		flash.Set(w, h.SecretKey, "error", "That app could not be disconnected.")
+		flash.Set(w, h.SecretKey, "error", h.T(r, "That app could not be disconnected."))
 	case !removed:
-		flash.Set(w, h.SecretKey, "success", "That app is already disconnected.")
+		flash.Set(w, h.SecretKey, "success", h.T(r, "That app is already disconnected."))
 	default:
 		log.Printf("tokens: disconnected grant %s for user %s", id, user.Username)
-		flash.Set(w, h.SecretKey, "success", "App disconnected. It is refused from now on and has to be approved again to reconnect.")
+		flash.Set(w, h.SecretKey, "success", h.T(r, "App disconnected. It is refused from now on and has to be approved again to reconnect."))
 	}
 	http.Redirect(w, r, "/admin/tokens", http.StatusSeeOther)
 }

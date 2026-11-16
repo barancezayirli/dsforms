@@ -2,7 +2,7 @@
 
 {{define "header-actions"}}
 <a class="btn btn-secondary btn-34" href="/admin/forms/{{.Form.ID}}">
-  <svg class="i" style="font-size:15px"><use href="#ph-tray"/></svg>Submissions
+  <svg class="i" style="font-size:15px"><use href="#ph-tray"/></svg>{{.T "Submissions"}}
 </a>
 {{end}}
 
@@ -22,127 +22,124 @@
   <div class="col-main">
     <form method="POST" action="/admin/forms/{{.Form.ID}}/edit">
       <div class="card elev-sm">
-        <span class="card-title">Form</span>
+        <span class="card-title">{{.T "Form"}}</span>
 
         <label class="field">
-          <span>Name</span>
+          <span>{{.T "Name"}}</span>
           <input class="input" name="name" value="{{.Form.Name}}" required>
         </label>
         <label class="field">
-          <span>Notify address</span>
+          <span>{{.T "Notify address"}}</span>
           <input class="input" type="email" name="email_to" value="{{.Form.EmailTo}}"
                  placeholder="you@example.com">
-          <span class="form-hint">Leave empty to store submissions without emailing anyone.</span>
+          <span class="form-hint">{{.T "Leave empty to store submissions without emailing anyone."}}</span>
         </label>
         <label class="field">
-          <span>Redirect after submit</span>
+          <span>{{.T "Redirect after submit"}}</span>
           <input class="input" name="redirect" value="{{.Form.Redirect}}"
                  placeholder="https://yoursite.com/thanks">
-          <span class="form-hint">Defaults to the built-in success page. If this is a full URL, it is also the allowlist for <code>_redirect</code>: any page on that origin is accepted.</span>
+          <span class="form-hint">{{.T "Defaults to the built-in success page. If this is a full URL, it is also the allowlist for _redirect: any page on that origin is accepted."}}</span>
         </label>
         <label class="field">
-          <span>Webhook URL</span>
+          <span>{{.T "Webhook URL"}}</span>
           <input class="input" name="webhook_url" value="{{.Form.WebhookURL}}"
                  placeholder="https://hooks.slack.com/services/…">
         </label>
         <label class="field" style="margin-bottom:0">
-          <span>Webhook format</span>
+          <span>{{.T "Webhook format"}}</span>
           <select class="input" name="webhook_format">
-            <option value=""        {{if eq .Form.WebhookFormat ""}}selected{{end}}>None</option>
-            <option value="generic" {{if eq .Form.WebhookFormat "generic"}}selected{{end}}>Generic JSON</option>
-            <option value="slack"   {{if eq .Form.WebhookFormat "slack"}}selected{{end}}>Slack</option>
-            <option value="discord" {{if eq .Form.WebhookFormat "discord"}}selected{{end}}>Discord</option>
+            <option value=""        {{if eq .Form.WebhookFormat ""}}selected{{end}}>{{.T "None"}}</option>
+            <option value="generic" {{if eq .Form.WebhookFormat "generic"}}selected{{end}}>{{.T "Generic JSON"}}</option>
+            <option value="slack"   {{if eq .Form.WebhookFormat "slack"}}selected{{end}}>{{.T "Slack"}}</option>
+            <option value="discord" {{if eq .Form.WebhookFormat "discord"}}selected{{end}}>{{.T "Discord"}}</option>
           </select>
         </label>
       </div>
 
       <div class="card elev-sm" style="margin-top:12px">
-        <span class="card-title">Spam &amp; abuse</span>
+        <span class="card-title">{{.T "Spam & abuse"}}</span>
         <p class="card-body" style="flex:none">
-          Submissions scoring at or above this form's threshold are held for
-          review rather than delivered. They stay recoverable in
-          <a class="link" href="/admin/quarantine">Quarantine</a>.
+          {{.T "Submissions scoring at or above this form's threshold are held for review rather than delivered. They stay recoverable in Quarantine."}}
         </p>
 
-        <div class="seg" role="group" aria-label="Spam sensitivity">
+        <div class="seg" role="group" aria-label="{{.T "Spam sensitivity"}}">
           {{$t := .Form.SpamThreshold}}
-          <label class="seg-opt"><input type="radio" name="spam_threshold" value="0" {{if eq $t 0}}checked{{end}}><span>Instance default</span></label>
-          <label class="seg-opt"><input type="radio" name="spam_threshold" value="9" {{if eq $t 9}}checked{{end}}><span>Lenient · 9</span></label>
-          <label class="seg-opt"><input type="radio" name="spam_threshold" value="6" {{if eq $t 6}}checked{{end}}><span>Balanced · 6</span></label>
-          <label class="seg-opt"><input type="radio" name="spam_threshold" value="4" {{if eq $t 4}}checked{{end}}><span>Strict · 4</span></label>
+          <label class="seg-opt"><input type="radio" name="spam_threshold" value="0" {{if eq $t 0}}checked{{end}}><span>{{.T "Instance default"}}</span></label>
+          <label class="seg-opt"><input type="radio" name="spam_threshold" value="9" {{if eq $t 9}}checked{{end}}><span>{{.T "Lenient · 9"}}</span></label>
+          <label class="seg-opt"><input type="radio" name="spam_threshold" value="6" {{if eq $t 6}}checked{{end}}><span>{{.T "Balanced · 6"}}</span></label>
+          <label class="seg-opt"><input type="radio" name="spam_threshold" value="4" {{if eq $t 4}}checked{{end}}><span>{{.T "Strict · 4"}}</span></label>
         </div>
 
         <!-- The weights are absolute constants, so moving the threshold changes
              which single signals are enough on their own. Naming that here is
              the tradeoff the operator is actually choosing between. -->
         <div class="panel-box" style="font-size:11.5px;line-height:1.6;margin-top:4px">
-          <div><strong>Lenient · 9</strong> <span class="dim">— a lone link-markup hit (+6) no longer holds.</span></div>
-          <div style="margin-top:5px"><strong>Balanced · 6</strong> <span class="dim">— one markup link holds; one keyword never does.</span></div>
-          <div style="margin-top:5px"><strong>Strict · 4</strong> <span class="dim">— a lone keyword hit (+5) now holds on its own.</span></div>
+          <div><strong>{{.T "Lenient · 9"}}</strong> <span class="dim">— {{.T "a lone link-markup hit (+6) no longer holds."}}</span></div>
+          <div style="margin-top:5px"><strong>{{.T "Balanced · 6"}}</strong> <span class="dim">— {{.T "one markup link holds; one keyword never does."}}</span></div>
+          <div style="margin-top:5px"><strong>{{.T "Strict · 4"}}</strong> <span class="dim">— {{.T "a lone keyword hit (+5) now holds on its own."}}</span></div>
         </div>
       </div>
 
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         <button class="btn btn-primary" type="submit">
-          <svg class="i" style="font-size:15px"><use href="#ph-check"/></svg>Save changes
+          <svg class="i" style="font-size:15px"><use href="#ph-check"/></svg>{{.T "Save changes"}}
         </button>
-        <a class="btn btn-secondary" href="/admin/forms">Cancel</a>
+        <a class="btn btn-secondary" href="/admin/forms">{{.T "Cancel"}}</a>
       </div>
     </form>
   </div>
 
   <div class="col-side">
     <div class="card elev-sm">
-      <span class="card-title">Endpoint</span>
+      <span class="card-title">{{.T "Endpoint"}}</span>
       <div style="display:flex;align-items:center;gap:8px">
         <div class="code" id="endpoint-url" style="flex:1;min-width:0">POST {{.BaseURL}}/f/{{.Form.ID}}</div>
         <button class="btn btn-ghost" type="button" data-copy="#endpoint-url">
-          <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">Copy</span>
+          <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">{{.T "Copy"}}</span>
         </button>
       </div>
 
-      <div class="card-meta" style="margin-top:10px">Paste-ready HTML</div>
+      <div class="card-meta" style="margin-top:10px">{{.T "Paste-ready HTML"}}</div>
       <div class="codecard" style="box-shadow:none;background:transparent">
         <pre class="code" id="form-snippet" style="font-size:11.5px;line-height:1.7">&lt;form method="POST" action="{{.BaseURL}}/f/{{.Form.ID}}"&gt;
   &lt;input type="text"  name="name"    required&gt;
   &lt;input type="email" name="email"   required&gt;
   &lt;textarea name="message" required&gt;&lt;/textarea&gt;
 
-  &lt;!-- left empty by people, filled by bots --&gt;
+  &lt;!-- {{.T "left empty by people, filled by bots"}} --&gt;
   &lt;input type="text" name="_honeypot" style="display:none" tabindex="-1"&gt;
 {{if .Form.Redirect}}  &lt;input type="hidden" name="_redirect" value="{{.Form.Redirect}}"&gt;
 {{end}}
-  &lt;button type="submit"&gt;Send&lt;/button&gt;
+  &lt;button type="submit"&gt;{{.T "Send"}}&lt;/button&gt;
 &lt;/form&gt;</pre>{{if not .Form.Redirect}}
-        <div class="form-hint" style="margin-top:6px">Set a redirect above to use <code>_redirect</code> from your own site.</div>{{end}}
+        <div class="form-hint" style="margin-top:6px">{{.T "Set a redirect above to use _redirect from your own site."}}</div>{{end}}
         <button class="btn btn-ghost" type="button" data-copy="#form-snippet" style="margin-top:4px">
-          <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">Copy snippet</span>
+          <svg class="i" style="font-size:14px"><use href="#ph-copy"/></svg><span class="copy-label">{{.T "Copy snippet"}}</span>
         </button>
       </div>
 
       {{if .Form.WebhookURL}}
       <hr class="hr">
       <button class="btn btn-secondary" type="button" id="test-webhook-btn">
-        <svg class="i" style="font-size:15px"><use href="#ph-webhooks-logo"/></svg>Test webhook
+        <svg class="i" style="font-size:15px"><use href="#ph-webhooks-logo"/></svg>{{.T "Test webhook"}}
       </button>
       <div id="test-webhook-result" class="dim" style="font-size:11.5px;margin-top:6px"></div>
       {{end}}
     </div>
 
     <div class="card elev-sm" style="margin-top:12px">
-      <span class="card-title">Danger zone</span>
+      <span class="card-title">{{.T "Danger zone"}}</span>
       <p class="card-body" style="flex:none">
-        Deleting this form deletes every submission it has ever received, and
-        the endpoint stops accepting new ones.
+        {{.T "Deleting this form deletes every submission it has ever received, and the endpoint stops accepting new ones."}}
       </p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn btn-secondary" href="/admin/forms/{{.Form.ID}}/export">
-          <svg class="i" style="font-size:15px"><use href="#ph-file-csv"/></svg>Export CSV
+          <svg class="i" style="font-size:15px"><use href="#ph-file-csv"/></svg>{{.T "Export CSV"}}
         </a>
         <form method="POST" action="/admin/forms/{{.Form.ID}}/delete"
-              data-confirm="Delete this form and every submission it has received? This cannot be undone.">
+              data-confirm="{{.T "Delete this form and every submission it has received? This cannot be undone."}}">
           <button class="btn btn-danger" type="submit">
-            <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>Delete form
+            <svg class="i" style="font-size:15px"><use href="#ph-trash"/></svg>{{.T "Delete form"}}
           </button>
         </form>
       </div>
@@ -157,11 +154,16 @@
   document.getElementById('test-webhook-btn').addEventListener('click', function () {
     var btn = this, out = document.getElementById('test-webhook-result');
     btn.disabled = true;
-    out.textContent = 'Sending…';
+    out.textContent = '{{.T "Sending…"}}';
     fetch('/admin/forms/{{.Form.ID}}/test-webhook', { method: 'POST', credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
-      .then(function (d) { out.textContent = d.success ? 'Delivered.' : 'Failed: ' + (d.error || 'unknown error'); })
-      .catch(function (e) { out.textContent = 'Failed: ' + e.message; })
+      .then(function (d) {
+        var failed = '{{.T "Failed: %s"}}'.replace('%s', d.error || '{{.T "unknown error"}}');
+        out.textContent = d.success ? '{{.T "Delivered."}}' : failed;
+      })
+      .catch(function (e) {
+        out.textContent = '{{.T "Failed: %s"}}'.replace('%s', e.message);
+      })
       .finally(function () { btn.disabled = false; });
   });
 </script>
